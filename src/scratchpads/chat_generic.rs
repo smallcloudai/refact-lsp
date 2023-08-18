@@ -5,7 +5,7 @@ use crate::call_validation::ChatPost;
 use crate::call_validation::ChatMessage;
 use crate::call_validation::SamplingParameters;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::vecdb_search::{VecdbSearch, embed_vecdb_results};
+use crate::vecdb_search::{VecdbSearch, add_vecdb2messages};
 
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex as AMutex;
 
 use tokenizers::Tokenizer;
-use tracing::info;
+use tracing::{error, info};
 
 const DEBUG: bool = true;
 
@@ -28,6 +28,7 @@ pub struct GenericChatScratchpad {
     pub keyword_asst: String,
     pub default_system_message: String,
     pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
+    pub vecdb_context_json: String,
 }
 
 impl GenericChatScratchpad {
@@ -45,7 +46,8 @@ impl GenericChatScratchpad {
             keyword_user: "".to_string(),
             keyword_asst: "".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search
+            vecdb_search,
+            vecdb_context_json: "".to_string(),
         }
     }
 }
@@ -83,7 +85,17 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         context_size: usize,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        embed_vecdb_results(self.vecdb_search.clone(), &mut self.post, 3).await;
+        // embedding vecdb into messages
+        let latest_msg_cont = &self.post.messages.last().unwrap().content;
+        let vdb_result_mb = self.vecdb_search.lock().await.search(latest_msg_cont).await;
+        match vdb_result_mb {
+            Ok(vdb_result) => {
+                add_vecdb2messages(&vdb_result, &mut self.post.messages).await;
+                self.vecdb_context_json = serde_json::to_string(&vdb_result).unwrap();
+            }
+            Err(e) => { error!("Vecdb error: {}", e); }
+        }
+
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &self.post, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = Some(self.dd.stop_list.clone());
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
@@ -134,6 +146,10 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         stop_length: bool,
     ) -> Result<(serde_json::Value, bool), String> {
         self.dd.response_streaming(delta, stop_toks)
+    }
+
+    fn vecdb_context_json(&mut self) -> String {
+        self.vecdb_context_json.clone()
     }
 }
 

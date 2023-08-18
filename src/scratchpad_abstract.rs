@@ -31,6 +31,8 @@ pub trait ScratchpadAbstract: Send {
         stop_toks: bool,
         stop_length: bool,
     ) -> Result<(serde_json::Value, bool), String>;
+
+    fn vecdb_context_json(&mut self) -> String;
 }
 
 
