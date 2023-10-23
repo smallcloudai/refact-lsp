@@ -126,7 +126,8 @@ impl Backend {
             model: "".to_string(),
             scratchpad: "".to_string(),
             stream: false,
-        }
+            no_cache: false
+        })
     }
 
     pub async fn get_completions(&self, params: CompletionParams1) -> Result<CompletionRes> {
