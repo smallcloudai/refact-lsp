@@ -140,8 +140,12 @@ impl ScratchpadAbstract for ChatLlama2 {
         self.dd.response_streaming(delta, stop_toks)
     }
 
-    fn vecdb_context_json(&mut self) -> String {
-        self.vecdb_context_json.clone()
+    // fn vecdb_context_json(&mut self) -> String {
+    // self.vecdb_context_json.clone()
+    // }
+
+    fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> {
+        let x: serde_json::Value = self.has_vecdb_results.response_streaming();
+        return Ok(x);
     }
 }
-

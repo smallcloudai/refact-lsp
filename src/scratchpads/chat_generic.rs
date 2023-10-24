@@ -147,9 +147,4 @@ impl ScratchpadAbstract for GenericChatScratchpad {
     ) -> Result<(serde_json::Value, bool), String> {
         self.dd.response_streaming(delta, stop_toks)
     }
-
-    fn vecdb_context_json(&mut self) -> String {
-        self.vecdb_context_json.clone()
-    }
 }
-
