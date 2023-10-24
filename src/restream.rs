@@ -144,8 +144,27 @@ pub async fn scratchpad_interaction_stream(
             let caps_locked = caps.read().unwrap();
             (caps_locked.endpoint_style.clone(), caps_locked.endpoint_template.clone(), caps_locked.endpoint_chat_passthrough.clone(), cx.telemetry.clone())
         };
+
         let mut save_url: String = String::new();
         loop {
+            // TODO move prompt here
+            loop {
+                let value_maybe = scratch.response_spontaneous();
+                if let Ok(value) = value_maybe {
+                    if value == json!(null) {
+                        break;
+                    }
+                    let value_str = serde_json::to_string(&value).unwrap();
+                    yield Result::<_, String>::Ok(value_str);
+                    break;
+                } else {
+                    let err_str = value_maybe.unwrap_err();
+                    error!("response_spontaneous error: {}", err_str);
+                    let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": err_str})).unwrap());
+                    yield Result::<_, String>::Ok(value_str);
+                    return;
+                }
+            }
             let event_source_maybe = if endpoint_style == "hf" {
                 forward_to_hf_endpoint::forward_to_hf_style_endpoint_streaming(
                     &mut save_url,
@@ -179,7 +198,7 @@ pub async fn scratchpad_interaction_stream(
                         e_str.to_string(),
                     ));
                     error!("forward_to_endpoint: {}", e_str);
-                    let value_str = serde_json::to_string(&json!({"detail": e_str})).unwrap();
+                    let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": e_str})).unwrap());
                     yield Result::<_, String>::Ok(value_str);
                     break;
                 }

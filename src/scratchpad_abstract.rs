@@ -31,6 +31,10 @@ pub trait ScratchpadAbstract: Send {
         stop_toks: bool,
         stop_length: bool,
     ) -> Result<(serde_json::Value, bool), String>;
+
+    fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> { // After prompt, scratchpad can emit several spontaneous responses (as it searches in a vecdb for example)
+        return Ok(serde_json::Value::Null);
+    }
 }
 
 
