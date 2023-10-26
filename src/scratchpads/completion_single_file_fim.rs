@@ -245,8 +245,6 @@ impl ScratchpadAbstract for SingleFileFIM {
         });
         Ok((ans, finished))
     }
-
-    fn vecdb_context_json(&mut self) -> String { "".to_string() }
 }
 
 

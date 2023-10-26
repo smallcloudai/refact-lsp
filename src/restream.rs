@@ -146,7 +146,6 @@ pub async fn scratchpad_interaction_stream(
 
         let mut save_url: String = String::new();
         loop {
-            // TODO move prompt here
             loop {
                 let value_maybe = scratch.response_spontaneous();
                 if let Ok(value) = value_maybe {
@@ -154,6 +153,7 @@ pub async fn scratchpad_interaction_stream(
                         break;
                     }
                     let value_str = serde_json::to_string(&value).unwrap();
+                    info!("yield: {:?}", value_str);
                     yield Result::<_, String>::Ok(value_str);
                     break;
                 } else {
@@ -161,7 +161,7 @@ pub async fn scratchpad_interaction_stream(
                     error!("response_spontaneous error: {}", err_str);
                     let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": err_str})).unwrap());
                     yield Result::<_, String>::Ok(value_str);
-                    return;
+                    break;
                 }
             }
             let event_source_maybe = if endpoint_style == "hf" {

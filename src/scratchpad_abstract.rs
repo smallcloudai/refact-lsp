@@ -4,6 +4,7 @@ use std::sync::RwLock;
 use tokenizers::Tokenizer;
 use crate::call_validation::SamplingParameters;
 use async_trait::async_trait;
+use serde_json::json;
 
 
 #[async_trait]
@@ -33,7 +34,7 @@ pub trait ScratchpadAbstract: Send {
     ) -> Result<(serde_json::Value, bool), String>;
 
     fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> { // After prompt, scratchpad can emit several spontaneous responses (as it searches in a vecdb for example)
-        return Ok(serde_json::Value::Null);
+        return Ok(json!(null));
     }
 }
 

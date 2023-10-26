@@ -1,4 +1,3 @@
-use crate::call_validation::{ChatMessage};
 // use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
@@ -21,40 +20,6 @@ pub struct VecdbResult {
     pub results: Vec<VecdbResultRec>,
 }
 
-pub async fn add_vecdb2messages(
-    vdb_result: &VecdbResult,
-    messages: &mut Vec<ChatMessage>,
-) {
-    if vdb_result.results.len() > 0 {
-        *messages = [
-            &messages[..messages.len() -1],
-            &[ChatMessage {
-                role: "user".to_string(),
-                content: vecdb_resp_to_prompt(vdb_result),
-            }],
-            &messages[messages.len() -1..],
-        ].concat();
-    }
-}
-
-
-fn vecdb_resp_to_prompt(
-    vdb_result: &VecdbResult,
-) -> String {
-    let mut cont = "".to_string();
-    cont.push_str("CONTEXT:\n");
-    for r in vdb_result.results.iter() {
-
-        cont.push_str("FILENAME:\n");
-        cont.push_str(r.file_name.clone().as_str());
-        cont.push_str("\nTEXT:");
-        cont.push_str(r.text.clone().as_str());
-        cont.push_str("\n");
-    }
-    cont.push_str("\nRefer to the context to answer my next question.\n");
-    cont
-}
-
 #[async_trait]
 pub trait VecdbSearch: Send {
     async fn search(
@@ -74,7 +39,6 @@ impl VecdbSearchTest {
     }
 }
 
-// unsafe impl Send for VecdbSearchTest {}
 
 #[async_trait]
 impl VecdbSearch for VecdbSearchTest {

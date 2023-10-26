@@ -5,7 +5,9 @@ use crate::call_validation::ChatPost;
 use crate::call_validation::ChatMessage;
 use crate::call_validation::SamplingParameters;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::vecdb_search::{VecdbSearch, add_vecdb2messages};
+use crate::vecdb_search::{VecdbSearch};
+use crate::scratchpads::chat_utils_vecdb::{HasVecdb, HasVecdbResults};
+
 
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -28,7 +30,7 @@ pub struct GenericChatScratchpad {
     pub keyword_asst: String,
     pub default_system_message: String,
     pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
-    pub vecdb_context_json: String,
+    pub has_vecdb_results: HasVecdbResults,
 }
 
 impl GenericChatScratchpad {
@@ -47,7 +49,7 @@ impl GenericChatScratchpad {
             keyword_asst: "".to_string(),
             default_system_message: "".to_string(),
             vecdb_search,
-            vecdb_context_json: "".to_string(),
+            has_vecdb_results: HasVecdbResults::new(),
         }
     }
 }
@@ -86,14 +88,10 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         // embedding vecdb into messages
-        let latest_msg_cont = &self.post.messages.last().unwrap().content;
-        let vdb_result_mb = self.vecdb_search.lock().await.search(latest_msg_cont).await;
-        match vdb_result_mb {
-            Ok(vdb_result) => {
-                add_vecdb2messages(&vdb_result, &mut self.post.messages).await;
-                self.vecdb_context_json = serde_json::to_string(&vdb_result).unwrap();
-            }
-            Err(e) => { error!("Vecdb error: {}", e); }
+        {
+            let latest_msg_cont = &self.post.messages.last().unwrap().content;
+            let vdb_result_mb = self.vecdb_search.lock().await.search(latest_msg_cont).await;
+            self.has_vecdb_results.add2messages(vdb_result_mb, &mut self.post.messages).await;
         }
 
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &self.post, context_size, &self.default_system_message)?;
@@ -146,5 +144,9 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         stop_length: bool,
     ) -> Result<(serde_json::Value, bool), String> {
         self.dd.response_streaming(delta, stop_toks)
+    }
+
+    fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> {
+        return self.has_vecdb_results.response_streaming();
     }
 }

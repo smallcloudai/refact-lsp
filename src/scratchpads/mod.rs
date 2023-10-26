@@ -10,6 +10,7 @@ pub mod chat_llama2;
 pub mod chat_passthrough;
 pub mod chat_utils_deltadelta;
 pub mod chat_utils_limit_history;
+pub mod chat_utils_vecdb;
 
 use crate::call_validation::CodeCompletionPost;
 use crate::call_validation::ChatPost;
