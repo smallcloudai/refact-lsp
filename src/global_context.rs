@@ -16,6 +16,7 @@ use crate::custom_error::ScratchError;
 use hyper::StatusCode;
 use tower_lsp::lsp_types::WorkspaceFolder;
 use crate::receive_workspace_changes::Document;
+use crate::vectordb::{VecDBHandler, VecDBHandlerRef};
 
 
 #[derive(Debug, StructOpt, Clone)]
@@ -37,7 +38,7 @@ pub struct CommandLine {
     #[structopt(long, default_value="0", help="Bind 127.0.0.1:<port> and act as an LSP server. This is compatible with having an HTTP server at the same time.")]
     pub lsp_port: u16,
     #[structopt(long, default_value="0", help="Act as an LSP server, use stdin stdout for communication. This is compatible with having an HTTP server at the same time. But it's not compatible with LSP port.")]
-    pub lsp_stdin_stdout: u16,    
+    pub lsp_stdin_stdout: u16,
     #[structopt(long, help="Trust self-signed SSL certificates")]
     pub insecure: bool,
 }
@@ -67,6 +68,7 @@ pub struct GlobalContext {
     pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
     pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
     pub lsp_backend_document_state: LSPBackendDocumentState,
+    pub vec_db: VecDBHandlerRef
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;
@@ -161,7 +163,7 @@ pub async fn create_global_context(
         http_client_builder = http_client_builder.danger_accept_invalid_certs(true)
     }
     let http_client = http_client_builder.build().unwrap();
-    
+
     let cx = GlobalContext {
         cmdline: cmdline.clone(),
         http_client: http_client,
@@ -178,6 +180,7 @@ pub async fn create_global_context(
             document_map: Arc::new(ARwLock::new(HashMap::new())),
             workspace_folders: Arc::new(ARwLock::new(None)),
         },
+        vec_db: Arc::new(StdRwLock::from(VecDBHandler::init(&cache_dir.clone()).await))
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)
 }
