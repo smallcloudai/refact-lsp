@@ -152,7 +152,7 @@ pub async fn scratchpad_interaction_stream(
                     if value == json!(null) {
                         break;
                     }
-                    let value_str = serde_json::to_string(&value).unwrap();
+                    let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
                     info!("yield: {:?}", value_str);
                     yield Result::<_, String>::Ok(value_str);
                     break;
