@@ -11,7 +11,7 @@ use crate::global_context;
 use crate::completion_cache;
 use crate::telemetry_storage;
 use crate::call_validation::CodeCompletionPost;
-use difference;
+use similar::{ChangeTag, TextDiff};
 
 
 // How it works:
@@ -20,8 +20,8 @@ use difference;
 // 3. LSP looks at file changes (LSP can be replaced with reaction to a next completion?)
 // 4. Changes are translated to "after_walkaway_remaining50to95" etc
 
-const SNIP_FINISHED_AFTER : i64 = 300;
-const SNIP_TIMEOUT_AFTER : i64 = 300;
+const SNIP_FINISHED_AFTER : i64 = 240;
+const SNIP_TIMEOUT_AFTER : i64 = 60;
 
 
 #[derive(Debug, Clone)]
@@ -52,7 +52,8 @@ pub struct SnippetTelemetry {
     pub corrected_by_user: String,
     // add
     pub remaining_percent_30s: f64,
-    // pub remaining_percent_300s: f64,
+    pub remaining_percent_90s: f64,
+    pub remaining_percent_180s: f64,
     // pub remaining_percent_walkaway: f64,
     // pub walkaway_ms: u64,
     pub created_ts: i64,
@@ -71,7 +72,9 @@ pub fn snippet_register(
         grey_text: grey_text.clone(),
         accepted: false,
         corrected_by_user: "".to_string(),
-        remaining_percent_30s: 0.0,
+        remaining_percent_30s: -1.,
+        remaining_percent_90s: -1.,
+        remaining_percent_180s: -1.,
         created_ts: chrono::Local::now().timestamp(),
         accepted_ts: 0,
     };
@@ -120,16 +123,6 @@ pub async fn sources_changed(
     info!("sources_changed: uri: {:?}, text: {:?}", uri, text);
     let tele_storage = gcx.read().await.telemetry.clone();
     let mut storage_locked = tele_storage.write().unwrap();
-    //     //  orig1    orig1    orig1
-    //     //  orig2    orig2    orig2
-    //     //  |        comp1    comp1
-    //     //  orig3    comp2    edit
-    //     //  orig4    comp3    comp3
-    //     //  orig5    orig3    orig3
-    //     //           orig4    orig4
-    //     // -------------------------------
-    //     // Goal: diff orig vs compl, orig vs uedit. If head and tail are the same, then user edit is valid and useful.
-    //     // Memorize the last valid user edit. At the point it becomes invalid, save feedback and forget.
     for snip in &mut storage_locked.tele_snippets {
         info!("does {:?} match {:?}", uri, snip.inputs.cursor.file);
         if !uri.ends_with(&snip.inputs.cursor.file) {
@@ -143,90 +136,116 @@ pub async fn sources_changed(
             continue;
         }
         let time_from_accepted = chrono::Local::now().timestamp() - snip.accepted_ts;
-        let (valid1, mut gray_corrected) = if_head_tail_equal_return_added_text(
-            orig_text.unwrap(),
-            text
-        );
-        gray_corrected = gray_corrected.replace("\r", "");
-        snip.corrected_by_user = gray_corrected.clone();
-        info!("valid1: {:?}, gray_corrected: {:?}", valid1, gray_corrected);
-        info!("orig grey_text: {:?}", snip.grey_text);
-        let unchanged_percentage = unchanged_percentage(&gray_corrected, &snip.grey_text);
-        info!("unchanged_percentage {:.2}", unchanged_percentage);
+
+        info!("snip id {}; time_from_accepted {}; grey_text {}", snip.snippet_telemetry_id, time_from_accepted, snip.grey_text);
+        info!("unchanged_percentage {:.2}", unchanged_percentage(orig_text.unwrap(), text, &snip.grey_text));
+
+        // if time_from_accepted < 30 ||
+        //     (time_from_accepted >= 30 && time_from_accepted < 90 && snip.remaining_percent_30s >= 0.) ||
+        //     (time_from_accepted >= 90 && time_from_accepted < 180 && snip.remaining_percent_90s >= 0.) ||
+        //     (time_from_accepted >= 180 && snip.remaining_percent_180s >= 0.){
+        //     continue;
+        // }
+        // info!("snip id {}; time_from_accepted {}", snip.snippet_telemetry_id, time_from_accepted);
+        //
+        // let (valid1, mut gray_corrected) = if_head_tail_equal_return_added_text(
+        //     orig_text.unwrap(),
+        //     text
+        // );
+        // gray_corrected = gray_corrected.replace("\r", "");
+        // snip.corrected_by_user = gray_corrected.clone();
+        // info!("valid1: {:?}, gray_corrected: {:?}", valid1, gray_corrected);
+        // info!("orig grey_text: {:?}", snip.grey_text);
+        // let unchanged_percentage = unchanged_percentage(&gray_corrected, &snip.grey_text);
+        // info!("unchanged_percentage {:.2}", unchanged_percentage);
+        //
+        // if time_from_accepted >= 30 && time_from_accepted < 90 {
+        //     snip.remaining_percent_30s = unchanged_percentage;
+        // }
+        // else if time_from_accepted >= 90 && time_from_accepted < 180 {
+        //     snip.remaining_percent_90s = unchanged_percentage;
+        // }
+        // else if time_from_accepted >= 180 {
+        //     snip.remaining_percent_180s = unchanged_percentage;
+        // }
     }
 }
 
-pub fn if_head_tail_equal_return_added_text(
+fn get_add_del_from_texts(
     text_a: &String,
     text_b: &String,
-) -> (bool, String) {
-    let difference::Changeset { diffs, .. } = difference::Changeset::new(&text_a, &text_b, "\n");
-    let mut allow_remove_spaces_once = true;
-    let mut added_one_block = false;
-    let mut added_text = "".to_string();
-    let mut kill_slash_n = false;
-    let mut failed = false;
-    let regex_space_only = regex::Regex::new(r"^\s*$").unwrap();
-    for c in &diffs {
-        match *c {
-            difference::Difference::Rem(ref z) => {
-                if !allow_remove_spaces_once {
-                    failed = true;
-                }
-                allow_remove_spaces_once = false;
-                let whitespace_only = regex_space_only.is_match(&z);
-                if !whitespace_only {
-                    failed = true;
-                }
-                if z.ends_with("\n") {
-                    kill_slash_n = true;
-                }
+) -> (String, String) {
+    let diff = TextDiff::from_lines(text_a, text_b);
+    let mut added = "".to_string();
+    let mut removed = "".to_string();
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Delete => {
+                removed += change.value();
             }
-            difference::Difference::Add(ref z) => {
-                if added_one_block {
-                    failed = true;
-                }
-                added_one_block = true;
-                added_text = z.clone();
+            ChangeTag::Insert => {
+                added += change.value();
             }
-            difference::Difference::Same(ref _z) => {
+            ChangeTag::Equal => {
             }
         }
     }
-    if failed {
-        return (false, "".to_string());
-    }
-    if kill_slash_n {
-        if !added_text.ends_with("\n") {
-            // should not normally happen, but who knows
-            info!("if_head_tail_equal_return_added_text: added_text does not end with \\n");
-            return (false, "".to_string());
-        }
-        added_text = added_text[..added_text.len() - 1].to_string();
-    }
-    (true, added_text)
+    (added, removed)
 }
 
-pub fn unchanged_percentage(
+fn unchanged_percentage(
     text_a: &String,
     text_b: &String,
+    grey_text_a: &String,
 ) -> f64 {
-    let char_level = "";
-    let difference::Changeset { diffs, .. } = difference::Changeset::new(&text_a, &text_b, char_level);
-    let mut common = 0;
-    for c in &diffs {
-        match *c {
-            difference::Difference::Rem(ref _z) => {
-            }
-            difference::Difference::Add(ref _z) => {
-            }
-            difference::Difference::Same(ref z) => {
-                common += z.len();
+    if text_b.contains(grey_text_a) {
+        // info!("text_b contains grey_text_a");
+        return 1.;
+    }
+    let (texts_ab_added, _) = get_add_del_from_texts(text_a, text_b);
+    let (_, removed) = get_add_del_from_texts(&texts_ab_added, grey_text_a);
+
+    if removed.is_empty() {
+        // info!("removed is empty");
+        return 1.;
+    }
+
+    fn common_syms_string(a: &String, b: &String) -> f64 {
+        let diff = TextDiff::from_chars(a, b);
+        let mut common = 0;
+        for change in diff.iter_all_changes() {
+            match change.tag() {
+                ChangeTag::Delete => {
+                }
+                ChangeTag::Insert => {
+                }
+                ChangeTag::Equal => {
+                    common += 1;
+                }
             }
         }
+        common as f64
     }
-    let largest_of_two = text_a.len().max(text_b.len());
-    (common as f64) / (largest_of_two as f64)
+
+    if !grey_text_a.contains("\n") {
+        let common = common_syms_string(&removed, grey_text_a);
+        let unchanged_percentage = common / grey_text_a.len() as f64;
+        unchanged_percentage
+    } else {
+        let mut common = 0.;
+        for line in grey_text_a.lines() {
+            // info!("checking the line: {:?}", line);
+            if text_b.contains(line.trim()) {
+                common += line.len() as f64;
+                // info!("text_b contains line {}: +{}", line, line.len());
+                continue;
+            }
+            let common_line = common_syms_string(&removed, &line.to_string());
+            // info!("common_line {}: +{}", line, common_line);
+            common += common_line;
+        }
+        common / grey_text_a.len() as f64
+    }
 }
 
 async fn send_finished_snippets(gcx: Arc<ARwLock<global_context::GlobalContext>>) {
@@ -261,7 +280,7 @@ async fn send_finished_snippets(gcx: Arc<ARwLock<global_context::GlobalContext>>
                 }
                 continue;
             }
-            if now - snip.created_ts >= SNIP_TIMEOUT_AFTER {
+            if !snip.accepted && now - snip.created_ts >= SNIP_TIMEOUT_AFTER {
                 to_remove.push(idx);
                 continue;
             }
