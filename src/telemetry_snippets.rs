@@ -36,7 +36,7 @@ impl SaveSnippet {
         post: &CodeCompletionPost
     ) -> Self {
         SaveSnippet {
-            storage_arc: storage_arc,
+            storage_arc,
             post: post.clone(),
         }
     }
@@ -49,11 +49,14 @@ pub struct SnippetTelemetry {
     pub inputs: call_validation::CodeCompletionInputs,
     pub grey_text: String,
     pub accepted: bool,
-    pub corrected_by_user: String,
-    // add
+
+    pub corrected_text_30s: String,
+    pub corrected_text_90s: String,
+    pub corrected_text_180s: String,
     pub remaining_percent_30s: f64,
     pub remaining_percent_90s: f64,
     pub remaining_percent_180s: f64,
+
     // pub remaining_percent_walkaway: f64,
     // pub walkaway_ms: u64,
     pub created_ts: i64,
@@ -71,7 +74,9 @@ pub fn snippet_register(
         inputs: ss.post.inputs.clone(),
         grey_text: grey_text.clone(),
         accepted: false,
-        corrected_by_user: "".to_string(),
+        corrected_text_30s: "".to_string(),
+        corrected_text_90s: "".to_string(),
+        corrected_text_180s: "".to_string(),
         remaining_percent_30s: -1.,
         remaining_percent_90s: -1.,
         remaining_percent_180s: -1.,
@@ -124,7 +129,9 @@ pub async fn sources_changed(
     let tele_storage = gcx.read().await.telemetry.clone();
     let mut storage_locked = tele_storage.write().unwrap();
     for snip in &mut storage_locked.tele_snippets {
-        info!("does {:?} match {:?}", uri, snip.inputs.cursor.file);
+        if !snip.accepted {
+            continue;
+        }
         if !uri.ends_with(&snip.inputs.cursor.file) {
             continue;
         }
@@ -132,42 +139,29 @@ pub async fn sources_changed(
         if !orig_text.is_some() {
             continue;
         }
-        if !snip.accepted {
-            continue;
-        }
         let time_from_accepted = chrono::Local::now().timestamp() - snip.accepted_ts;
 
-        info!("snip id {}; time_from_accepted {}; grey_text {}", snip.snippet_telemetry_id, time_from_accepted, snip.grey_text);
-        info!("unchanged_percentage {:.2}", unchanged_percentage(orig_text.unwrap(), text, &snip.grey_text));
-
-        // if time_from_accepted < 30 ||
-        //     (time_from_accepted >= 30 && time_from_accepted < 90 && snip.remaining_percent_30s >= 0.) ||
-        //     (time_from_accepted >= 90 && time_from_accepted < 180 && snip.remaining_percent_90s >= 0.) ||
-        //     (time_from_accepted >= 180 && snip.remaining_percent_180s >= 0.){
-        //     continue;
-        // }
-        // info!("snip id {}; time_from_accepted {}", snip.snippet_telemetry_id, time_from_accepted);
-        //
-        // let (valid1, mut gray_corrected) = if_head_tail_equal_return_added_text(
-        //     orig_text.unwrap(),
-        //     text
-        // );
-        // gray_corrected = gray_corrected.replace("\r", "");
-        // snip.corrected_by_user = gray_corrected.clone();
-        // info!("valid1: {:?}, gray_corrected: {:?}", valid1, gray_corrected);
-        // info!("orig grey_text: {:?}", snip.grey_text);
-        // let unchanged_percentage = unchanged_percentage(&gray_corrected, &snip.grey_text);
-        // info!("unchanged_percentage {:.2}", unchanged_percentage);
-        //
-        // if time_from_accepted >= 30 && time_from_accepted < 90 {
-        //     snip.remaining_percent_30s = unchanged_percentage;
-        // }
-        // else if time_from_accepted >= 90 && time_from_accepted < 180 {
-        //     snip.remaining_percent_90s = unchanged_percentage;
-        // }
-        // else if time_from_accepted >= 180 {
-        //     snip.remaining_percent_180s = unchanged_percentage;
-        // }
+        if time_from_accepted < 30 ||
+            (time_from_accepted >= 30 && time_from_accepted < 90 && snip.remaining_percent_30s >= 0.) ||
+            (time_from_accepted >= 90 && time_from_accepted < 180 && snip.remaining_percent_90s >= 0.) ||
+            (time_from_accepted >= 180 && snip.remaining_percent_180s >= 0.){
+            continue;
+        }
+        info!("snip id {}; time_from_accepted {}", snip.snippet_telemetry_id, time_from_accepted);
+        let snip_unchanged_percentage = unchanged_percentage(orig_text.unwrap(), text, &snip.grey_text);
+        info!("snip_unchanged_percentage: {}", snip_unchanged_percentage);
+        if time_from_accepted >= 30 && time_from_accepted < 90 {
+            snip.corrected_text_30s = text.clone();
+            snip.remaining_percent_30s = snip_unchanged_percentage;
+        }
+        else if time_from_accepted >= 90 && time_from_accepted < 180 {
+            snip.corrected_text_90s = text.clone();
+            snip.remaining_percent_90s = snip_unchanged_percentage;
+        }
+        else if time_from_accepted >= 180 {
+            snip.corrected_text_180s = text.clone();
+            snip.remaining_percent_180s = snip_unchanged_percentage;
+        }
     }
 }
 
