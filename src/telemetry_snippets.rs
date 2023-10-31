@@ -17,7 +17,7 @@ use similar::{ChangeTag, TextDiff};
 // How it works:
 // 1. Rust returns {"snippet_telemetry_id":101,"choices":[{"code_completion":"\n    return \"Hello World!\"\n"}] ...}
 // ?. IDE detects accept, sends /v1/completion-accepted with {"snippet_telemetry_id":101}
-// 3. LSP looks at file changes (LSP can be replaced with reaction to a next completion?)
+// 3. LSP looks at file changes
 // 4. Changes are translated to "after_walkaway_remaining50to95" etc
 
 const SNIP_FINISHED_AFTER : i64 = 240;
@@ -25,7 +25,7 @@ const SNIP_TIMEOUT_AFTER : i64 = 60;
 
 
 #[derive(Debug, Clone)]
-pub struct SaveSnippet {
+pub struct SaveSnippet {   // Aggregate this struct into the scratchpad to generate snippet
     pub storage_arc: Arc<StdRwLock<telemetry_storage::Storage>>,
     pub post: CodeCompletionPost,
 }
@@ -101,7 +101,7 @@ pub fn snippet_register_from_data4cache(
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SnippetAccepted {
+pub struct SnippetAccepted {  // Used to load an external call
     pub snippet_telemetry_id: u64,
 }
 
