@@ -130,17 +130,7 @@ pub fn cache_key_from_post(
 
 
 pub fn cache_part2_from_post(post: &CodeCompletionPost) -> String {
-    let mut key = format!("{};{};{};",
-                          post.inputs.cursor.file.clone(),
-                          post.inputs.cursor.line,
-                          post.inputs.cursor.character,
-    );
-    if post.inputs.multiline {
-        key += "multiline;";
-    } else {
-        key += "singleline;";
-    }
-    key
+    if post.inputs.multiline { "multiline".to_string() } else { "singleline".to_string() }
 }
 
 

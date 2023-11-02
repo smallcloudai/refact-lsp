@@ -89,7 +89,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         }
         let mut source = self.post.inputs.sources.get(
             &self.post.inputs.cursor.file)
-            .ok_or("Cursor is in file not found in sources".to_string()).unwrap().clone();
+            .ok_or("Cursor is in file not found in sources".to_string())?.clone();
         source = self.cleanup_prompt(&source);
 
         let text = Rope::from_str(&*source);
