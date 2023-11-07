@@ -99,8 +99,70 @@ pub struct CompletionRes {
     pub created: Option<f32>,
 }
 
+//3.18 does not currently appear to be supported by tower_lsp/lsp_types
+//so we make our own structs that mirror the offical 3.18 spec for inlineCompletion
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineCompletionParams{
+    #[serde(flatten)]
+    pub text_document_position: TextDocumentPositionParams,
+
+    #[serde(flatten)]
+    pub work_done_progress_params: WorkDoneProgressParams,
+
+    pub context: InlineCompletionContext
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineCompletionContext{
+    pub trigger_kind: InlineCompletionTriggerKind,
+    pub selected_completion_info : SelectedCompletionInfo
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedCompletionInfo{
+    pub range: Range,
+    pub text: String 
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+pub enum InlineCompletionTriggerKind{
+    Invoke = 0,
+    Automatic = 1,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineCompletionList{
+    pub items: Vec<InlineCompletionItem>
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineCompletionItem{
+    pub insert_text : String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_text: Option<String>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<Command>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub insert_text_format: Option<InsertTextFormat>
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+pub enum InsertTextFormat{
+    PlainText = 1,
+    Snippet = 2
+}
+
 impl Backend {
     async fn flat_params_to_code_completion_post(&self, params: &CompletionParams1) -> CodeCompletionPost {
+
         let document_map = self.document_map.read().await;
         let document = document_map
             .get(params.text_document_position.text_document.uri.as_str())
@@ -142,6 +204,34 @@ impl Backend {
         let value = serde_json::from_str::<CompletionRes>(s.as_str()).map_err(|e| internal_error(e))?;
 
         Ok(value)
+    }
+
+    //3.18 textDocument/inlineCompletion handler
+    pub async fn get_inline_completions(&self, params: InlineCompletionParams) -> Result<InlineCompletionList>{
+
+        let completion_params = CompletionParams1{
+            text_document_position : params.text_document_position,
+            parameters : RequestParams{
+                max_new_tokens : 50,
+                temperature: 0.2
+            },
+            multiline:true
+        };
+
+        let completion_res = self.get_completions(completion_params).await?;
+
+        let choices: Vec<InlineCompletionItem> = completion_res.choices.iter().map(|s|  {
+            InlineCompletionItem{
+                insert_text : s.code_completion.clone(),
+                command: None,
+                filter_text: Some(s.code_completion.clone()),
+                insert_text_format: Some(InsertTextFormat::PlainText)
+            }
+        }).collect();
+
+        Ok(InlineCompletionList{
+            items: choices,
+        })
     }
 }
 
@@ -258,6 +348,9 @@ pub fn build_lsp_service(
         workspace_folders: Arc::new(ARwLock::new(None)),
     })
         .custom_method("refact/getCompletions", Backend::get_completions)
+        //tower_lsp does not currently support 3.18 textDocument/inlineCompletion 
+        //so we add it as a custom method for now
+        .custom_method("textDocument/inlineCompletion", Backend::get_inline_completions)
         .finish();
     (lsp_service, socket)
 }

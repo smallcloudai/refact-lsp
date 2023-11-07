@@ -25,6 +25,20 @@ def main():
     languageId = pylspclient.lsp_structs.LANGUAGE_IDENTIFIER.PYTHON
     lsp_client.didOpen(pylspclient.lsp_structs.TextDocumentItem(uri, languageId, version=1, text=hello_py))
 
+    inlineCompletion = lsp_client.lsp_endpoint.call_method(
+        "textDocument/inlineCompletion",
+        textDocument=pylspclient.lsp_structs.TextDocumentIdentifier(uri),
+        position=pylspclient.lsp_structs.Position(1, 4),
+        context = {
+            "triggerKind": "Invoke", #Completion activated by directly invoking it instead of an automatic trigger
+            "selectedCompletionInfo": {
+                "range": pylspclient.lsp_structs.Range(pylspclient.lsp_structs.Position(1, 0), pylspclient.lsp_structs.Position(1, 3)),
+                "text": "    "
+            }
+        }
+    )
+    print("CC inlineCompletion result:", inlineCompletion)
+
     cc = lsp_client.lsp_endpoint.call_method(
         "refact/getCompletions",
         textDocument=pylspclient.lsp_structs.TextDocumentIdentifier(uri),
@@ -35,7 +49,8 @@ def main():
         },
         multiline=False
     )
-    print("CC result:", cc)
+    print("CC getCompletions result:", cc)
+
     try:
         # pylspclient conflicts with tower-lsp, shutdown() below sends {} as parameters and lsp-tower expects something else
         # the result is:
@@ -46,9 +61,16 @@ def main():
         pass
     lsp_endpoint.join()
 
+    print("getCompletions")
     print("%s%s" % (
         termcolor.colored(hello_py, "green"),
         termcolor.colored(cc["choices"][0]["code_completion"], "magenta")
+    ))
+
+    print("inlineCompletion")
+    print("%s%s" % (
+        termcolor.colored(hello_py, "green"),
+        termcolor.colored(inlineCompletion["items"][0]["insertText"], "magenta")
     ))
 
 
