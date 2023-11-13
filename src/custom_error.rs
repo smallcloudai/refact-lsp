@@ -21,29 +21,12 @@ impl IntoResponse for ScratchError {
         let payload = json!({
             "detail": self.message,
         });
-        let status_code = self.clone().status_code;
-        // tokio::spawn(async move {
-        //     let e = self;
-        //     if !e.telemetry_skip {
-        //         let tele_storage = &e.global_context.read().await.telemetry;
-        //         let mut tele_storage_locked = tele_storage.write().unwrap();
-        //         tele_storage_locked.tele_net.push(telemetry_basic::TelemetryNetwork::new(
-        //             e.path.clone(),
-        //             format!("{}", e.method),
-        //             false,
-        //             format!("{}", e.message),
-        //         ));
-        //     }
-        //     return Ok(e.to_response());
-        // });
-
-        (status_code, Json(payload)).into_response()
+        (self.status_code, Json(payload)).into_response()
     }
 }
 
-impl std::error::Error for ScratchError {}
+impl Error for ScratchError {}
 unsafe impl Send for ScratchError {}
-
 unsafe impl Sync for ScratchError {}
 impl fmt::Display for ScratchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
