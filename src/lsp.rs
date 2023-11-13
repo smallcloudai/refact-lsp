@@ -10,12 +10,15 @@ use tower_lsp::{ClientSocket, LanguageServer, LspService};
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tracing::{error, info};
+use tracing::log::warn;
 
 use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPosition, SamplingParameters};
 use crate::global_context;
 use crate::http_server::handle_v1_code_completion;
+use crate::lsp::document::Document;
 use crate::telemetry_snippets;
-
+mod document;
+mod language_id;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 
@@ -27,20 +30,6 @@ struct APIError {
 impl Display for APIError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.error)
-    }
-}
-
-
-#[derive(Debug)]
-pub struct Document {
-    #[allow(dead_code)]
-    pub language_id: String,
-    pub text: Rope,
-}
-
-impl Document {
-    fn new(language_id: String, text: Rope) -> Self {
-        Self { language_id, text }
     }
 }
 
@@ -187,35 +176,47 @@ impl LanguageServer for Backend {
     // textDocument/didClose
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let rope = ropey::Rope::from_str(&params.text_document.text);
         let uri = params.text_document.uri.to_string();
-        *self
-            .document_map
-            .write()
+        match Document::open(
+            &params.text_document.language_id,
+            &params.text_document.text,
+        )
             .await
-            .entry(uri.clone())
-            .or_insert(Document::new("unknown".to_owned(), Rope::new())) =
-            Document::new(params.text_document.language_id, rope);
+        {
+            Ok(document) => {
+                self.document_map
+                    .write()
+                    .await
+                    .insert(uri.clone(), document);
+                info!("{uri} opened");
+            }
+            Err(err) => error!("error opening {uri}: {err}"),
+        }
         info!("{uri} opened");
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let t0 = Instant::now();
-        let rope = ropey::Rope::from_str(&params.content_changes[0].text);
         let uri = params.text_document.uri.to_string();
         let mut document_map = self.document_map.write().await;
-        let doc = document_map
-            .entry(uri.clone())
-            .or_insert(Document::new("unknown".to_owned(), Rope::new()));
-        doc.text = rope;
-        info!("{} changed, save time: {:?}", uri, t0.elapsed());
-        let t1 = Instant::now();
-        telemetry_snippets::sources_changed(
-            self.gcx.clone(),
-            &uri,
-            &params.content_changes[0].text,
-        ).await;
-        info!("{} changed, telemetry time: {:?}", uri, t1.elapsed());
+        let doc = document_map.get_mut(&uri);
+        if let Some(doc) = doc {
+            match doc.change(&params.content_changes[0].text).await {
+                Ok(()) => {
+                    info!("{} changed, save time: {:?}", uri, t0.elapsed());
+                    let t1 = Instant::now();
+                    telemetry_snippets::sources_changed(
+                        self.gcx.clone(),
+                        &uri,
+                        &params.content_changes[0].text,
+                    ).await;
+                    info!("{} changed, telemetry time: {:?}", uri, t1.elapsed());
+                },
+                Err(err) => error!("error when changing {uri}: {err}"),
+            }
+        } else {
+            warn!("textDocument/didChange {uri}: document not found");
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -237,14 +238,6 @@ impl LanguageServer for Backend {
     async fn shutdown(&self) -> Result<()> {
         let _ = info!("shutdown");
         Ok(())
-    }
-
-    async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        info!("asked for completion");
-        Ok(Some(CompletionResponse::Array(vec![
-            CompletionItem::new_simple("Hello".to_string(), "Some detail".to_string()),
-            CompletionItem::new_simple("Bye".to_string(), "More detail".to_string()),
-        ])))
     }
 }
 
