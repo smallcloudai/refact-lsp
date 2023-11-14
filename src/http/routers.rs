@@ -30,6 +30,6 @@ pub fn make_v1_router() -> Router {
         .route("/telemetry-network", telemetry_post!(handle_v1_telemetry_network))
         .route("/snippet-accepted", telemetry_post!(handle_v1_snippet_accepted))
 
-        .route("/snippet-accepted", telemetry_get!(handle_v1_caps))
+        .route("/caps", telemetry_get!(handle_v1_caps))
         .route("/graceful-shutdown", telemetry_get!(handle_v1_graceful_shutdown))
 }
