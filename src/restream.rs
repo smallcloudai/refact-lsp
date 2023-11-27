@@ -12,7 +12,7 @@ use crate::forward_to_hf_endpoint;
 use crate::forward_to_openai_endpoint;
 use crate::custom_error::ScratchError;
 use crate::call_validation::SamplingParameters;
-use crate::telemetry_basic;
+use crate::telemetry::telemetry_structs;
 use crate::global_context::GlobalContext;
 
 
@@ -56,7 +56,7 @@ pub async fn scratchpad_interaction_not_stream(
             &parameters,
         ).await
     }.map_err(|e| {
-        tele_storage.write().unwrap().tele_net.push(telemetry_basic::TelemetryNetwork::new(
+        tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
                 save_url.clone(),
                 scope.clone(),
                 false,
@@ -64,7 +64,7 @@ pub async fn scratchpad_interaction_not_stream(
             ));
         ScratchError::new_but_skip_telemetry(StatusCode::INTERNAL_SERVER_ERROR, format!("forward_to_endpoint: {}", e))
     })?;
-    tele_storage.write().unwrap().tele_net.push(telemetry_basic::TelemetryNetwork::new(
+    tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
         save_url.clone(),
         scope.clone(),
         true,
@@ -118,7 +118,7 @@ pub async fn scratchpad_interaction_not_stream(
     scratchpad_response_json["created"] = json!(t2.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
 
     let txt = serde_json::to_string_pretty(&scratchpad_response_json).unwrap();
-    info!("handle_v1_code_completion return {}", txt);
+    // info!("handle_v1_code_completion return {}", txt);
     let response = Response::builder()
         .header("Content-Type", "application/json")
         .body(Body::from(txt))
@@ -173,7 +173,7 @@ pub async fn scratchpad_interaction_stream(
                 Ok(event_source) => event_source,
                 Err(e) => {
                     let e_str = format!("forward_to_endpoint: {:?}", e);
-                    tele_storage.write().unwrap().tele_net.push(telemetry_basic::TelemetryNetwork::new(
+                    tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
                         save_url.clone(),
                         scope.clone(),
                         false,
@@ -188,6 +188,7 @@ pub async fn scratchpad_interaction_stream(
             let mut finished: bool = false;
             let mut problem_reported = false;
             let mut was_correct_output_even_if_error = false;
+            // let mut test_countdown = 250;
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(Event::Open) => {},
@@ -196,6 +197,14 @@ pub async fn scratchpad_interaction_stream(
                         if message.data.starts_with("[DONE]") {
                             break;
                         }
+                        // test_countdown -= 1;
+                        // if test_countdown == 0 {
+                        //     error!("test_countdown!");
+                        //     let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": "test_countdown happened"})).unwrap());
+                        //     yield Result::<_, String>::Ok(value_str);
+                        //     problem_reported = true;
+                        //     break;
+                        // }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
                         crate::global_context::look_for_piggyback_fields(global_context.clone(), &json).await;
                         let value_maybe = _push_streaming_json_into_scratchpad(
@@ -216,6 +225,7 @@ pub async fn scratchpad_interaction_stream(
                             let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": err_str})).unwrap());
                             yield Result::<_, String>::Ok(value_str);
                             // TODO: send telemetry
+                            problem_reported = true;
                             break;
                         }
                         if finished {
@@ -230,7 +240,7 @@ pub async fn scratchpad_interaction_stream(
                         error!("restream error: {}\n{:?}", err, err);
                         let problem_str = format!("restream error: {}", err);
                         {
-                            tele_storage.write().unwrap().tele_net.push(telemetry_basic::TelemetryNetwork::new(
+                            tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
                                 save_url.clone(),
                                 scope.clone(),
                                 false,
@@ -259,7 +269,7 @@ pub async fn scratchpad_interaction_stream(
         }
         info!("yield: [DONE]");
         yield Result::<_, String>::Ok("data: [DONE]\n\n".to_string());
-        tele_storage.write().unwrap().tele_net.push(telemetry_basic::TelemetryNetwork::new(
+        tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
             save_url.clone(),
             scope.clone(),
             true,

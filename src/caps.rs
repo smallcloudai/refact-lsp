@@ -2,7 +2,6 @@ use tracing::{info, error};
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs::File;
-use std::path::PathBuf;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
@@ -38,6 +37,8 @@ pub struct CodeAssistantCaps {
     #[serde(default)]
     pub code_completion_models: HashMap<String, ModelRecord>,
     pub code_completion_default_model: String,
+    #[serde(default)]
+    pub code_completion_n_ctx: usize,
     #[serde(default)]
     pub code_chat_models: HashMap<String, ModelRecord>,
     pub code_chat_default_model: String,
@@ -80,7 +81,8 @@ const KNOWN_MODELS: &str = r#"
             },
             "default_scratchpad": "FIM-SPM",
             "similar_models": [
-                "Refact/1.6B"
+                "Refact/1.6B",
+                "Refact/1.6B/vllm"
             ]
         },
         "codellama/CodeLlama-13b-hf": {
@@ -98,25 +100,24 @@ const KNOWN_MODELS: &str = r#"
             "similar_models": [
                 "codellama/7b"
             ]
+        },
+        "deepseek-coder/1.3b/base": {
+            "n_ctx": 4096,
+            "supports_scratchpads": {
+                "FIM-PSM": {
+                    "fim_prefix": "<｜fim▁begin｜>",
+                    "fim_suffix": "<｜fim▁hole｜>",
+                    "fim_middle": "<｜fim▁end｜>",
+                    "eot": "<|EOT|>"
+                }
+            },
+            "default_scratchpad": "FIM-PSM",
+            "similar_models": [
+                "deepseek-coder/5.7b/mqa-base"
+            ]
         }
     },
     "code_chat_models": {
-        "smallcloudai/Refact-1_6B-fim": {
-            "n_ctx": 4096,
-            "supports_scratchpads": {
-                "CHAT-GENERIC": {
-                    "token_esc": "<empty_output>",
-                    "keyword_system": "SYSTEM ",
-                    "keyword_user": "USER ",
-                    "keyword_assistant": "ASSISTANT ",
-                    "stop_list": ["<empty_output>"],
-                    "default_system_message": "You are a programming assistant."
-                }
-            },
-            "similar_models": [
-                "Refact/1.6B"
-            ]
-        },
         "meta-llama/Llama-2-70b-chat-hf": {
             "n_ctx": 4096,
             "supports_scratchpads": {
@@ -128,7 +129,19 @@ const KNOWN_MODELS: &str = r#"
         "gpt-3.5-turbo": {
             "n_ctx": 4096,
             "supports_scratchpads": {
-                "PASSTHROUGH": {}
+                "PASSTHROUGH": {
+                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
+                }
+            },
+            "similar_models": [
+            ]
+        },
+        "gpt-4": {
+            "n_ctx": 4096,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {
+                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
+                }
             },
             "similar_models": [
             ]
@@ -195,6 +208,7 @@ const HF_DEFAULT_CAPS: &str = r#"
         "meta-llama/Llama-2-70b-chat-hf": "TheBloke/Llama-2-70B-fp16"
     },
     "code_completion_default_model": "bigcode/starcoder",
+    "code_completion_n_ctx": 2048,
     "code_chat_default_model": "meta-llama/Llama-2-70b-chat-hf",
     "telemetry_basic_dest": "https://staging.smallcloud.ai/v1/telemetry-basic",
     "telemetry_corrected_snippets_dest": "https://www.smallcloud.ai/v1/feedback",
@@ -231,8 +245,13 @@ pub async fn load_caps(
         file.read_to_string(&mut buffer).map_err(|_| format!("failed to read file '{}'", caps_url))?;
     }
     if is_remote_address {
+        let api_key = cmdline.api_key.clone();
         let http_client = reqwest::Client::new();
-        let response = http_client.get(caps_url.clone()).send().await.map_err(|e| format!("{}", e))?;
+        let mut headers = reqwest::header::HeaderMap::new();
+        if !api_key.is_empty() {
+            headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str()).unwrap());
+        }
+        let response = http_client.get(caps_url.clone()).headers(headers).send().await.map_err(|e| format!("{}", e))?;
         let status = response.status().as_u16();
         buffer = response.text().await.map_err(|e| format!("failed to read response: {}", e))?;
         if status != 200 {
