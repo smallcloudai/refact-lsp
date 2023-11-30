@@ -181,6 +181,7 @@ pub async fn create_global_context(
             workspace_folders: Arc::new(ARwLock::new(None)),
         },
         vec_db: Arc::new(StdRwLock::from(VecDBHandler::init(&cache_dir.clone()).await))
+        vecdb_search: Arc::new(AMutex::new(Box::new(crate::vecdb_search::VecdbSearchTest::new()))),
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)
 }

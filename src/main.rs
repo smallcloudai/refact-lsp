@@ -1,5 +1,3 @@
-use tracing::{error, info};
-use tokio::net::TcpListener;
 use std::io::Write;
 
 use tracing::{error, info};
@@ -8,8 +6,6 @@ use tracing_appender;
 use crate::background_tasks::start_background_tasks;
 use crate::lsp::spawn_lsp_task;
 use crate::telemetry::{basic_transmit, snippets_transmit};
-
-use crate::vectordb::{Record, VecDBHandler};
 
 mod global_context;
 mod caps;
@@ -27,21 +23,15 @@ mod vecdb_search;
 mod lsp;
 mod http;
 mod background_tasks;
+
 mod receive_workspace_changes;
-mod vectordb;
+mod vecdb;
 
 #[tokio::main]
 async fn main() {
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
     let cache_dir = home_dir.join(".cache/refact");
     let (gcx, ask_shutdown_receiver, cmdline) = global_context::create_global_context(cache_dir.clone()).await;
-    gcx.read().await.vec_db.clone().write().unwrap().add(vec![
-        Record { vector: vec![0.1, 0.1], text: "asd".to_string() },
-        Record { vector: vec![0.2, 0.2], text: "zxc".to_string() },
-        Record { vector: vec![0.3, 0.3], text: "qwe".to_string() },
-        Record { vector: vec![0.4, 0.4], text: "wer".to_string() },
-    ]).await;
-    let a = gcx.read().await.vec_db.clone().read().unwrap().find(vec![0.2f32, 0.2f32]).await;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
         tracing_appender::non_blocking(std::io::stderr())
     } else {
