@@ -14,7 +14,6 @@ use crate::telemetry::telemetry_structs;
 use crate::vecdb_search::VecdbSearch;
 use crate::custom_error::ScratchError;
 use hyper::StatusCode;
-use crate::vectordb::{VecDBHandler, VecDBHandlerRef};
 
 
 #[derive(Debug, StructOpt, Clone)]
@@ -60,7 +59,6 @@ pub struct GlobalContext {
     pub completions_cache: Arc<StdRwLock<CompletionCache>>,
     pub telemetry: Arc<StdRwLock<telemetry_structs::Storage>>,
     pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
-    pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
     pub vec_db: VecDBHandlerRef
 }
 
@@ -169,7 +167,7 @@ pub async fn create_global_context(
         telemetry: Arc::new(StdRwLock::new(telemetry_structs::Storage::new())),
         vecdb_search: Arc::new(AMutex::new(Box::new(crate::vecdb_search::VecdbSearchTest::new()))),
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
-        vec_db: Arc::new(StdRwLock::from(VecDBHandler::init(&cache_dir.clone()).await))
+        vecdb_search: Arc::new(AMutex::new(Box::new(crate::vecdb_search::VecdbSearchTest::new()))),
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)
 }
