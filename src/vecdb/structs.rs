@@ -7,11 +7,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VecDbStatus {
-    pub unprocessed_chunk_count: usize,
-    pub requests_count: usize,
+    pub unprocessed_chunk_count: usize,    // "idle" if zero
+    pub requests_count: usize,             // since process started
     pub db_size: usize,
     pub db_last_time_updated: SystemTime,
+    // files    5/1337
+    // chunks  10/2668
 }
+
 
 pub type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
 
@@ -27,6 +30,7 @@ pub struct Record {
     pub time_added: SystemTime,
     pub model_name: String,
 }
+
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct SplitResult {
