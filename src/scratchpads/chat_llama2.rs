@@ -1,39 +1,41 @@
-use tracing::info;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
-use tokio::sync::Mutex as AMutex;
-use tokenizers::Tokenizer;
+
 use async_trait::async_trait;
+use tokenizers::Tokenizer;
+use tokio::sync::Mutex as AMutex;
+use tracing::info;
 
-use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::scratchpad_abstract::HasTokenizerAndEot;
+use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
-use crate::call_validation::{ChatPost, ChatMessage, SamplingParameters, ContextFile};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::vecdb_search::{VecdbSearch, embed_vecdb_results};
-
+use crate::vecdb::structs::VecdbSearch;
+use crate::vecdb::vecdb_remote::embed_vecdb_results;
 
 const DEBUG: bool = true;
 
 
 // #[derive(Debug)]
-pub struct ChatLlama2 {
+pub struct ChatLlama2<T> {
     pub t: HasTokenizerAndEot,
     pub dd: DeltaDeltaChatStreamer,
     pub post: ChatPost,
-    pub keyword_s: String, // "SYSTEM:" keyword means it's not one token
+    pub keyword_s: String,
+    // "SYSTEM:" keyword means it's not one token
     pub keyword_slash_s: String,
     pub default_system_message: String,
-    pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
+    pub vecdb_search: Arc<AMutex<Box<T>>>,
 }
 
 
-impl ChatLlama2 {
+impl<T: Send + VecdbSearch> ChatLlama2<T> {
     pub fn new(
         tokenizer: Arc<StdRwLock<Tokenizer>>,
         post: ChatPost,
-        vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
-    ) -> Self {
+        vecdb_search: Arc<AMutex<Box<T>>>,
+    ) -> Self where T: VecdbSearch + Send {
         ChatLlama2 {
             t: HasTokenizerAndEot::new(tokenizer),
             dd: DeltaDeltaChatStreamer::new(),
@@ -41,13 +43,13 @@ impl ChatLlama2 {
             keyword_s: "<s>".to_string(),
             keyword_slash_s: "</s>".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search
+            vecdb_search,
         }
     }
 }
 
 #[async_trait]
-impl ScratchpadAbstract for ChatLlama2 {
+impl<T: Send + VecdbSearch> ScratchpadAbstract for ChatLlama2<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,

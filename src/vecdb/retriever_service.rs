@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use tokio::task::JoinHandle;
 
 use crate::vecdb::file_splitter::FileSplitter;
-use crate::vecdb::hadler::VecDBHandlerRef;
+use crate::vecdb::handler::VecDBHandlerRef;
 use crate::vecdb::req_client::get_embedding;
 use crate::vecdb::structs::{Record, SplitResult, VecDbStatus, VecDbStatusRef};
 
@@ -63,6 +63,7 @@ fn retrieve_thread(
     status: VecDbStatusRef,
     splitter_window_size: usize,
     embedding_model_name: String,
+    api_key: String,
 ) {
     let file_splitter = FileSplitter::new(splitter_window_size);
     let runtime = tokio::runtime::Handle::current();
@@ -81,14 +82,16 @@ fn retrieve_thread(
         };
 
         let splat_data = file_splitter.split(&path);
+        let vecdb_handler = runtime.block_on(vecdb_handler_ref.lock());
         let splat_data_filtered: Vec<SplitResult> = splat_data
             .iter()
-            .filter(|x| vecdb_handler_ref.read().unwrap().contains(&x.window_text_hash))
+            .filter(|x| vecdb_handler.contains(&x.window_text_hash))
             .cloned() // Clone to avoid borrowing issues
             .collect();
+        drop(vecdb_handler);
 
         let join_handles: Vec<_> = splat_data_filtered.iter().map(
-            |x| get_embedding(x.window_text.clone(), &embedding_model_name)
+            |x| get_embedding(x.window_text.clone(), &embedding_model_name, api_key.clone())
         ).collect();
 
         let mut splat_join_data: VecDeque<(SplitResult, JoinHandle<Result<Vec<f32>, String>>)>
@@ -120,6 +123,7 @@ fn retrieve_thread(
                             end_line: data_res.end_line,
                             time_added: SystemTime::now(),
                             model_name: embedding_model_name.clone(),
+                            score: 1.0
                         }
                     );
                 }
@@ -127,7 +131,7 @@ fn retrieve_thread(
             }
         }
 
-        vecdb_handler_ref.write().unwrap().add_or_update(records);
+        runtime.block_on(vecdb_handler_ref.lock()).add_or_update(records);
         thread::sleep(std::time::Duration::from_millis(25));
     }
 }
@@ -138,6 +142,7 @@ impl RetrieverService {
         cooldown_secs: u64,
         splitter_window_size: usize,
         embedding_model_name: String,
+        api_key: String,
     ) -> Self {
         let cooldown_queue = Arc::new(Mutex::new(VecDeque::new()));
         let output_queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -145,6 +150,7 @@ impl RetrieverService {
         let retrieve_thread_end_flag = Arc::new(AtomicBool::new(false));
         let status = Arc::new(Mutex::new(
             VecDbStatus {
+                unprocessed_files_count: 0,
                 unprocessed_chunk_count: 0,
                 requests_count: 0,
                 db_size: 0,
@@ -181,6 +187,7 @@ impl RetrieverService {
                         status_clone_2.clone(),
                         splitter_window_size,
                         embedding_model_name,
+                        api_key,
                     )
                 })
             ),
@@ -219,5 +226,33 @@ impl Drop for RetrieverService {
         if let Some(handle) = self.retrieve_thread_handle.take() {
             handle.join().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::*;
+
+    struct VecDbStatus {
+        pub unprocessed_chunk_count: usize,
+    }
+
+    type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
+
+    // Helper function to create a test environment
+    fn setup_test_env() -> (Arc<Mutex<VecDeque<PathBuf>>>, Arc<Mutex<VecDeque<PathBuf>>>, Arc<AtomicBool>, VecDbStatusRef, u64) {
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let out_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let end_flag = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(VecDbStatus { unprocessed_chunk_count: 0 }));
+        let cooldown_secs = 1; // 1 second for quick testing
+
+        (queue, out_queue, end_flag, status, cooldown_secs)
     }
 }

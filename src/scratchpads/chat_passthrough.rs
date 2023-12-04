@@ -1,33 +1,32 @@
-use tracing::info;
 use std::sync::Arc;
-use tokio::sync::Mutex as AMutex;
+
 use async_trait::async_trait;
+use tokio::sync::Mutex as AMutex;
+use tracing::info;
 
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::scratchpad_abstract::ScratchpadAbstract;
-use crate::call_validation::{ChatPost, ChatMessage, SamplingParameters, ContextFile};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history_in_bytes;
-// use crate::vecdb_search::{VecdbSearch, embed_vecdb_results};
-use crate::vecdb_search::VecdbSearch;
-
+use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = true;
 
 
 // #[derive(Debug)]
-pub struct ChatPassthrough {
+pub struct ChatPassthrough<T> {
     pub post: ChatPost,
     pub default_system_message: String,
     pub limit_bytes: usize,
-    pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
+    pub vecdb_search: Arc<AMutex<Box<T>>>,
 }
 
-const DEFAULT_LIMIT_BYTES: usize = 4096*3;
+const DEFAULT_LIMIT_BYTES: usize = 4096 * 3;
 
-impl ChatPassthrough {
+impl<T: Send + VecdbSearch> ChatPassthrough<T> {
     pub fn new(
         post: ChatPost,
-        vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
-    ) -> Self {
+        vecdb_search: Arc<AMutex<Box<T>>>,
+    ) -> Self where T: VecdbSearch + 'static {
         ChatPassthrough {
             post,
             default_system_message: "".to_string(),
@@ -38,7 +37,7 @@ impl ChatPassthrough {
 }
 
 #[async_trait]
-impl ScratchpadAbstract for ChatPassthrough {
+impl<T: Send + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,

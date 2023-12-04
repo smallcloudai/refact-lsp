@@ -18,8 +18,8 @@ use crate::caps::CodeAssistantCaps;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::completion_cache;
 use crate::telemetry::telemetry_structs;
-use crate::vecdb_search;
 use crate::cached_tokenizers;
+use crate::vecdb::structs::VecdbSearch;
 
 
 fn verify_has_send<T: Send>(_x: &T) {}
@@ -49,15 +49,16 @@ pub async fn create_code_completion_scratchpad(
     Ok(result)
 }
 
-pub async fn create_chat_scratchpad(
+pub async fn create_chat_scratchpad<T>(
     global_context: Arc<ARwLock<GlobalContext>>,
     caps: Arc<StdRwLock<CodeAssistantCaps>>,
     model_name_for_tokenizer: String,
     post: ChatPost,
     scratchpad_name: &str,
     scratchpad_patch: &serde_json::Value,
-    vecdb_search: Arc<AMutex<Box<dyn vecdb_search::VecdbSearch + Send>>>,
-) -> Result<Box<dyn ScratchpadAbstract>, String> {
+    vecdb_search: Arc<AMutex<Box<T>>>,
+) -> Result<Box<dyn ScratchpadAbstract>, String>
+    where T: VecdbSearch + 'static {
     let mut result: Box<dyn ScratchpadAbstract>;
     if scratchpad_name == "CHAT-GENERIC" {
         let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context, model_name_for_tokenizer).await?;
