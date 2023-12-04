@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as AMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::SystemTime;
@@ -14,18 +15,18 @@ use crate::vecdb::structs::{Record, SplitResult, VecDbStatus, VecDbStatusRef};
 
 #[derive(Debug)]
 pub struct RetrieverService {
-    update_request_queue: Arc<Mutex<VecDeque<PathBuf>>>,
+    update_request_queue: Arc<AMutex<VecDeque<PathBuf>>>,
     output_queue: Arc<Mutex<VecDeque<PathBuf>>>,
     vecdb_handler: VecDBHandlerRef,
-    cooldown_queue_thread_handle: Option<thread::JoinHandle<()>>,
+    cooldown_queue_join_handle: tokio::task::JoinHandle<()>,
     cooldown_queue_thread_end_flag: Arc<AtomicBool>,
     retrieve_thread_handle: Option<thread::JoinHandle<()>>,
     retrieve_thread_end_flag: Arc<AtomicBool>,
     status: VecDbStatusRef,
 }
 
-fn cooldown_queue_thread(
-    queue: Arc<Mutex<VecDeque<PathBuf>>>,
+async fn cooldown_queue_thread(
+    update_request_queue: Arc<AMutex<VecDeque<PathBuf>>>,
     out_queue: Arc<Mutex<VecDeque<PathBuf>>>,
     end_flag: Arc<AtomicBool>,
     status: VecDbStatusRef,
@@ -33,13 +34,20 @@ fn cooldown_queue_thread(
 ) {
     let mut last_updated: HashMap<PathBuf, SystemTime> = HashMap::new();
     loop {
-        if end_flag.load(Ordering::SeqCst) {
-            break;
+        let (path_maybe, unprocessed_chunk_count) = {
+            let mut queue_locked: tokio::sync::MutexGuard<'_, VecDeque<PathBuf>> = update_request_queue.lock().await;
+            if !queue_locked.is_empty() {
+                (Some(queue_locked.pop_front().unwrap()), queue_locked.len())
+            } else {
+                (None, 0)
+            }
+        };
+        status.lock().unwrap().unprocessed_chunk_count = unprocessed_chunk_count;
+
+        if let Some(path) = path_maybe {
+            last_updated.insert(path, SystemTime::now());
         }
 
-        let Some(path) = queue.lock().unwrap().pop_front() else { continue; };
-        status.lock().unwrap().unprocessed_chunk_count = queue.lock().unwrap().len();
-        last_updated.insert(path, SystemTime::now());
         let mut paths_to_process: Vec<PathBuf> = Vec::new();
         for (path, time) in &last_updated {
             if time.elapsed().unwrap().as_secs() > cooldown_secs {
@@ -51,7 +59,7 @@ fn cooldown_queue_thread(
             out_queue.lock().unwrap().push_back(path);
         }
 
-        thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }
 
@@ -144,7 +152,7 @@ impl RetrieverService {
         embedding_model_name: String,
         api_key: String,
     ) -> Self {
-        let cooldown_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let update_request_queue = Arc::new(AMutex::new(VecDeque::new()));
         let output_queue = Arc::new(Mutex::new(VecDeque::new()));
         let cooldown_queue_thread_end_flag = Arc::new(AtomicBool::new(false));
         let retrieve_thread_end_flag = Arc::new(AtomicBool::new(false));
@@ -162,21 +170,19 @@ impl RetrieverService {
         let status_clone_1 = status.clone();
         let status_clone_2 = status.clone();
         RetrieverService {
-            update_request_queue: cooldown_queue.clone(),
+            update_request_queue: update_request_queue.clone(),
             output_queue: output_queue.clone(),
             vecdb_handler: vecdb_handler.clone(),
             cooldown_queue_thread_end_flag: cooldown_queue_thread_end_flag.clone(),
             retrieve_thread_end_flag: retrieve_thread_end_flag.clone(),
-            cooldown_queue_thread_handle: Option::from(
-                thread::spawn(move || {
-                    cooldown_queue_thread(
-                        cooldown_queue.clone(),
-                        output_queue_clone_1.clone(),
-                        cooldown_queue_thread_end_flag.clone(),
-                        status_clone_1,
-                        cooldown_secs,
-                    )
-                })
+            cooldown_queue_join_handle: tokio::spawn(
+                cooldown_queue_thread(
+                    update_request_queue.clone(),
+                    output_queue_clone_1.clone(),
+                    cooldown_queue_thread_end_flag.clone(),
+                    status_clone_1,
+                    cooldown_secs,
+                )
             ),
             retrieve_thread_handle: Option::from(
                 thread::spawn(move || {
@@ -197,7 +203,7 @@ impl RetrieverService {
 
     pub async fn process_file(&self, path: PathBuf, force: bool) {
         if !force {
-            self.update_request_queue.lock().unwrap().push_back(path);
+            self.update_request_queue.lock().await.push_back(path);
         } else {
             self.output_queue.lock().unwrap().push_back(path);
         }
@@ -205,7 +211,7 @@ impl RetrieverService {
 
     pub async fn process_files(&self, paths: Vec<PathBuf>, force: bool) {
         if !force {
-            self.update_request_queue.lock().unwrap().extend(paths);
+            self.update_request_queue.lock().await.extend(paths);
         } else {
             self.output_queue.lock().unwrap().extend(paths);
         }
@@ -220,9 +226,9 @@ impl Drop for RetrieverService {
     fn drop(&mut self) {
         self.cooldown_queue_thread_end_flag.store(true, Ordering::SeqCst);
         self.retrieve_thread_end_flag.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.cooldown_queue_thread_handle.take() {
-            handle.join().unwrap();
-        }
+        // if let Some(handle) = self.cooldown_queue_thread_handle.take() {
+        //     handle.join().unwrap();
+        // }
         if let Some(handle) = self.retrieve_thread_handle.take() {
             handle.join().unwrap();
         }
