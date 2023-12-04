@@ -1,54 +1,41 @@
-use crate::call_validation::{ChatMessage, ChatPost};
+use std::sync::Arc;
+
+use async_trait::async_trait;
 // use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
-
-use std::sync::Arc;
 use tokio::sync::Mutex as AMutex;
-use async_trait::async_trait;
 
+use crate::call_validation::{ChatMessage, ChatPost};
+use crate::vecdb::structs::{SearchResult, VecdbSearch};
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct VecdbResultRec {
-    pub file_name: String,
-    pub text: String,
-    pub score: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct VecdbResult {
-    pub results: Vec<VecdbResultRec>,
-}
-
-// FIXME: bad idea
-pub async fn embed_vecdb_results(
-    vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
+pub async fn embed_vecdb_results<T>(
+    vecdb_search: Arc<AMutex<Box<T>>>,
     post: &mut ChatPost,
     limit_examples_cnt: usize,
-) {
+) where T: VecdbSearch {
     let my_vdb = vecdb_search.clone();
     let latest_msg_cont = &post.messages.last().unwrap().content;
     let mut vecdb_locked = my_vdb.lock().await;
-    let vdb_resp = vecdb_locked.search(&latest_msg_cont).await;
+    let vdb_resp = vecdb_locked.search(latest_msg_cont.clone()).await;
     let vdb_cont = vecdb_resp_to_prompt(&vdb_resp, limit_examples_cnt);
     if vdb_cont.len() > 0 {
         post.messages = [
-            &post.messages[..post.messages.len() -1],
+            &post.messages[..post.messages.len() - 1],
             &[ChatMessage {
                 role: "user".to_string(),
                 content: vdb_cont,
             }],
-            &post.messages[post.messages.len() -1..],
+            &post.messages[post.messages.len() - 1..],
         ].concat();
     }
 }
 
 // FIXME: bad idea
 fn vecdb_resp_to_prompt(
-    resp: &Result<VecdbResult, String>,
+    resp: &Result<SearchResult, String>,
     limit_examples_cnt: usize,
 ) -> String {
     let mut cont = "".to_string();
@@ -60,9 +47,9 @@ fn vecdb_resp_to_prompt(
                     break;
                 }
                 cont.push_str("FILENAME:\n");
-                cont.push_str(resp.results[i].file_name.clone().as_str());
+                cont.push_str(resp.results[i].file_path.to_str().unwrap());
                 cont.push_str("\nTEXT:");
-                cont.push_str(resp.results[i].text.clone().as_str());
+                cont.push_str(resp.results[i].window_text.clone().as_str());
                 cont.push_str("\n");
             }
             cont.push_str("\nRefer to the context to answer my next question.\n");
@@ -75,33 +62,15 @@ fn vecdb_resp_to_prompt(
     }
 }
 
-#[async_trait]
-pub trait VecdbSearch: Send {
-    async fn search(
-        &mut self,
-        query: &str,
-    ) -> Result<VecdbResult, String>;
-}
-
-#[derive(Debug, Clone)]
-pub struct VecdbSearchTest {
-}
-
-impl VecdbSearchTest {
-    pub fn new() -> Self {
-        VecdbSearchTest {
-        }
-    }
-}
-
-// unsafe impl Send for VecdbSearchTest {}
+#[derive(Debug)]
+pub struct VecDbRemote {}
 
 #[async_trait]
-impl VecdbSearch for VecdbSearchTest {
+impl VecdbSearch for VecDbRemote {
     async fn search(
-        &mut self,
-        query: &str,
-    ) -> Result<VecdbResult, String> {
+        &self,
+        query: String,
+    ) -> Result<SearchResult, String> {
         let url = "http://127.0.0.1:8008/v1/vdb-search".to_string();
         let mut headers = HeaderMap::new();
         // headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", self.token)).unwrap());
@@ -120,7 +89,7 @@ impl VecdbSearch for VecdbSearchTest {
 
         let body = res.text().await.map_err(|e| format!("Vecdb search HTTP error (2): {}", e))?;
         // info!("Vecdb search result: {:?}", &body);
-        let result: Vec<VecdbResult> = serde_json::from_str(&body).map_err(|e| {
+        let result: Vec<SearchResult> = serde_json::from_str(&body).map_err(|e| {
             format!("vecdb JSON problem: {}", e)
         })?;
         if result.len() == 0 {

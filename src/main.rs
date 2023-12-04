@@ -19,12 +19,11 @@ mod restream;
 mod custom_error;
 mod completion_cache;
 mod telemetry;
-mod vecdb_search;
 mod lsp;
 mod http;
 mod background_tasks;
-
 mod vecdb;
+
 
 #[tokio::main]
 async fn main() {

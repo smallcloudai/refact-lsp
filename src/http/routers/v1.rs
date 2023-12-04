@@ -25,6 +25,7 @@ pub mod telemetry_network;
 pub mod snippet_accepted;
 pub mod caps;
 pub mod graceful_shutdown;
+pub mod vecdb;
 
 pub fn make_v1_router() -> Router {
     Router::new()

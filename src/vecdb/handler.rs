@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::SystemTime;
 
 use arrow::array::ArrayData;
@@ -16,13 +15,14 @@ use arrow_array::types::{Float32Type, UInt64Type};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tracing::Instrument;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
 use crate::vecdb::structs::Record;
 
-pub type VecDBHandlerRef = Arc<RwLock<VecDBHandler>>;
+pub type VecDBHandlerRef = Arc<Mutex<VecDBHandler>>;
 
 impl Debug for VecDBHandler {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -203,6 +203,7 @@ impl VecDBHandler {
                     .expect("Missing column 'model_name'"))
                     .value(idx)
                     .to_string(),
+                score: 1.0,  // TODO: investigate if we can really take this value from the vectordb
             })
         }).collect();
         res
@@ -248,6 +249,7 @@ mod tests {
                 end_line: 2,
                 time_added: SystemTime::now(),
                 model_name: "model1".to_string(),
+                score: 1.0,
             },
         ];
 
@@ -280,6 +282,7 @@ mod tests {
                 end_line: 4,
                 time_added: time_added,
                 model_name: "model2".to_string(),
+                score: 1.0,
             },
         ];
         handler.add_or_update(records).await.unwrap();
@@ -294,5 +297,6 @@ mod tests {
         assert_eq!(results[0].start_line, 3);
         assert_eq!(results[0].end_line, 4);
         assert_eq!(results[0].model_name, "model2");
+        assert_eq!(results[0].score, 1.0);
     }
 }

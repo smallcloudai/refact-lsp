@@ -1,6 +1,7 @@
 mod file_splitter;
-mod hadler;
+mod handler;
 mod req_client;
 mod retriever_service;
-mod structs;
+pub mod structs;
 pub mod vecdb;
+pub mod vecdb_remote;

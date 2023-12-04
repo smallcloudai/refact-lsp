@@ -1,39 +1,42 @@
-use crate::scratchpad_abstract::ScratchpadAbstract;
-use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
-use crate::call_validation::{ChatPost, ChatMessage, SamplingParameters, ContextFile};
-use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::vecdb_search::{VecdbSearch, embed_vecdb_results};
-
 use std::sync::Arc;
 use std::sync::RwLock;
-use async_trait::async_trait;
-use tokio::sync::Mutex as AMutex;
 
+use async_trait::async_trait;
 use tokenizers::Tokenizer;
+use tokio::sync::Mutex as AMutex;
 use tracing::info;
+
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::scratchpad_abstract::HasTokenizerAndEot;
+use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
+use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
+use crate::vecdb::structs::VecdbSearch;
+use crate::vecdb::vecdb_remote::embed_vecdb_results;
 
 const DEBUG: bool = true;
 
 
-pub struct GenericChatScratchpad {
+pub struct GenericChatScratchpad<T> {
     pub t: HasTokenizerAndEot,
     pub dd: DeltaDeltaChatStreamer,
     pub post: ChatPost,
-    pub token_esc: String,    // for models that switch between sections using <esc>SECTION
-    pub keyword_syst: String, // "SYSTEM:" keyword means it's not one token
+    pub token_esc: String,
+    // for models that switch between sections using <esc>SECTION
+    pub keyword_syst: String,
+    // "SYSTEM:" keyword means it's not one token
     pub keyword_user: String,
     pub keyword_asst: String,
     pub default_system_message: String,
-    pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
+    pub vecdb_search: Arc<AMutex<Box<T>>>,
 }
 
-impl GenericChatScratchpad {
+impl<T: Send + VecdbSearch> GenericChatScratchpad<T> {
     pub fn new(
         tokenizer: Arc<RwLock<Tokenizer>>,
         post: ChatPost,
-        vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
-    ) -> Self {
+        vecdb_search: Arc<AMutex<Box<T>>>,
+    ) -> Self where T: VecdbSearch + 'static {
         GenericChatScratchpad {
             t: HasTokenizerAndEot::new(tokenizer),
             dd: DeltaDeltaChatStreamer::new(),
@@ -43,13 +46,13 @@ impl GenericChatScratchpad {
             keyword_user: "".to_string(),
             keyword_asst: "".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search
+            vecdb_search,
         }
     }
 }
 
 #[async_trait]
-impl ScratchpadAbstract for GenericChatScratchpad {
+impl<T: Send + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,
