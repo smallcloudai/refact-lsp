@@ -27,6 +27,7 @@ pub mod telemetry_network;
 pub mod snippet_accepted;
 pub mod caps;
 pub mod graceful_shutdown;
+pub mod vecdb;
 mod lsp_like_handlers;
 
 pub fn make_v1_router() -> Router {

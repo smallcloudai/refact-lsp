@@ -3,18 +3,26 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+#[async_trait]
+pub trait VecdbSearch: Send {
+    async fn search(
+        &self,
+        query: String,
+    ) -> Result<SearchResult, String>;
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VecDbStatus {
-    pub unprocessed_chunk_count: usize,    // "idle" if zero
-    pub requests_count: usize,             // since process started
+    pub unprocessed_files_count: usize,
+    pub unprocessed_chunk_count: usize,
+    pub requests_count: usize,
     pub db_size: usize,
     pub db_last_time_updated: SystemTime,
-    // files    5/1337
-    // chunks  10/2668
 }
-
 
 pub type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
 
@@ -29,8 +37,8 @@ pub struct Record {
     pub end_line: u64,
     pub time_added: SystemTime,
     pub model_name: String,
+    pub score: f32,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct SplitResult {
@@ -45,5 +53,4 @@ pub struct SplitResult {
 pub struct SearchResult {
     pub query_text: String,
     pub results: Vec<Record>,
-    pub db_status: VecDbStatus,
 }
