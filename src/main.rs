@@ -64,6 +64,9 @@ async fn main() {
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
     }
+    background_tasks.extend(
+        gcx.read().await.vec_db.lock().await.start_background_tasks().await
+    );
 
     let gcx_clone = gcx.clone();
     let server = http::start_server(gcx_clone, ask_shutdown_receiver);

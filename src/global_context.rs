@@ -40,6 +40,8 @@ pub struct CommandLine {
     pub lsp_stdin_stdout: u16,
     #[structopt(long, help="Trust self-signed SSL certificates")]
     pub insecure: bool,
+    #[structopt(long, short = "f", default_value = "", help = "The path to jsonl file which contains filtered source files")]
+    pub files_set_path: String,
 }
 
 

@@ -1,7 +1,7 @@
-use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use tokio::fs::read_to_string;
 
 use crate::vecdb::structs::SplitResult;
 
@@ -31,14 +31,18 @@ impl FileSplitter {
         FileSplitter { window_size }
     }
 
-    pub fn split(&self, file_path: &PathBuf) -> Vec<SplitResult> {
-        let file_content = fs::read_to_string(file_path).expect("Failed to read file");
+    pub async fn split(&self, file_path: &PathBuf) -> Result<Vec<SplitResult>, String> {
+        let file_content = match read_to_string(file_path).await {
+            Ok(s) => s,
+            Err(e) => return Err(e.to_string())
+        };
+
         let mut chunks = Vec::new();
         let mut delimiter = self.max_empty_lines(&file_content);
         chunks = self.split_by_empty_lines(&file_content, file_path, delimiter, 0);
 
         delimiter -= 1;
-        while delimiter > 0 {
+        while delimiter > 1 {
             chunks = self.split_large_chunks(chunks, file_path, delimiter);
             if chunks.iter().all(|chunk| chunk.window_text.len() <= self.window_size) {
                 break;
@@ -46,7 +50,7 @@ impl FileSplitter {
             delimiter -= 1;
         }
 
-        chunks.iter()
+        Ok(chunks.iter()
             .filter(|s| !s.window_text.is_empty())
             .map(
                 |s| {
@@ -60,7 +64,7 @@ impl FileSplitter {
                     }
                 }
             )
-            .collect()
+            .collect())
     }
 
     fn max_empty_lines(&self, content: &str) -> i32 {
@@ -152,19 +156,19 @@ mod tests {
         (file, file_path)
     }
 
-    #[test]
-    fn test_empty_file() {
+    #[tokio::test]
+    async fn test_empty_file() {
         let splitter = FileSplitter::new(10);
         let (temp_file, file_path) = create_temp_file_with_content("");
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn test_file_smaller_than_window_size() {
+    #[tokio::test]
+    async fn test_file_smaller_than_window_size() {
         let splitter = FileSplitter::new(3);
         let (temp_file, file_path) = create_temp_file_with_content("Hello");
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello".to_string(),
@@ -176,11 +180,11 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_file_with_exact_window_size() {
+    #[tokio::test]
+    async fn test_file_with_exact_window_size() {
         let splitter = FileSplitter::new(5);
         let (temp_file, file_path) = create_temp_file_with_content("Hello");
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello".to_string(),
@@ -192,11 +196,11 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_file_with_a_single_empty_line() {
+    #[tokio::test]
+    async fn test_file_with_a_single_empty_line() {
         let splitter = FileSplitter::new(10);
         let (temp_file, file_path) = create_temp_file_with_content("Hello\nWorld");
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello".to_string(),
@@ -215,11 +219,11 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_splitting_by_maximum_empty_lines() {
+    #[tokio::test]
+    async fn test_splitting_by_maximum_empty_lines() {
         let splitter = FileSplitter::new(30);
         let (temp_file, file_path) = create_temp_file_with_content("Hello\n\n\nWorld");
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello".to_string(),
@@ -238,12 +242,12 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_splitting_enough_win_size() {
+    #[tokio::test]
+    async fn test_splitting_enough_win_size() {
         let splitter = FileSplitter::new(20);
         let content = "Hello\n\nWorld\n\n\nThis is a test\n";
         let (temp_file, file_path) = create_temp_file_with_content(content);
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello\n\nWorld".to_string(),
@@ -262,12 +266,12 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_splitting_not_enough_win_size() {
+    #[tokio::test]
+    async fn test_splitting_not_enough_win_size() {
         let splitter = FileSplitter::new(5);
         let content = "Hello\n\nWorld\n\n\nThis is a test\n";
         let (temp_file, file_path) = create_temp_file_with_content(content);
-        let result = splitter.split(&file_path);
+        let result = splitter.split(&file_path).await.unwrap();
         assert_eq!(result, vec![
             SplitResult {
                 window_text: "Hello".to_string(),

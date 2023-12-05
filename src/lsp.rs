@@ -1,21 +1,29 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
+use arrow::compute::filter;
 
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::{ClientSocket, LanguageServer, LspService};
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tracing::{error, info};
+use walkdir::WalkDir;
 
 use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPosition, SamplingParameters};
-use crate::global_context;
-use crate::global_context::CommandLine;
+use crate::{global_context};
+use crate::global_context::{CommandLine, SharedGlobalContext};
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
 use crate::telemetry;
+use crate::vecdb::file_filter::is_valid_file;
 use crate::receive_workspace_changes;
 
 
@@ -39,6 +47,8 @@ impl Display for APIError {
 pub struct Backend {
     pub gcx: Arc<ARwLock<global_context::GlobalContext>>,
     pub client: tower_lsp::Client,
+    pub document_map: Arc<ARwLock<HashMap<String, Document>>>,
+    pub workspace_folders: Arc<ARwLock<Option<Vec<WorkspaceFolder>>>>
 }
 
 
@@ -177,6 +187,24 @@ impl LanguageServer for Backend {
             *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders;
             info!("LSP workspace_folders {:?}", gcx_locked.lsp_backend_document_state.workspace_folders);
         }
+        let maybe_folders = self.workspace_folders.read().await.clone();
+
+        if let Some(folders) = maybe_folders {
+            let files: Vec<PathBuf> = folders
+                .iter()
+                .map( |f| {
+                    return WalkDir::new(Path::new(f.uri.path()))
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                        .filter(|e| !e.path().is_dir())
+                        .filter(|e| is_valid_file(&e.path().to_path_buf()))
+                        .map(|e| e.path().to_path_buf())
+                        .collect::<Vec<PathBuf>>();
+                })
+                .flatten()
+                .collect();
+            self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, true).await;
+        }
 
         let completion_options: CompletionOptions;
         completion_options = CompletionOptions {
@@ -221,6 +249,22 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let t0 = Instant::now();
+        let rope = ropey::Rope::from_str(&params.content_changes[0].text);
+        let uri = params.text_document.uri.to_string();
+        let mut document_map = self.document_map.write().await;
+        let doc = document_map
+            .entry(uri.clone())
+            .or_insert(Document::new("unknown".to_owned(), Rope::new()));
+        doc.text = rope;
+
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
+                file_path, false
+            ).await;
+        }
+
         receive_workspace_changes::on_did_change(
             self.gcx.clone(),
             &params.text_document.uri.to_string(),
@@ -233,6 +277,12 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "{refact-lsp} file saved")
             .await;
         let uri = params.text_document.uri.to_string();
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
+                file_path, false
+            ).await;
+        }
         info!("{uri} saved");
     }
 
@@ -241,6 +291,12 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "{refact-lsp} file closed")
             .await;
         let uri = params.text_document.uri.to_string();
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
+                file_path, false
+            ).await;
+        }
         info!("{uri} closed");
     }
 
@@ -255,6 +311,25 @@ impl LanguageServer for Backend {
             CompletionItem::new_simple("Hello".to_string(), "Some detail".to_string()),
             CompletionItem::new_simple("Bye".to_string(), "More detail".to_string()),
         ])))
+    }
+
+    async fn did_delete_files(&self, params: DeleteFilesParams) {
+        let files = params.files
+            .into_iter()
+            .map(|x| PathBuf::from(x.uri.replace("file://", "")))
+            .filter(|x| is_valid_file(&x));
+        for file in files {
+            self.gcx.read().await.vec_db.lock().await.remove_file(&file).await;
+        }
+    }
+
+    async fn did_create_files(&self, params: CreateFilesParams) {
+        let files = params.files
+            .into_iter()
+            .map(|x| PathBuf::from(x.uri.replace("file://", "")))
+            .filter(|x| is_valid_file(&x))
+            .collect();
+        self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, false).await;
     }
 }
 
