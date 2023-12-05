@@ -18,23 +18,23 @@ use crate::vecdb::vecdb::VecDb;
 
 #[derive(Debug, StructOpt, Clone)]
 pub struct CommandLine {
-    #[structopt(long, help = "Send logs to stderr, as opposed to ~/.cache/refact/logs, so it's easier to debug.")]
+    #[structopt(long, help="Send logs to stderr, as opposed to ~/.cache/refact/logs, so it's easier to debug.")]
     pub logs_stderr: bool,
-    #[structopt(long, short = "u", help = "URL to start working. The first step is to fetch coding_assistant_caps.json.")]
+    #[structopt(long, short="u", help="URL to start working. The first step is to fetch coding_assistant_caps.json.")]
     pub address_url: String,
-    #[structopt(long, short = "k", default_value = "", help = "The API key to authenticate your requests, will appear in HTTP requests this binary makes.")]
+    #[structopt(long, short="k", default_value="", help="The API key to authenticate your requests, will appear in HTTP requests this binary makes.")]
     pub api_key: String,
-    #[structopt(long, short = "p", default_value = "8001", help = "Bind 127.0.0.1:<port> to listen for HTTP requests, such as /v1/code-completion, /v1/chat, /v1/caps.")]
+    #[structopt(long, short="p", default_value="8001", help="Bind 127.0.0.1:<port> to listen for HTTP requests, such as /v1/code-completion, /v1/chat, /v1/caps.")]
     pub http_port: u16,
-    #[structopt(long, default_value = "", help = "End-user client version, such as version of VS Code plugin.")]
+    #[structopt(long, default_value="", help="End-user client version, such as version of VS Code plugin.")]
     pub enduser_client_version: String,
-    #[structopt(long, short = "b", help = "Send basic telemetry (counters and errors)")]
+    #[structopt(long, short="b", help="Send basic telemetry (counters and errors)")]
     pub basic_telemetry: bool,
-    #[structopt(long, short = "s", help = "Send snippet telemetry (code snippets)")]
+    #[structopt(long, short="s", help="Send snippet telemetry (code snippets)")]
     pub snippet_telemetry: bool,
-    #[structopt(long, default_value = "0", help = "Bind 127.0.0.1:<port> and act as an LSP server. This is compatible with having an HTTP server at the same time.")]
+    #[structopt(long, default_value="0", help="Bind 127.0.0.1:<port> and act as an LSP server. This is compatible with having an HTTP server at the same time.")]
     pub lsp_port: u16,
-    #[structopt(long, default_value = "0", help = "Act as an LSP server, use stdin stdout for communication. This is compatible with having an HTTP server at the same time. But it's not compatible with LSP port.")]
+    #[structopt(long, default_value="0", help="Act as an LSP server, use stdin stdout for communication. This is compatible with having an HTTP server at the same time. But it's not compatible with LSP port.")]
     pub lsp_stdin_stdout: u16,
     #[structopt(long, help="Trust self-signed SSL certificates")]
     pub insecure: bool,
@@ -55,20 +55,17 @@ pub struct GlobalContext {
     pub http_client: reqwest::Client,
     pub http_client_slowdown: Arc<Mutex<Slowdown>>,
     pub cache_dir: PathBuf,
-    pub tokenizer_map: HashMap<String, Arc<StdRwLock<Tokenizer>>>,
     pub caps: Option<Arc<StdRwLock<CodeAssistantCaps>>>,
     pub caps_last_attempted_ts: u64,
     pub tokenizer_map: HashMap< String, Arc<StdRwLock<Tokenizer>>>,
     pub completions_cache: Arc<StdRwLock<CompletionCache>>,
     pub telemetry: Arc<StdRwLock<telemetry_structs::Storage>>,
     pub vec_db: Arc<AMutex<Box<VecDb>>>,
-    pub vec_db: VecDBHandlerRef
+    pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;
-
-const CAPS_RELOAD_BACKOFF: u64 = 60;
-// seconds
+const CAPS_RELOAD_BACKOFF: u64 = 60;       // seconds
 const CAPS_BACKGROUND_RELOAD: u64 = 3600;  // seconds
 
 pub async fn caps_background_reload(
@@ -85,7 +82,7 @@ pub async fn caps_background_reload(
                 global_context_locked.caps = Some(caps);
                 info!("background reload caps successful");
                 write!(std::io::stderr(), "CAPS\n").unwrap();
-            }
+            },
             Err(e) => {
                 error!("failed to load caps: {}", e);
             }
@@ -122,7 +119,7 @@ pub async fn try_load_caps_quickly_if_not_present(
                 info!("quick load caps successful");
                 write!(std::io::stderr(), "CAPS\n").unwrap();
                 Ok(caps)
-            }
+            },
             Err(e) => {
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("server is not reachable: {}", e)));
             }
@@ -176,7 +173,6 @@ pub async fn create_global_context(
             "BAAI/bge-small-en-v1.5".to_string(), 20
         ).await))),
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
-        vecdb_search: Arc::new(AMutex::new(Box::new(crate::vecdb_search::VecdbSearchTest::new()))),
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)
 }
