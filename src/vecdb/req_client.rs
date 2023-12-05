@@ -1,18 +1,15 @@
+use std::time::Duration;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
+use tracing::info;
 
 #[derive(Serialize)]
 struct Payload {
-    inputs: String,
+    pub inputs: String,
 }
 
-// Define a struct to deserialize the response
-#[derive(Deserialize)]
-struct ApiResponse {
-    // Assuming the API returns an embedding in a field named 'embedding'
-    embedding: Vec<f32>,
-}
 
 fn get_base_url() -> String {
     #[cfg(test)]
@@ -36,19 +33,41 @@ pub fn get_embedding(
     let url = format!("{}/models/{}", get_base_url(), model_name);
     let client = reqwest::Client::new();
     let payload = Payload { inputs: text };
+
+
     tokio::spawn(async move {
-        let response = client.post(url)
-            .bearer_auth(api_key.clone())
-            .json(&payload)
-            .send()
-            .await
-            .unwrap();
-        if response.status().is_success() {
-            let api_response: ApiResponse = response.json().await.unwrap();
-            Ok(api_response.embedding)
-        } else {
-            Err(format!("Failed to get a response: {:?}", response.status()))
+        let mut attempts = 0;
+        let max_attempts = 3;
+        let delay = Duration::from_secs(5);
+
+        while attempts < max_attempts {
+            let maybe_response = client.post(&url)
+                .bearer_auth("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".clone())
+                .json(&payload)
+                .send()
+                .await;
+
+            match maybe_response {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        match response.json::<Vec<f32>>().await {
+                            Ok(embedding) => return Ok(embedding),
+                            Err(err) => return Err(format!("Failed to parse the response: {:?}", err)),
+                        }
+                    } else if response.status().is_server_error() {
+                        // Retry in case of 5xx server errors
+                        attempts += 1;
+                        sleep(delay).await;
+                        continue;
+                    } else {
+                        return Err(format!("Failed to get a response: {:?}", response.status()));
+                    }
+                },
+                Err(err) => return Err(format!("Failed to send a request: {:?}", err))
+            }
         }
+
+        Err("Exceeded maximum attempts to reach the server".to_string())
     })
 }
 
