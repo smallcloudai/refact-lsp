@@ -14,6 +14,7 @@ use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_
 use arrow_array::types::{Float32Type, UInt64Type};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::{StreamExt, TryStreamExt};
+use lance::dataset::{WriteMode, WriteParams};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::Instrument;
@@ -40,7 +41,7 @@ pub struct VecDBHandler {
 
 async fn table_record_batch(schema: &SchemaRef, table: &Table) -> RecordBatch {
     // expose the private dataset field
-    let dataset = table.search(Float32Array::from_iter_values([1.0])).dataset;
+    let dataset = table.search(Float32Array::from_iter_values([1.0])).dataset.clone();
     let batches = dataset.scan()
         .try_into_stream()
         .await.unwrap()
@@ -67,9 +68,10 @@ impl VecDBHandler {
             Ok(table) => { table }
             Err(_) => {
                 let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-                database.create_table("data", batches_iter, None).await.unwrap()
+                database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap()
             }
         };
+
         let hashes_cache: Vec<String> = table_record_batch(&schema, &table).await
             .column_by_name("window_text_hash")
             .unwrap()
@@ -114,6 +116,10 @@ impl VecDBHandler {
                 .unwrap();
         }
 
+        if records.is_empty() {
+            return Ok(());
+        }
+
         let vectors: ArrayData = make_emb_data(&records, self.embedding_size);
         let window_texts: Vec<String> = records.iter().map(|x| x.window_text.clone()).collect();
         let window_text_hashes: Vec<String> = records.iter().map(|x| x.window_text_hash.clone()).collect();
@@ -139,7 +145,12 @@ impl VecDBHandler {
             self.schema.clone(),
         );
 
-        let res = self.table.add(batches_iter, None);
+        let res = self.table.add(
+            batches_iter, Option::from(WriteParams {
+                mode: WriteMode::Append,
+                ..Default::default()
+            })
+        );
         self.hashes_cache.extend(window_text_hashes);
         res.await
     }
@@ -153,7 +164,6 @@ impl VecDBHandler {
     pub fn contains(&self, hash: &str) -> bool {
         self.hashes_cache.contains(hash)
     }
-
 
     pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
         let query = self.table

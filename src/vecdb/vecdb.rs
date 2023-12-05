@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
 use crate::vecdb::req_client::get_embedding;
@@ -44,6 +45,10 @@ impl VecDb {
             top_n,
             cmdline,
         }
+    }
+
+    pub async fn start_background_tasks(&self) -> Vec<JoinHandle<()>> {
+        return self.retriever_service.lock().await.start_background_tasks().await;
     }
 
     pub async fn add_or_update_file(&mut self, file_path: PathBuf, force: bool) {
