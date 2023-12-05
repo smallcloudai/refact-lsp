@@ -12,7 +12,6 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::vecdb::structs::VecdbSearch;
-use crate::vecdb::vecdb_remote::embed_vecdb_results;
 
 const DEBUG: bool = true;
 
@@ -22,8 +21,7 @@ pub struct ChatLlama2<T> {
     pub t: HasTokenizerAndEot,
     pub dd: DeltaDeltaChatStreamer,
     pub post: ChatPost,
-    pub keyword_s: String,
-    // "SYSTEM:" keyword means it's not one token
+    pub keyword_s: String, // "SYSTEM:" keyword means it's not one token
     pub keyword_slash_s: String,
     pub default_system_message: String,
     pub vecdb_search: Arc<AMutex<Box<T>>>,
@@ -43,7 +41,7 @@ impl<T: Send + VecdbSearch> ChatLlama2<T> {
             keyword_s: "<s>".to_string(),
             keyword_slash_s: "</s>".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search,
+            vecdb_search
         }
     }
 }

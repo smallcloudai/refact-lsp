@@ -1,12 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::fs;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use arrow::compute::filter;
 
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -20,7 +16,7 @@ use walkdir::WalkDir;
 
 use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPosition, SamplingParameters};
 use crate::{global_context};
-use crate::global_context::{CommandLine, SharedGlobalContext};
+use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
 use crate::telemetry;
 use crate::vecdb::file_filter::is_valid_file;
@@ -48,7 +44,7 @@ pub struct Backend {
     pub gcx: Arc<ARwLock<global_context::GlobalContext>>,
     pub client: tower_lsp::Client,
     pub document_map: Arc<ARwLock<HashMap<String, Document>>>,
-    pub workspace_folders: Arc<ARwLock<Option<Vec<WorkspaceFolder>>>>
+    pub workspace_folders: Arc<ARwLock<Option<Vec<WorkspaceFolder>>>>,
 }
 
 

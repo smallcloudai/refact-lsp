@@ -20,7 +20,7 @@ pub struct ChatPassthrough<T> {
     pub vecdb_search: Arc<AMutex<Box<T>>>,
 }
 
-const DEFAULT_LIMIT_BYTES: usize = 4096 * 3;
+const DEFAULT_LIMIT_BYTES: usize = 4096*3;
 
 impl<T: Send + VecdbSearch> ChatPassthrough<T> {
     pub fn new(

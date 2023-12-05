@@ -12,7 +12,6 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::vecdb::structs::VecdbSearch;
-use crate::vecdb::vecdb_remote::embed_vecdb_results;
 
 const DEBUG: bool = true;
 
@@ -21,10 +20,8 @@ pub struct GenericChatScratchpad<T> {
     pub t: HasTokenizerAndEot,
     pub dd: DeltaDeltaChatStreamer,
     pub post: ChatPost,
-    pub token_esc: String,
-    // for models that switch between sections using <esc>SECTION
-    pub keyword_syst: String,
-    // "SYSTEM:" keyword means it's not one token
+    pub token_esc: String,    // for models that switch between sections using <esc>SECTION
+    pub keyword_syst: String, // "SYSTEM:" keyword means it's not one token
     pub keyword_user: String,
     pub keyword_asst: String,
     pub default_system_message: String,
@@ -46,7 +43,7 @@ impl<T: Send + VecdbSearch> GenericChatScratchpad<T> {
             keyword_user: "".to_string(),
             keyword_asst: "".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search,
+            vecdb_search
         }
     }
 }
