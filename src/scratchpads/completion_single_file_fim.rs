@@ -4,6 +4,7 @@ use crate::call_validation::CodeCompletionPost;
 use crate::call_validation::SamplingParameters;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use tokio::sync::Mutex as AMutex;
 // use ropey::RopeSlice;
 use tokenizers::Tokenizer;
 use ropey::Rope;
@@ -13,12 +14,13 @@ use async_trait::async_trait;
 use crate::completion_cache;
 use crate::telemetry::telemetry_structs;
 use crate::telemetry::snippets_collection;
+use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = false;
 
 
 #[derive(Debug)]
-pub struct SingleFileFIM {
+pub struct SingleFileFIM<T> {
     pub t: HasTokenizerAndEot,
     pub post: CodeCompletionPost,
     pub order: String,
@@ -27,19 +29,24 @@ pub struct SingleFileFIM {
     pub fim_middle: String,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
+    pub vecdb_search: Arc<AMutex<Box<T>>>,
 }
 
-impl SingleFileFIM {
+impl<T: Send + VecdbSearch> SingleFileFIM<T> {
     pub fn new(
         tokenizer: Arc<StdRwLock<Tokenizer>>,
         post: CodeCompletionPost,
         order: String,
         cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
         tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
-    ) -> Self {
+        vecdb_search: Arc<AMutex<Box<T>>>,
+    ) -> Self where T: VecdbSearch + Send {
         let data4cache = completion_cache::CompletionSaveToCache::new(cache_arc, &post);
         let data4snippet = snippets_collection::SaveSnippet::new(tele_storage, &post);
-        SingleFileFIM { t: HasTokenizerAndEot::new(tokenizer), post, order, fim_prefix: String::new(), fim_suffix: String::new(), fim_middle: String::new(), data4cache, data4snippet }
+        SingleFileFIM { t: HasTokenizerAndEot::new(tokenizer), post, order, fim_prefix: String::new(),
+            fim_suffix: String::new(), fim_middle: String::new(), data4cache, data4snippet,
+            vecdb_search
+        }
     }
 
     fn cleanup_prompt(&mut self, text: &String) -> String {
@@ -53,7 +60,7 @@ impl SingleFileFIM {
 
 
 #[async_trait]
-impl ScratchpadAbstract for SingleFileFIM {
+impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,

@@ -15,6 +15,7 @@ use crate::http::routers::v1::graceful_shutdown::handle_v1_graceful_shutdown;
 use crate::http::routers::v1::snippet_accepted::handle_v1_snippet_accepted;
 use crate::http::routers::v1::telemetry_network::handle_v1_telemetry_network;
 use crate::http::routers::v1::vecdb::handle_v1_vecdb_search;
+use crate::http::routers::v1::vecdb::handle_v1_vecdb_status;
 use crate::http::utils::telemetry_wrapper;
 use crate::telemetry_get;
 use crate::telemetry_post;
@@ -33,4 +34,5 @@ pub fn make_v1_router() -> Router {
         .route("/graceful-shutdown", telemetry_get!(handle_v1_graceful_shutdown))
 
         .route("/vdb-search", telemetry_get!(handle_v1_vecdb_search))
+        .route("/vdb-status", telemetry_get!(handle_v1_vecdb_status))
 }
