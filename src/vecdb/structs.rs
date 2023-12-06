@@ -12,6 +12,7 @@ pub trait VecdbSearch: Send {
     async fn search(
         &self,
         query: String,
+        top_n: usize,
     ) -> Result<SearchResult, String>;
 }
 
@@ -19,10 +20,8 @@ pub trait VecdbSearch: Send {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VecDbStatus {
     pub unprocessed_files_count: usize,
-    pub unprocessed_chunk_count: usize,
-    pub requests_count: usize,
+    pub requests_made_since_start: usize,
     pub db_size: usize,
-    pub db_last_time_updated: SystemTime,
 }
 
 pub type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
@@ -30,7 +29,7 @@ pub type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Record {
-    pub vector: Vec<f32>,
+    pub vector: Option<Vec<f32>>,
     pub window_text: String,
     pub window_text_hash: String,
     pub file_path: PathBuf,
@@ -38,7 +37,7 @@ pub struct Record {
     pub end_line: u64,
     pub time_added: SystemTime,
     pub model_name: String,
-    pub score: f32,
+    pub distance: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]

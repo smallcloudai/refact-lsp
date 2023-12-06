@@ -3,21 +3,18 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
 use arrow::compute::concat_batches;
 use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt64Array};
 use arrow_array::array::Array;
-use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array, AsArray};
+use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
 use arrow_array::types::{Float32Type, UInt64Type};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::TryStreamExt;
 use lance::dataset::{WriteMode, WriteParams};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tracing::Instrument;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
@@ -49,6 +46,18 @@ async fn table_record_batch(schema: &SchemaRef, table: &Table) -> RecordBatch {
         .await.unwrap();
     concat_batches(&schema, &batches).unwrap()
 }
+
+fn cosine_similarity(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
+    let dot_product: f32 = vec1.iter().zip(vec2).map(|(x, y)| x * y).sum();
+    let magnitude_vec1: f32 = vec1.iter().map(|x| x.powi(2)).sum::<f32>().sqrt();
+    let magnitude_vec2: f32 = vec2.iter().map(|x| x.powi(2)).sum::<f32>().sqrt();
+    dot_product / (magnitude_vec1 * magnitude_vec2)
+}
+
+fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
+    1.0 - cosine_similarity(vec1, vec2)
+}
+
 
 impl VecDBHandler {
     pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> VecDBHandler {
@@ -100,7 +109,7 @@ impl VecDBHandler {
             let mut emb_builder: Vec<f32> = vec![];
 
             for record in records {
-                emb_builder.append(&mut record.vector.clone());
+                emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
             }
 
             let emb_data = ArrayData::builder(DataType::Float32)
@@ -149,7 +158,7 @@ impl VecDBHandler {
             batches_iter, Option::from(WriteParams {
                 mode: WriteMode::Append,
                 ..Default::default()
-            })
+            }),
         );
         self.hashes_cache.extend(window_text_hashes);
         res.await
@@ -167,7 +176,7 @@ impl VecDBHandler {
 
     pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
         let query = self.table
-            .search(Float32Array::from(embedding))
+            .search(Float32Array::from(embedding.clone()))
             .limit(top_n)
             .use_index(true)
             .execute()
@@ -176,15 +185,18 @@ impl VecDBHandler {
             .await?;
         let record_batch = concat_batches(&self.schema, &query)?;
         let res: Result<Vec<Record>, _> = (0..record_batch.num_rows()).map(|idx| {
-            Ok(Record {
-                vector: as_primitive_array::<Float32Type>(
-                    &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
-                        .iter()
-                        .map(|x| x.unwrap())
-                        .collect::<Vec<_>>()[idx]
-                )
+            let gathered_vec = as_primitive_array::<Float32Type>(
+                &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
                     .iter()
-                    .map(|x| x.unwrap()).collect(),
+                    .map(|x| x.unwrap())
+                    .collect::<Vec<_>>()[idx]
+            )
+                .iter()
+                .map(|x| x.unwrap()).collect();
+            let distance = cosine_distance(&embedding, &gathered_vec);
+
+            Ok(Record {
+                vector: None,  // we don't really want to send it to the client
                 window_text: as_string_array(record_batch.column_by_name("window_text")
                     .expect("Missing column 'window_text'"))
                     .value(idx)
@@ -213,9 +225,10 @@ impl VecDBHandler {
                     .expect("Missing column 'model_name'"))
                     .value(idx)
                     .to_string(),
-                score: 1.0,  // TODO: investigate if we can really take this value from the vectordb
+                distance: distance,
             })
         }).collect();
+
         res
     }
 }
@@ -224,6 +237,7 @@ impl VecDBHandler {
 mod tests {
     use tempfile::tempdir;
     use tokio;
+    use std::time::SystemTime;
 
     use super::*;
 
@@ -251,7 +265,7 @@ mod tests {
         // Prepare a sample record
         let records = vec![
             Record {
-                vector: vec![1.0, 2.0], // Example values
+                vector: Some(vec![1.0, 2.0]), // Example values
                 window_text: "sample text".to_string(),
                 window_text_hash: "hash1".to_string(),
                 file_path: PathBuf::from("/path/to/file"),
@@ -259,7 +273,7 @@ mod tests {
                 end_line: 2,
                 time_added: SystemTime::now(),
                 model_name: "model1".to_string(),
-                score: 1.0,
+                distance: 1.0,
             },
         ];
 
@@ -284,7 +298,7 @@ mod tests {
         let time_added = SystemTime::now();
         let records = vec![
             Record {
-                vector: vec![1.0, 2.0, 3.0, 4.0],
+                vector: Some(vec![1.0, 2.0, 3.0, 4.0]),
                 window_text: "test text".to_string(),
                 window_text_hash: "hash2".to_string(),
                 file_path: PathBuf::from("/path/to/another/file"),
@@ -292,7 +306,7 @@ mod tests {
                 end_line: 4,
                 time_added: time_added,
                 model_name: "model2".to_string(),
-                score: 1.0,
+                distance: 1.0,
             },
         ];
         handler.add_or_update(records).await.unwrap();
@@ -307,6 +321,6 @@ mod tests {
         assert_eq!(results[0].start_line, 3);
         assert_eq!(results[0].end_line, 4);
         assert_eq!(results[0].model_name, "model2");
-        assert_eq!(results[0].score, 1.0);
+        assert_eq!(results[0].distance, 1.0);
     }
 }

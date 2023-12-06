@@ -18,8 +18,8 @@ pub async fn embed_vecdb_results<T>(
 ) where T: VecdbSearch {
     let my_vdb = vecdb_search.clone();
     let latest_msg_cont = &post.messages.last().unwrap().content;
-    let mut vecdb_locked = my_vdb.lock().await;
-    let vdb_resp = vecdb_locked.search(latest_msg_cont.clone()).await;
+    let vecdb_locked = my_vdb.lock().await;
+    let vdb_resp = vecdb_locked.search(latest_msg_cont.clone(), limit_examples_cnt).await;
     let vdb_cont = vecdb_resp_to_prompt(&vdb_resp, limit_examples_cnt);
     if vdb_cont.len() > 0 {
         post.messages = [
@@ -33,7 +33,7 @@ pub async fn embed_vecdb_results<T>(
     }
 }
 
-// FIXME: bad idea
+// FIXME: move it to scratchpads section
 fn vecdb_resp_to_prompt(
     resp: &Result<SearchResult, String>,
     limit_examples_cnt: usize,
@@ -70,15 +70,15 @@ impl VecdbSearch for VecDbRemote {
     async fn search(
         &self,
         query: String,
+        top_n: usize,
     ) -> Result<SearchResult, String> {
         let url = "http://127.0.0.1:8008/v1/vdb-search".to_string();
         let mut headers = HeaderMap::new();
         // headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", self.token)).unwrap());
         headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json").unwrap());
         let body = json!({
-            "texts": [query],
-            "account": "XXX",
-            "top_k": 3,
+            "text": query,
+            "top_n": top_n
         });
         let res = reqwest::Client::new()
             .post(&url)
