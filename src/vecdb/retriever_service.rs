@@ -20,6 +20,7 @@ pub struct RetrieverService {
     status: VecDbStatusRef,
     cooldown_secs: u64,
     splitter_window_size: usize,
+    splitter_soft_limit: usize,
     embedding_model_name: String,
     api_key: String,
 }
@@ -32,7 +33,7 @@ async fn cooldown_queue_thread(
 ) {
     let mut last_updated: HashMap<PathBuf, SystemTime> = HashMap::new();
     loop {
-        let (path_maybe, unprocessed_chunk_count) = {
+        let (path_maybe, unprocessed_files_count) = {
             let mut queue_locked = update_request_queue.lock().await;
             if !queue_locked.is_empty() {
                 (Some(queue_locked.pop_front().unwrap()), queue_locked.len())
@@ -40,7 +41,7 @@ async fn cooldown_queue_thread(
                 (None, 0)
             }
         };
-        status.lock().await.unprocessed_chunk_count = unprocessed_chunk_count;
+        status.lock().await.unprocessed_files_count = unprocessed_files_count;
 
         if let Some(path) = path_maybe {
             last_updated.insert(path, SystemTime::now());
@@ -66,10 +67,11 @@ async fn retrieve_thread(
     vecdb_handler_ref: VecDBHandlerRef,
     status: VecDbStatusRef,
     splitter_window_size: usize,
+    splitter_soft_limit: usize,
     embedding_model_name: String,
     api_key: String,
 ) {
-    let file_splitter = FileSplitter::new(splitter_window_size);
+    let file_splitter = FileSplitter::new(splitter_window_size, splitter_soft_limit);
 
     loop {
         let path = {
@@ -85,7 +87,7 @@ async fn retrieve_thread(
 
         let splat_data = match file_splitter.split(&path).await {
             Ok(data) => data,
-            Err(e) => { continue }
+            Err(_) => { continue }
         };
         let vecdb_handler = vecdb_handler_ref.lock().await;
         let splat_data_filtered: Vec<SplitResult> = splat_data
@@ -99,6 +101,7 @@ async fn retrieve_thread(
         let join_handles: Vec<_> = splat_data_filtered.iter().map(
             |x| get_embedding(x.window_text.clone(), &embedding_model_name, api_key.clone())
         ).collect();
+        status.lock().await.requests_made_since_start += join_handles.len();
 
         let mut splat_join_data: VecDeque<(SplitResult, JoinHandle<Result<Vec<f32>, String>>)>
             = splat_data_filtered.into_iter()
@@ -111,7 +114,7 @@ async fn retrieve_thread(
                 Ok(Ok(result)) => {
                     records.push(
                         Record {
-                            vector: result,
+                            vector: Some(result),
                             window_text: data_res.window_text,
                             window_text_hash: data_res.window_text_hash,
                             file_path: data_res.file_path,
@@ -119,14 +122,14 @@ async fn retrieve_thread(
                             end_line: data_res.end_line,
                             time_added: SystemTime::now(),
                             model_name: embedding_model_name.clone(),
-                            score: 1.0,
+                            distance: -1.0,
                         }
                     );
                 }
                 Ok(Err(e)) => {
                     info!("Error retrieving embeddings for {}: {}", data_res.window_text, e);
                 }
-                Err(e) => { continue; }
+                Err(_) => { continue; }
             }
         }
         match vecdb_handler_ref.lock().await.add_or_update(records).await {
@@ -143,6 +146,7 @@ impl RetrieverService {
         vecdb_handler: VecDBHandlerRef,
         cooldown_secs: u64,
         splitter_window_size: usize,
+        splitter_soft_limit: usize,
         embedding_model_name: String,
         api_key: String,
     ) -> Self {
@@ -151,10 +155,8 @@ impl RetrieverService {
         let status = Arc::new(Mutex::new(
             VecDbStatus {
                 unprocessed_files_count: 0,
-                unprocessed_chunk_count: 0,
-                requests_count: 0,
+                requests_made_since_start: 0,
                 db_size: 0,
-                db_last_time_updated: SystemTime::now(),
             }
         ));
         RetrieverService {
@@ -164,6 +166,7 @@ impl RetrieverService {
             status: status.clone(),
             cooldown_secs,
             splitter_window_size,
+            splitter_soft_limit,
             embedding_model_name,
             api_key,
         }
@@ -185,6 +188,7 @@ impl RetrieverService {
                 self.vecdb_handler.clone(),
                 self.status.clone(),
                 self.splitter_window_size,
+                self.splitter_soft_limit,
                 self.embedding_model_name.clone(),
                 self.api_key.clone(),
             )
@@ -210,6 +214,8 @@ impl RetrieverService {
     }
 
     pub async fn status(&self) -> VecDbStatus {
-        self.status.lock().await.clone()
+        let mut status = self.status.lock().await.clone();
+        status.db_size = self.vecdb_handler.lock().await.size().await;
+        status
     }
 }

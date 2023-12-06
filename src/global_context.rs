@@ -169,8 +169,8 @@ pub async fn create_global_context(
         telemetry: Arc::new(StdRwLock::new(telemetry_structs::Storage::new())),
         vec_db: Arc::new(AMutex::new(Box::new(VecDb::new(
             cache_dir, cmdline.clone(),
-            384, 60, 50,
-            "BAAI/bge-small-en-v1.5".to_string(), 20
+            384, 60, 512, 1024,
+            "BAAI/bge-small-en-v1.5".to_string()
         ).await))),
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
     };

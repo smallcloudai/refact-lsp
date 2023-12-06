@@ -15,7 +15,6 @@ pub struct VecDb {
     vecdb_handler: VecDBHandlerRef,
     retriever_service: Arc<Mutex<RetrieverService>>,
     embedding_model_name: String,
-    top_n: usize,
     cmdline: crate::global_context::CommandLine,
 }
 
@@ -27,14 +26,14 @@ impl VecDb {
         embedding_size: i32,
         cooldown_secs: u64,
         splitter_window_size: usize,
+        splitter_soft_limit: usize,
         embedding_model_name: String,
-        top_n: usize,
     ) -> Self {
         let vecdb_handler = Arc::new(Mutex::new(VecDBHandler::init(
             cache_dir, embedding_size,
         ).await));
         let retriever_service = Arc::new(Mutex::new(RetrieverService::new(
-            vecdb_handler.clone(), cooldown_secs, splitter_window_size,
+            vecdb_handler.clone(), cooldown_secs, splitter_window_size, splitter_soft_limit,
             embedding_model_name.clone(), cmdline.api_key.clone(),
         ).await));
 
@@ -42,7 +41,6 @@ impl VecDb {
             vecdb_handler,
             retriever_service,
             embedding_model_name,
-            top_n,
             cmdline,
         }
     }
@@ -71,14 +69,14 @@ impl VecDb {
 
 #[async_trait]
 impl VecdbSearch for VecDb {
-    async fn search(&self, query: String) -> Result<SearchResult, String> {
+    async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let embedding = get_embedding(
             query.clone(), &self.embedding_model_name, self.cmdline.api_key.clone(),
         ).await.unwrap();
         match embedding {
             Ok(vector) => {
                 let binding = self.vecdb_handler.lock().await;
-                let results = binding.search(vector, self.top_n);
+                let results = binding.search(vector, top_n);
                 Ok(
                     SearchResult {
                         query_text: query,
