@@ -1,9 +1,8 @@
 use std::time::Duration;
 use reqwest;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::info;
 
 #[derive(Serialize)]
 struct Payload {
@@ -34,7 +33,6 @@ pub fn get_embedding(
     let client = reqwest::Client::new();
     let payload = Payload { inputs: text };
 
-
     tokio::spawn(async move {
         let mut attempts = 0;
         let max_attempts = 3;
@@ -42,7 +40,7 @@ pub fn get_embedding(
 
         while attempts < max_attempts {
             let maybe_response = client.post(&url)
-                .bearer_auth("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".clone())
+                .bearer_auth(api_key.clone())
                 .json(&payload)
                 .send()
                 .await;

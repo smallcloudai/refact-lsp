@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
@@ -12,7 +10,8 @@ use crate::vecdb::structs::VecdbSearch;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct VecDBPost {
-    query: String
+    query: String,
+    top_n: usize
 }
 
 pub async fn handle_v1_vecdb_search(
@@ -25,7 +24,7 @@ pub async fn handle_v1_vecdb_search(
 
     let cx_locked = global_context.read().await;
     let vecdb = cx_locked.vec_db.clone();
-    let res = vecdb.lock().await.search(post.query.to_string()).await;
+    let res = vecdb.lock().await.search(post.query.to_string(), post.top_n).await;
 
     match res {
         Ok(search_res) => {
