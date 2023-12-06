@@ -11,7 +11,7 @@ use crate::vecdb::structs::VecdbSearch;
 #[derive(Serialize, Deserialize, Clone)]
 struct VecDBPost {
     query: String,
-    top_n: usize
+    top_n: usize,
 }
 
 pub async fn handle_v1_vecdb_search(
@@ -37,4 +37,18 @@ pub async fn handle_v1_vecdb_search(
             Err(ScratchError::new(StatusCode::BAD_REQUEST, e))
         }
     }
+}
+
+pub async fn handle_v1_vecdb_status(
+    Extension(global_context): Extension<SharedGlobalContext>,
+    _: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let cx_locked = global_context.read().await;
+    let vecdb = cx_locked.vec_db.clone();
+    let res = vecdb.lock().await.get_status().await;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(json!(res).to_string()))
+        .unwrap())
 }
