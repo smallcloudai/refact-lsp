@@ -23,9 +23,8 @@
           console.log("Submitting form");
           const formData = new FormData(event.target);
           const data = Object.fromEntries(formData.entries());
-          console.log({data, top});
-
-          top.postMessage({type: "user_submit_name", ...data}, location.origin)
+          console.log({data});
+          window.parent.postMessage({type: "user_submit_name", ...data}, "*")
        }
 
     }())
