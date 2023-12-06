@@ -1,0 +1,18 @@
+<html>
+   <body>
+     <iframe id="chat" src="/webgui/chat.html"></iframe>
+     <script>
+       (function(){
+         const iframe = document.getElementById("chat")
+         window.addEventListener("message", (event) => {
+              if(event.data.type === "user_submit_name") {
+                 iframe.contentWindow.postMessage({
+                    type:"update_name",
+                    name: event.data.name
+                 }, location.origin)
+              }
+         }, false)
+       })()
+     </script>
+   </body>
+</html>

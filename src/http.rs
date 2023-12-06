@@ -1,4 +1,11 @@
-use axum::{Extension, http::{StatusCode, Uri}, response::IntoResponse, Router};
+use axum::{
+    Extension,
+    http::{StatusCode, Uri},
+    response::{ IntoResponse, Html },
+    Router,
+    routing::get
+};
+use tower_http::services::{ServeDir, ServeFile};
 use tokio::signal;
 use tracing::info;
 
@@ -18,11 +25,12 @@ async fn handler_404(path: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, format!("no handler for {}", path))
 }
 
-
 pub fn make_refact_http_server() -> Router {
     Router::new()
         .fallback(handler_404)
         .nest("/v1", make_v1_router())
+        .route_service("/", ServeFile::new("webgui/index.html"))
+        .nest_service("/webgui", ServeDir::new("webgui"))
 }
 
 

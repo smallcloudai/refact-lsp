@@ -1,0 +1,36 @@
+<html>
+  <body>
+    <span>Hello, <span id="name">World</span></span>
+    <form id="greeting" action="#">
+           <input name="name" id="name_input" value="" />
+           <button type="submit">submit</button>
+    </form>
+  </body>
+  <script>
+    (function() {
+       window.addEventListener("message", (event) => {
+        console.log("chat recieved");
+        console.log({event});
+           if(event.data.type === "update_name") {
+                const greeting = document.getElementById("name");
+                greeting.textContent = event.data.name;
+           }
+       }, false);
+
+       const form = document.getElementById("greeting");
+       form.onsubmit = (event) => {
+          event.preventDefault();
+          console.log("Submitting form");
+          const formData = new FormData(event.target);
+          const data = Object.fromEntries(formData.entries());
+          console.log({data, top});
+
+          top.postMessage({type: "user_submit_name", ...data}, location.origin)
+       }
+
+
+      // event handler for updating the name. through the message system via window.postMessage.
+
+    }())
+  </script>
+</html>
