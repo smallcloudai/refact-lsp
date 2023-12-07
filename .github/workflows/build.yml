@@ -89,10 +89,6 @@ jobs:
         if: matrix.target == 'arm-unknown-linux-gnueabihf'
         run: sudo apt-get install gcc-multilib-arm-linux-gnueabihf
 
-      - name: Install toolchain dependencies (Ubuntu)
-        if: startsWith(matrix.os, 'ubuntu')
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
       - name: Install toolchain dependencies (MacOS)
         if: startsWith(matrix.os, 'macos')
         run: brew install protobuf
