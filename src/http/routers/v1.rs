@@ -29,6 +29,8 @@ pub mod caps;
 pub mod graceful_shutdown;
 pub mod vecdb;
 mod lsp_like_handlers;
+pub mod lsp;
+pub mod lsp_handlers;
 
 pub fn make_v1_router() -> Router {
     Router::new()
@@ -40,6 +42,10 @@ pub fn make_v1_router() -> Router {
         .route("/caps", telemetry_get!(handle_v1_caps))
         .route("/graceful-shutdown", telemetry_get!(handle_v1_graceful_shutdown))
 
+        .route("/vdb-search", telemetry_get!(handle_v1_vecdb_search))
+        .route("/vdb-status", telemetry_get!(handle_v1_vecdb_status))
+
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
-        .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
+        .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_changed))
 }
+
