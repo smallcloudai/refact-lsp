@@ -67,7 +67,7 @@ jobs:
         if: matrix.container == 'ubuntu:18.04'
         shell: bash
         run: |
-          apt-get update && apt-get install -y build-essential curl libssl-dev pkg-config
+          apt-get update && apt-get install -y build-essential curl libssl-dev pkg-config protobuf-compiler
           curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --profile minimal --default-toolchain none -y
           echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
 
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++
+        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ protobuf-compiler
 
       - name: Checkout repository
         uses: actions/checkout@v3
