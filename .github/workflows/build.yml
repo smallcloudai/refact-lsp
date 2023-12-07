@@ -87,7 +87,7 @@ jobs:
 
       - name: Install ARM target toolchain
         if: matrix.target == 'arm-unknown-linux-gnueabihf'
-        run: sudo apt-get install gcc-multilib-arm-linux-gnueabihf
+        run: sudo apt-get install gcc-multilib-arm-linux-gnueabihf protobuf-compiler
 
       - name: Install toolchain dependencies (MacOS)
         if: startsWith(matrix.os, 'macos')
