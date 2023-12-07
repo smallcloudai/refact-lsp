@@ -5,3 +5,4 @@ pub mod snippet_accepted;
 pub mod caps;
 pub mod graceful_shutdown;
 pub mod vecdb;
+pub mod lsp_handlers;
