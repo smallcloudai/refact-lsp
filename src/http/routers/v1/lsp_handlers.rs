@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::SharedGlobalContext;
-use crate::vecdb::file_filter::is_valid_file;
+use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct PostInit {
@@ -31,20 +31,12 @@ pub async fn handle_v1_lsp_initialize(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    let files: Vec<PathBuf> = post.project_roots
-        .iter()
-        .map( |f| {
-            return WalkDir::new(Path::new(f.path()))
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| !e.path().is_dir())
-                .filter(|e| is_valid_file(&e.path().to_path_buf()))
-                .map(|e| e.path().to_path_buf())
-                .collect::<Vec<PathBuf>>();
-        })
-        .flatten()
-        .collect();
-    global_context.read().await.vec_db.lock().await.add_or_update_files(files, true).await;
+    let files = retrieve_files_by_proj_folders(
+        post.project_roots.iter().map(|x| PathBuf::from(x.path())).collect()
+    ).await;
+    global_context.read().await.vec_db.lock().await.add_or_update_files(
+        files, true
+    ).await;
 
     // Real work here
     Ok(Response::builder()
