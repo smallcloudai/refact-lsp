@@ -19,9 +19,8 @@ use crate::{global_context};
 use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
 use crate::telemetry;
-use crate::vecdb::file_filter::is_valid_file;
+use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
 use crate::receive_workspace_changes;
-
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -186,19 +185,9 @@ impl LanguageServer for Backend {
         let maybe_folders = self.workspace_folders.read().await.clone();
 
         if let Some(folders) = maybe_folders {
-            let files: Vec<PathBuf> = folders
-                .iter()
-                .map( |f| {
-                    return WalkDir::new(Path::new(f.uri.path()))
-                        .into_iter()
-                        .filter_map(|e| e.ok())
-                        .filter(|e| !e.path().is_dir())
-                        .filter(|e| is_valid_file(&e.path().to_path_buf()))
-                        .map(|e| e.path().to_path_buf())
-                        .collect::<Vec<PathBuf>>();
-                })
-                .flatten()
-                .collect();
+            let files = retrieve_files_by_proj_folders(
+                folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
+            ).await;
             self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, true).await;
         }
 

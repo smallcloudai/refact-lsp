@@ -2,7 +2,12 @@ use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
-const LARGE_FILE_SIZE_THRESHOLD: u64 = 1_000_000;  // 1 MB
+use async_process::Command;
+use walkdir::WalkDir;
+use which::which;
+
+const LARGE_FILE_SIZE_THRESHOLD: u64 = 1_000_000;
+// 1 MB
 const SMALL_FILE_SIZE_THRESHOLD: u64 = 10;  // 10 Bytes
 
 const SOURCE_FILE_EXTENSIONS: &[&str] = &[
@@ -73,3 +78,55 @@ pub fn is_valid_file(path: &PathBuf) -> bool {
     true
 }
 
+pub async fn get_control_version_files(path: &PathBuf) -> Option<Vec<PathBuf>> {
+    if path.join(".git").exists() && which("git").is_ok() {
+        // Git repository
+        run_command("git", &["ls-files"], path).await
+    } else if path.join(".hg").exists() && which("hg").is_ok() {
+        // Mercurial repository
+        run_command("hg", &["status", "-c"], path).await
+    } else if path.join(".svn").exists() && which("svn").is_ok() {
+        // SVN repository
+        run_command("svn", &["list", "-R"], path).await
+    } else {
+        None
+    }
+}
+
+async fn run_command(cmd: &str, args: &[&str], path: &PathBuf) -> Option<Vec<PathBuf>> {
+    let output = Command::new(cmd)
+        .args(args)
+        .current_dir(path)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|s| s.lines().map(|line| path.join(line)).collect())
+}
+
+
+pub async fn retrieve_files_by_proj_folders(proj_folders: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut all_files: Vec<PathBuf> = Vec::new();
+    for proj_folder in proj_folders {
+        let maybe_files = get_control_version_files(&proj_folder).await;
+        if let Some(files) = maybe_files {
+            all_files.extend(files);
+        } else {
+            let files: Vec<PathBuf> = WalkDir::new(proj_folder)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| !e.path().is_dir())
+                .filter(|e| is_valid_file(&e.path().to_path_buf()))
+                .map(|e| e.path().to_path_buf())
+                .collect::<Vec<PathBuf>>();
+            all_files.extend(files);
+        }
+    }
+    all_files
+}
