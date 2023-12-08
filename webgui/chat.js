@@ -1,5 +1,5 @@
 (function() {
-    const vscode = acquireVsCodeApi ? acquireVsCodeApi() : null
+    const vscode = window.acquireVsCodeApi ? window.acquireVsCodeApi() : null
 
     function postMessage({type, ...data}) {
         console.log("postMessage called")
