@@ -41,7 +41,6 @@ async fn cooldown_queue_thread(
                 (None, 0)
             }
         };
-        status.lock().await.unprocessed_files_count = unprocessed_files_count;
 
         if let Some(path) = path_maybe {
             last_updated.insert(path, SystemTime::now());
@@ -74,8 +73,17 @@ async fn retrieve_thread(
     let file_splitter = FileSplitter::new(splitter_window_size, splitter_soft_limit);
 
     loop {
+        let (path_maybe, unprocessed_files_count) = {
+            let mut queue_locked = queue.lock().await;
+            if !queue_locked.is_empty() {
+                (Some(queue_locked.pop_front().unwrap()), queue_locked.len())
+            } else {
+                (None, 0)
+            }
+        };
+        status.lock().await.unprocessed_files_count = unprocessed_files_count;
         let path = {
-            match queue.lock().await.pop_front() {
+            match path_maybe {
                 Some(path) => path,
                 None => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
