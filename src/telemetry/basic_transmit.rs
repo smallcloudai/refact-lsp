@@ -138,7 +138,8 @@ pub async fn telemetry_background_task(
     global_context: Arc<ARwLock<global_context::GlobalContext>>,
 ) -> () {
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await; // workaround waiting for caps to load
         telemetry_full_cycle(global_context.clone(), false).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS)).await;
     }
 }
