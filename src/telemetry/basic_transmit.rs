@@ -15,7 +15,7 @@ use crate::telemetry::basic_comp_counters;
 use crate::telemetry::utils::{sorted_json_files, read_file, cleanup_old_files, telemetry_storage_dirs};
 
 
-const TELEMETRY_TRANSMIT_EACH_N_SECONDS: u64 = 3600;
+const TELEMETRY_TRANSMIT_EACH_N_SECONDS: u64 = 3600*3;
 const TELEMETRY_FILES_KEEP: i32 = 30;
 
 
@@ -67,7 +67,7 @@ pub async fn send_telemetry_files_to_mothership(
         let path_str = path.to_str().unwrap();
         if path_str.ends_with("-net.json") || path_str.ends_with("-rh.json") || path_str.ends_with("-comp.json") {
             info!("sending telemetry file\n{}\nto url\n{}", path.to_str().unwrap(), telemetry_basic_dest);
-            let resp = send_telemetry_data(contents, &telemetry_basic_dest, 
+            let resp = send_telemetry_data(contents, &telemetry_basic_dest,
                                            &api_key, gcx.clone()).await;
             if resp.is_err() {
                 error!("telemetry send failed: {}", resp.err().unwrap());
