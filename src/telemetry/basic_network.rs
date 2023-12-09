@@ -56,9 +56,6 @@ pub async fn compress_basic_telemetry_to_file(
     let (dir, _) = telemetry_storage_dirs(&cache_dir).await;
 
     let records = compress_telemetry_network(storage.clone());
-    if records.as_array().unwrap().is_empty() {
-        return;
-    }
     let fn_net = dir.join(format!("{}-net.json", now.format("%Y%m%d-%H%M%S")));
     let mut big_json_net = json!({
         "records": records,
@@ -71,6 +68,9 @@ pub async fn compress_basic_telemetry_to_file(
         storage_locked.tele_net.clear();
         big_json_net.as_object_mut().unwrap().insert("ts_start".to_string(), json!(storage_locked.last_flushed_ts));
         storage_locked.last_flushed_ts = now.timestamp();
+    }
+    if records.as_array().unwrap().is_empty() {
+        return;
     }
     // even if there's an error with i/o, storage is now clear, preventing infinite memory growth
     info!("basic telemetry save \"{}\"", fn_net.to_str().unwrap());
