@@ -56,6 +56,9 @@ pub async fn compress_basic_telemetry_to_file(
     let (dir, _) = telemetry_storage_dirs(&cache_dir).await;
 
     let records = compress_telemetry_network(storage.clone());
+    if records.as_array().unwrap().is_empty() {
+        return;
+    }
     let fn_net = dir.join(format!("{}-net.json", now.format("%Y%m%d-%H%M%S")));
     let mut big_json_net = json!({
         "records": records,
