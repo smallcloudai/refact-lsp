@@ -104,7 +104,7 @@ jobs:
           tar -xvzf protobuf-all-3.6.1.tar.gz
           cd protobuf-3.6.1/
           ./configure
-          make && sudo make install && sudo ldconfig
+          make && make install && ldconfig
 
       - name: Build artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -145,7 +145,7 @@ jobs:
           tar -xvzf protobuf-all-3.6.1.tar.gz
           cd protobuf-3.6.1/
           ./configure
-          make && sudo make install && sudo ldconfig
+          make && make install && ldconfig
 
       - name: Checkout repository
         uses: actions/checkout@v3
