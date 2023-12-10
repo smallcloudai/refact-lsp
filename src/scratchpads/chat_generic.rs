@@ -11,6 +11,7 @@ use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
+use crate::scratchpads::chat_utils_rag::embed_vecdb_results;
 use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = true;
@@ -83,7 +84,7 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<T> {
         context_size: usize,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        // embed_vecdb_results(self.vecdb_search.clone(), &mut self.post, 3).await;
+        embed_vecdb_results(self.vecdb_search.clone(), &mut self.post, 6).await;
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &self.post, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = Some(self.dd.stop_list.clone());
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
