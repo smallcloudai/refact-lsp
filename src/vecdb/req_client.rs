@@ -40,7 +40,7 @@ pub fn get_embedding(
 
         while attempts < max_attempts {
             let maybe_response = client.post(&url)
-                .bearer_auth(api_key.clone())
+                .bearer_auth("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".clone())
                 .json(&payload)
                 .send()
                 .await;

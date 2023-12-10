@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,25 +14,29 @@ use arrow_array::types::{Float32Type, UInt64Type};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::TryStreamExt;
 use lance::dataset::{WriteMode, WriteParams};
+use tempfile::{tempdir, TempDir};
 use tokio::sync::Mutex;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
-use crate::vecdb::structs::Record;
+use crate::vecdb::structs::{Record, SplitResult};
 
 pub type VecDBHandlerRef = Arc<Mutex<VecDBHandler>>;
 
 impl Debug for VecDBHandler {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "VecDBHandler: {:?}", self.database.type_id())
+        write!(f, "VecDBHandler: {:?}", self.cache_database.type_id())
     }
 }
 
 pub struct VecDBHandler {
-    database: Database,
-    table: Table,
+    cache_database: Database,
+    data_database_temp_dir: TempDir,
+    cache_table: Table,
+    data_table: Table,
     schema: SchemaRef,
-    hashes_cache: HashSet<String>,
+    data_table_hashes: HashSet<String>,
+    hashes_cache: HashMap<String, Record>,
     embedding_size: i32,
 }
 
@@ -61,7 +65,9 @@ fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
 
 impl VecDBHandler {
     pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> VecDBHandler {
-        let database = Database::connect(cache_dir.join("vecdb").to_str().unwrap()).await.unwrap();
+        let cache_database = Database::connect(cache_dir.join("refact_vecdb_cache").to_str().unwrap()).await.unwrap();
+        let data_database_temp_dir = tempdir().unwrap();
+        let temp_database = Database::connect(data_database_temp_dir.path().to_str().unwrap()).await.unwrap();
         let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
         let schema = Arc::new(Schema::new(vec![
             Field::new("vector", DataType::FixedSizeList(vec_trait, embedding_size), true),
@@ -73,37 +79,59 @@ impl VecDBHandler {
             Field::new("time_added", DataType::UInt64, true),
             Field::new("model_name", DataType::Utf8, true),
         ]));
-        let table = match database.open_table("data").await {
+        let cache_table = match cache_database.open_table("data").await {
             Ok(table) => { table }
-            Err(_) => {
+            Err(e) => {
                 let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-                database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap()
+                cache_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap()
             }
         };
+        let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
+        let data_table = temp_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap();
 
-        let hashes_cache: Vec<String> = table_record_batch(&schema, &table).await
-            .column_by_name("window_text_hash")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("ArrayRef must be a StringArray")
-            .iter()
-            .map(|maybe_string| maybe_string.map_or_else(String::new, |str_val| str_val.to_string()))
-            .collect();
+        let hashes_record_batch = table_record_batch(&schema, &cache_table).await;
+        let maybe_hashes_cache_iter = VecDBHandler::parse_table_iter(hashes_record_batch, true, None);
+        let hashes_cache: HashMap<String, Record> = match maybe_hashes_cache_iter {
+            Ok(hashes_cache_iter) => {
+                hashes_cache_iter.iter().map(|x| {
+                    (x.window_text_hash.clone(), x.clone())
+                }).collect()
+            }
+            Err(_) => HashMap::new()
+        };
+
         VecDBHandler {
-            database,
+            cache_database,
+            data_database_temp_dir,
             schema,
-            table,
-            hashes_cache: HashSet::from_iter(hashes_cache),
+            cache_table,
+            data_table,
+            data_table_hashes: HashSet::new(),
+            hashes_cache,
             embedding_size,
         }
     }
 
-    pub async fn size(&self) -> usize {
-        self.table.count_rows().await.unwrap()
+    pub async fn size(&self) -> usize { self.data_table.count_rows().await.unwrap() }
+
+    pub async fn cache_size(&self) -> usize { self.cache_table.count_rows().await.unwrap() }
+
+    pub async fn try_add_from_cache(&mut self, data: Vec<SplitResult>) -> Vec<SplitResult> {
+        let mut found_records: Vec<Record> = Vec::new();
+        let mut left_results: Vec<SplitResult> = Vec::new();
+
+        for split_result in data {
+            if self.hashes_cache.contains_key(&split_result.window_text_hash) {
+                found_records.push(self.hashes_cache.get(&split_result.window_text_hash).unwrap().clone());
+            } else {
+                left_results.push(split_result);
+            }
+        }
+        self.add_or_update(found_records, false).await.unwrap();
+        left_results
     }
 
-    pub async fn add_or_update(&mut self, records: Vec<Record>) -> vectordb::error::Result<()> {
+    pub async fn add_or_update(&mut self, records: Vec<Record>, add_to_cache: bool) -> vectordb::error::Result<()> {
         fn make_emb_data(records: &Vec<Record>, embedding_size: i32) -> ArrayData {
             let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
             let mut emb_builder: Vec<f32> = vec![];
@@ -137,7 +165,23 @@ impl VecDBHandler {
         let end_lines: Vec<u64> = records.iter().map(|x| x.end_line).collect();
         let time_adds: Vec<u64> = records.iter().map(|x| x.time_added.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).collect();
         let model_names: Vec<String> = records.iter().map(|x| x.model_name.clone()).collect();
-        let batches_iter = RecordBatchIterator::new(
+        let data_batches_iter = RecordBatchIterator::new(
+            vec![RecordBatch::try_new(
+                self.schema.clone(),
+                vec![
+                    Arc::new(FixedSizeListArray::from(vectors.clone())),
+                    Arc::new(StringArray::from(window_texts.clone())),
+                    Arc::new(StringArray::from(window_text_hashes.clone())),
+                    Arc::new(StringArray::from(file_paths.clone())),
+                    Arc::new(UInt64Array::from(start_lines.clone())),
+                    Arc::new(UInt64Array::from(end_lines.clone())),
+                    Arc::new(UInt64Array::from(time_adds.clone())),
+                    Arc::new(StringArray::from(model_names.clone())),
+                ],
+            )],
+            self.schema.clone(),
+        );
+        let cache_batches_iter = RecordBatchIterator::new(
             vec![RecordBatch::try_new(
                 self.schema.clone(),
                 vec![
@@ -154,37 +198,48 @@ impl VecDBHandler {
             self.schema.clone(),
         );
 
-        let res = self.table.add(
-            batches_iter, Option::from(WriteParams {
+        let data_res = self.data_table.add(
+            data_batches_iter, Option::from(WriteParams {
                 mode: WriteMode::Append,
                 ..Default::default()
             }),
         );
-        self.hashes_cache.extend(window_text_hashes);
-        res.await
+
+        let cache_res = self.cache_table.add(
+            cache_batches_iter, Option::from(WriteParams {
+                mode: WriteMode::Append,
+                ..Default::default()
+            }),
+        );
+        if add_to_cache {
+            self.hashes_cache.extend(
+                records.iter().map(|x| (x.window_text_hash.clone(), x.clone())).collect::<Vec<_>>()
+            );
+            cache_res.await.unwrap();
+        }
+        self.data_table_hashes.extend(window_text_hashes);
+        data_res.await
     }
 
     pub async fn remove(&mut self, file_path: &PathBuf) {
-        self.table.delete(
+        self.cache_table.delete(
+            format!("(file_path = {})", file_path.to_str().unwrap()).as_str()
+        ).await.unwrap();
+        self.data_table.delete(
             format!("(file_path = {})", file_path.to_str().unwrap()).as_str()
         ).await.unwrap();
     }
 
     pub fn contains(&self, hash: &str) -> bool {
-        self.hashes_cache.contains(hash)
+        self.data_table_hashes.contains(hash)
     }
 
-    pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
-        let query = self.table
-            .search(Float32Array::from(embedding.clone()))
-            .limit(top_n)
-            .use_index(true)
-            .execute()
-            .await?
-            .try_collect::<Vec<_>>()
-            .await?;
-        let record_batch = concat_batches(&self.schema, &query)?;
-        let res: Result<Vec<Record>, _> = (0..record_batch.num_rows()).map(|idx| {
+    fn parse_table_iter(
+        record_batch: RecordBatch,
+        include_embedding: bool,
+        embedding_to_compare: Option<&Vec<f32>>,
+    ) -> vectordb::error::Result<Vec<Record>> {
+        (0..record_batch.num_rows()).map(|idx| {
             let gathered_vec = as_primitive_array::<Float32Type>(
                 &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
                     .iter()
@@ -193,10 +248,17 @@ impl VecDBHandler {
             )
                 .iter()
                 .map(|x| x.unwrap()).collect();
-            let distance = cosine_distance(&embedding, &gathered_vec);
+            let distance = match embedding_to_compare {
+                None => { -1.0 }
+                Some(embedding) => { cosine_distance(&embedding, &gathered_vec) }
+            };
+            let embedding = match include_embedding {
+                true => Some(gathered_vec),
+                false => None
+            };
 
             Ok(Record {
-                vector: None,  // we don't really want to send it to the client
+                vector: embedding,
                 window_text: as_string_array(record_batch.column_by_name("window_text")
                     .expect("Missing column 'window_text'"))
                     .value(idx)
@@ -225,19 +287,31 @@ impl VecDBHandler {
                     .expect("Missing column 'model_name'"))
                     .value(idx)
                     .to_string(),
-                distance: distance,
+                distance,
             })
-        }).collect();
+        }).collect()
+    }
 
-        res
+    pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
+        let query = self.data_table
+            .search(Float32Array::from(embedding.clone()))
+            .limit(top_n)
+            .use_index(true)
+            .execute()
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        let record_batch = concat_batches(&self.schema, &query)?;
+        VecDBHandler::parse_table_iter(record_batch, false, Some(&embedding))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use tempfile::tempdir;
     use tokio;
-    use std::time::SystemTime;
 
     use super::*;
 
@@ -278,7 +352,7 @@ mod tests {
         ];
 
         // Call add_or_update
-        handler.add_or_update(records).await.unwrap();
+        handler.add_or_update(records, true).await.unwrap();
 
         // Validate the records
         assert_eq!(handler.size().await, expected_size);
@@ -294,7 +368,6 @@ mod tests {
         ).await;
         let top_n = 1;
 
-        // Add a record to the database
         let time_added = SystemTime::now();
         let records = vec![
             Record {
@@ -309,7 +382,7 @@ mod tests {
                 distance: 1.0,
             },
         ];
-        handler.add_or_update(records).await.unwrap();
+        handler.add_or_update(records, true).await.unwrap();
 
         let query_embedding = vec![1.0, 2.0, 3.0, 4.0];
         let results = handler.search(query_embedding, top_n).await.unwrap();

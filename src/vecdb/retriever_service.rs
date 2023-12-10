@@ -97,12 +97,14 @@ async fn retrieve_thread(
             Ok(data) => data,
             Err(_) => { continue }
         };
-        let vecdb_handler = vecdb_handler_ref.lock().await;
-        let splat_data_filtered: Vec<SplitResult> = splat_data
+
+        let mut vecdb_handler = vecdb_handler_ref.lock().await;
+        let mut splat_data_filtered: Vec<SplitResult> = splat_data
             .iter()
             .filter(|x| !vecdb_handler.contains(&x.window_text_hash))
             .cloned() // Clone to avoid borrowing issues
             .collect();
+        splat_data_filtered = vecdb_handler.try_add_from_cache(splat_data_filtered).await;
         drop(vecdb_handler);
         info!("Retrieving embeddings for {} chunks", splat_data_filtered.len());
 
@@ -140,7 +142,7 @@ async fn retrieve_thread(
                 Err(_) => { continue; }
             }
         }
-        match vecdb_handler_ref.lock().await.add_or_update(records).await {
+        match vecdb_handler_ref.lock().await.add_or_update(records, true).await {
             Err(e) => {
                 info!("Error adding/updating records in VecDB: {}", e);
             }
@@ -165,6 +167,7 @@ impl RetrieverService {
                 unprocessed_files_count: 0,
                 requests_made_since_start: 0,
                 db_size: 0,
+                db_cache_size: 0,
             }
         ));
         RetrieverService {
@@ -224,6 +227,7 @@ impl RetrieverService {
     pub async fn status(&self) -> VecDbStatus {
         let mut status = self.status.lock().await.clone();
         status.db_size = self.vecdb_handler.lock().await.size().await;
+        status.db_cache_size = self.vecdb_handler.lock().await.cache_size().await;
         status
     }
 }
