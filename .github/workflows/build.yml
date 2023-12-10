@@ -137,7 +137,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++
+        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ make
 
       - name: Build and install protobuf library
         run: |
