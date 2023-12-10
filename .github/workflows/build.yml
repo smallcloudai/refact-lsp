@@ -87,7 +87,7 @@ jobs:
 
       - name: Install ARM target toolchain
         if: matrix.target == 'arm-unknown-linux-gnueabihf'
-        run: sudo apt-get install gcc-multilib-arm-linux-gnueabihf protobuf-compiler
+        run: sudo apt-get install gcc-multilib-arm-linux-gnueabihf
 
       - name: Install toolchain dependencies (MacOS)
         if: startsWith(matrix.os, 'macos')
@@ -104,7 +104,7 @@ jobs:
           tar -xvzf protobuf-all-3.6.1.tar.gz
           cd protobuf-3.6.1/
           ./configure
-          make && make check && make install && ldconfig
+          make && sudo make install && sudo ldconfig
 
       - name: Build artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -138,6 +138,14 @@ jobs:
     steps:
       - name: Install dependencies
         run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++
+
+      - name: Build and install protobuf library
+        run: |
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v3.6.1/protobuf-all-3.6.1.tar.gz
+          tar -xvzf protobuf-all-3.6.1.tar.gz
+          cd protobuf-3.6.1/
+          ./configure
+          make && sudo make install && sudo ldconfig
 
       - name: Checkout repository
         uses: actions/checkout@v3
