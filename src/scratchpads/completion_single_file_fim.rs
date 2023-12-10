@@ -4,6 +4,7 @@ use crate::call_validation::CodeCompletionPost;
 use crate::call_validation::SamplingParameters;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use std::vec;
 use tokio::sync::Mutex as AMutex;
 // use ropey::RopeSlice;
 use tokenizers::Tokenizer;
@@ -81,6 +82,7 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
         Ok(())
     }
 
+
     async fn prompt(
         &mut self,
         context_size: usize,
@@ -105,6 +107,18 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
         let pos = &self.post.inputs.cursor;
         let mut before_iter = text.lines_at(pos.line as usize).reversed();
         let mut after_iter = text.lines_at(pos.line as usize + 1);
+        let (extra_context, mut tokens_used) = match self.post.no_cache || self.post.inputs.multiline {
+            true => {
+                let text_near_cursor = get_context_near_cursor(&text, pos.line as usize, 20);
+                search_vecdb(
+                    self.vecdb_search.clone(),
+                    self.t.clone(),
+                    text_near_cursor,
+                    (limit as f32 * 0.5) as usize
+                ).await
+            }
+            false => (String::new(), 0)
+        };
 
         let mut before_line = before_iter.next();
 
@@ -124,7 +138,7 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
 
         let mut before = vec![];
         let mut after = String::new();
-        let mut tokens_used = self.t.count_tokens(
+        tokens_used += self.t.count_tokens(
             (cursor_line1.clone() + &cursor_line2).as_str()
         )?;
         while before_line.is_some() || after_line.is_some() {
@@ -153,9 +167,10 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
         let prompt: String;
         if self.order == "PSM" {
             prompt = format!(
-                "{}{}{}{}{}{}{}{}",
+                "{}{}{}{}{}{}{}{}{}",
                 self.t.eos,
                 self.fim_prefix,
+                extra_context,
                 before.into_iter().rev().collect::<Vec<_>>().join(""),
                 cursor_line1,
                 self.fim_suffix,
@@ -165,9 +180,10 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
             );
         } else if self.order == "SPM" {
             prompt = format!(
-                "{}{}{}{}{}{}{}{}",
+                "{}{}{}{}{}{}{}{}{}",
                 self.t.eos,
                 self.fim_suffix,
+                extra_context,
                 cursor_line2,
                 after,
                 self.fim_prefix,
@@ -263,6 +279,71 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
             "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
         });
         Ok((ans, finished))
+    }
+}
+
+fn get_context_near_cursor(text: &Rope, line_pos: usize, max_lines_count: usize) -> String {
+    let mut before_iter = text.lines_at(line_pos).reversed();
+    let mut after_iter = text.lines_at(line_pos + 1);
+
+    let mut before = vec![];
+    let mut after = vec![];
+    let mut before_line = before_iter.next();
+    let mut after_line = after_iter.next();
+
+    while (before.len() + after.len() < max_lines_count) && (before_line.is_some() || after_line.is_some()) {
+        if let Some(before_line) = before_iter.next() {
+            before.push(before_line.as_str().unwrap_or(""));
+        }
+        if let Some(after_line) = after_iter.next() {
+            after.push(after_line.as_str().unwrap_or(""));
+        }
+        before_line = before_iter.next();
+        after_line = after_iter.next();
+    }
+
+    let before_str = before.into_iter().rev().collect::<Vec<_>>().join("");
+    let after_str = after.join("");
+
+    return format!("{}{}", before_str, after_str);
+}
+
+async fn search_vecdb<T>(
+    vecdb_search: Arc<AMutex<Box<T>>>,
+    tokenizer: HasTokenizerAndEot,
+    text_near_cursor: String,
+    max_context_size: usize
+) -> (String, i32) where T: VecdbSearch + Send {
+    let search_result = vecdb_search.lock().await.search(text_near_cursor, 20).await;
+
+    let init_cfc_text = "Here are some relevant code fragments from other files of the repo:\n\n";
+    let mut tokens_used = tokenizer.count_tokens(init_cfc_text).expect(
+        "Tokenization has failed"
+    );
+
+    match search_result {
+        Ok(res) => {
+            if res.results.is_empty() {
+                return ("".to_string(), tokens_used);
+            }
+
+            let mut final_text_vec: Vec<String> = vec![init_cfc_text.to_string()];
+            for res in res.results {
+                let text: String = format!(
+                    "The below code fragment is found in {}\n{}\n\n",
+                    res.file_path.to_str().unwrap_or(""), res.window_text
+                );
+                tokens_used += tokenizer.count_tokens(&text).expect(
+                    "Tokenization has failed"
+                );
+                final_text_vec.push(text);
+                if tokens_used > max_context_size as i32 {
+                    break
+                }
+            }
+            (final_text_vec.join(""), tokens_used)
+        }
+        Err(_) => ("".to_string(), tokens_used)
     }
 }
 
