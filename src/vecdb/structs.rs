@@ -22,6 +22,7 @@ pub struct VecDbStatus {
     pub unprocessed_files_count: usize,
     pub requests_made_since_start: usize,
     pub db_size: usize,
+    pub db_cache_size: usize,
 }
 
 pub type VecDbStatusRef = Arc<Mutex<VecDbStatus>>;
