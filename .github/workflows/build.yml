@@ -97,6 +97,32 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: choco install protoc
 
+      - name: Cache protobuf library
+        if: matrix.target == 'arm-unknown-linux-gnueabihf' || matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'x86_64-unknown-linux-musl'
+        id: cache-protobuf
+        uses: actions/cache@v1
+        with:
+          path: protobuf
+          key: ${{ runner.os }}-protobuf
+      - name: Build protobuf library
+        if: steps.cache-protobuf.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/protocolbuffers/protobuf.git
+          cd protobuf
+          git submodule update --init --recursive
+          ./autogen.sh
+          ./autogen.sh
+          ./configure
+          make
+          make check
+      - name: Install protobuf library
+        run: |
+          cd protobuf
+          sudo make install
+          sudo ldconfig
+      - name: make
+        run: make
+
       - name: Build artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: OPENSSL_STATIC=1 OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu OPENSSL_INCLUDE_DIR=/usr/include/openssl cargo build --release --target-dir dist/
