@@ -67,7 +67,7 @@ jobs:
         if: matrix.container == 'ubuntu:18.04'
         shell: bash
         run: |
-          apt-get update && apt-get install -y build-essential curl libssl-dev pkg-config protobuf-compiler
+          apt-get update && apt-get install -y build-essential curl libssl-dev pkg-config wget
           curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --profile minimal --default-toolchain none -y
           echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
 
@@ -83,7 +83,7 @@ jobs:
 
       - name: Install AArch64 target toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get install gcc-aarch64-linux-gnu protobuf-compiler
+        run: sudo apt-get install gcc-aarch64-linux-gnu
 
       - name: Install ARM target toolchain
         if: matrix.target == 'arm-unknown-linux-gnueabihf'
@@ -107,14 +107,11 @@ jobs:
       - name: Build protobuf library
         if: steps.cache-protobuf.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/protocolbuffers/protobuf.git
-          cd protobuf
-          git submodule update --init --recursive
-          ./autogen.sh
-          ./autogen.sh
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v3.6.1/protobuf-all-3.6.1.tar.gz
+          tar -xvzf protobuf-all-3.6.1.tar.gz
+          cd protobuf-3.6.1/
           ./configure
-          make
-          make check
+          make && make check && make install && ldconfig
       - name: Install protobuf library
         run: |
           cd protobuf
@@ -154,7 +151,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ protobuf
+        run: apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++
 
       - name: Checkout repository
         uses: actions/checkout@v3
