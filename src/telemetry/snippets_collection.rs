@@ -3,6 +3,7 @@ use std::sync::RwLock as StdRwLock;
 use serde::{Serialize, Deserialize};
 
 use tokio::sync::RwLock as ARwLock;
+use tracing::info;
 
 use crate::global_context;
 use crate::completion_cache;

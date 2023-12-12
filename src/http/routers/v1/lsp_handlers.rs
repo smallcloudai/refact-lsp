@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::SharedGlobalContext;
+use crate::telemetry;
 use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -59,6 +60,12 @@ pub async fn handle_v1_lsp_did_changed(
             file_path, false
         ).await;
     }
+
+    telemetry::snippets_collection::sources_changed(
+        global_context,
+        &post.uri.to_string(),
+        &post.text,
+    ).await;
 
     // Real work here
     Ok(Response::builder()
