@@ -1,9 +1,10 @@
-/* .font-face { cors issue change . to @ to recrate in vscode
+@font-face {  /* cors issue loading font-face */
     font-family: "codify";
     src: url("codify.woff");
     font-weight: normal;
     font-style: normal;
-} */
+}
+
 
 * {
     box-sizing: border-box;

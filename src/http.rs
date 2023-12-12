@@ -6,6 +6,7 @@ use axum::{
     routing::get
 };
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::cors::CorsLayer;
 use tokio::signal;
 use tracing::info;
 
@@ -30,7 +31,9 @@ pub fn make_refact_http_server() -> Router {
         .fallback(handler_404)
         .nest("/v1", make_v1_router())
         .route_service("/", ServeFile::new("webgui/index.html"))
+        .layer(CorsLayer::very_permissive())
         .nest_service("/webgui", ServeDir::new("webgui"))
+
 }
 
 

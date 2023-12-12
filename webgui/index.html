@@ -5,6 +5,8 @@
        (function(){
          const iframe = document.getElementById("chat")
          window.addEventListener("message", (event) => {
+            const wasIframe = event.source === iframe.contentWindow
+            console.log({data: event.data, wasIframe});
               if(event.data.type === "user_submit_name") {
                  iframe.contentWindow.postMessage({
                     type:"update_name",
