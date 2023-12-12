@@ -18,7 +18,7 @@ pub struct ChatPassthrough<T> {
     pub post: ChatPost,
     pub default_system_message: String,
     pub limit_bytes: usize,
-    pub vecdb_search: Arc<AMutex<Box<T>>>,
+    pub vecdb_search: Option<Arc<AMutex<Box<T>>>>,
 }
 
 const DEFAULT_LIMIT_BYTES: usize = 4096*6;
@@ -26,7 +26,7 @@ const DEFAULT_LIMIT_BYTES: usize = 4096*6;
 impl<T: Send + VecdbSearch> ChatPassthrough<T> {
     pub fn new(
         post: ChatPost,
-        vecdb_search: Arc<AMutex<Box<T>>>,
+        vecdb_search: Option<Arc<AMutex<Box<T>>>>,
     ) -> Self where T: VecdbSearch + 'static {
         ChatPassthrough {
             post,
@@ -53,7 +53,9 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
         _context_size: usize,
         _sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        embed_vecdb_results(self.vecdb_search.clone(), &mut self.post, 6).await;
+        if let Some(vecdb_search) = &self.vecdb_search {
+            embed_vecdb_results(vecdb_search.clone(), &mut self.post, 6).await;
+        }
         let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post, self.limit_bytes, &self.default_system_message)?;
         info!("chat passthrough {} messages -> {} messages after applying limits and possibly adding the default system message", &limited_msgs.len(), &limited_msgs.len());
         let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();

@@ -194,7 +194,9 @@ impl LanguageServer for Backend {
             let files = retrieve_files_by_proj_folders(
                 folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
             ).await;
-            self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, true).await;
+            if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+                vec_db.lock().await.add_or_update_files(files, true).await;
+            }
         }
 
         let completion_options: CompletionOptions;
@@ -255,9 +257,10 @@ impl LanguageServer for Backend {
 
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+                vec_db.lock().await.add_or_update_file(file_path, false).await;
+            }
+
         }
 
         info!("{} changed, save time: {:?}", uri, t0.elapsed());
@@ -277,9 +280,9 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+                vec_db.lock().await.add_or_update_file(file_path, false).await;
+            }
         }
         info!("{uri} saved");
     }
@@ -291,9 +294,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+                vec_db.lock().await.add_or_update_file(file_path, false).await;
+            }
+
         }
         info!("{uri} closed");
     }
@@ -317,7 +321,9 @@ impl LanguageServer for Backend {
             .map(|x| PathBuf::from(x.uri.replace("file://", "")))
             .filter(|x| is_valid_file(&x));
         for file in files {
-            self.gcx.read().await.vec_db.lock().await.remove_file(&file).await;
+            if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+                vec_db.lock().await.remove_file(&file).await;
+            }
         }
     }
 
@@ -327,7 +333,9 @@ impl LanguageServer for Backend {
             .map(|x| PathBuf::from(x.uri.replace("file://", "")))
             .filter(|x| is_valid_file(&x))
             .collect();
-        self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, false).await;
+        if let Some(vec_db) = self.gcx.read().await.vec_db.clone() {
+            vec_db.lock().await.add_or_update_files(files, false).await;
+        }
     }
 }
 

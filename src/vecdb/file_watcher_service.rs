@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::{
     channel::mpsc::{channel, Receiver},
@@ -12,8 +12,11 @@ use tokio::fs::File;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::RwLock as ARwLock;
+use tokio::sync::Mutex as AMutex;
+use tower::ready_cache::cache;
 
 use crate::global_context::GlobalContext;
+use crate::vecdb::vecdb::VecDb;
 
 fn make_async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Result<Event>>)> {
     let (mut tx, rx) = channel(1);
@@ -62,6 +65,26 @@ pub async fn file_watcher_task(
         info!("file watcher: no files to watch");
         return;
     }
+    // let cache_dir = global_context.read().await.cache_dir.clone();
+    // let cmdline = global_context.read().await.cmdline.clone();
+    // optimize code above
+    let (cache_dir, cmdline) = {
+        let cx = global_context.read().await;
+        (cx.cache_dir.clone(), cx.cmdline.clone())
+    };
+    {
+        let mut cx = global_context.write().await;
+        cx.vec_db = Some(Arc::new(AMutex::new(Box::new(VecDb::new(
+            cache_dir,
+            cmdline.clone(),
+            384,
+            60,
+            512,
+            1024,
+            "BAAI/bge-small-en-v1.5".to_string()
+        ).await))));
+    }
+
     let path = PathBuf::from(maybe_path);
     let load_data = || async {
         let filenames_data = match parse_jsonl(&path).await {
@@ -71,9 +94,11 @@ pub async fn file_watcher_task(
                 vec![]
             }
         };
-        global_context.read().await.vec_db.lock().await.add_or_update_files(
-            filenames_data, true,
-        ).await;
+        if let Some(vec_db) = global_context.read().await.vec_db.clone() {
+            vec_db.lock().await.add_or_update_files(
+                filenames_data, true,
+            ).await;
+        }
     };
 
     if watcher.watch(path.as_ref(), RecursiveMode::Recursive).is_err() {

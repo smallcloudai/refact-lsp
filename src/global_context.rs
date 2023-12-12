@@ -60,7 +60,7 @@ pub struct GlobalContext {
     pub tokenizer_map: HashMap< String, Arc<StdRwLock<Tokenizer>>>,
     pub completions_cache: Arc<StdRwLock<CompletionCache>>,
     pub telemetry: Arc<StdRwLock<telemetry_structs::Storage>>,
-    pub vec_db: Arc<AMutex<Box<VecDb>>>,
+    pub vec_db: Option<Arc<AMutex<Box<VecDb>>>>,
     pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
 }
 
@@ -167,11 +167,7 @@ pub async fn create_global_context(
         tokenizer_map: HashMap::new(),
         completions_cache: Arc::new(StdRwLock::new(CompletionCache::new())),
         telemetry: Arc::new(StdRwLock::new(telemetry_structs::Storage::new())),
-        vec_db: Arc::new(AMutex::new(Box::new(VecDb::new(
-            cache_dir, cmdline.clone(),
-            384, 60, 512, 1024,
-            "BAAI/bge-small-en-v1.5".to_string()
-        ).await))),
+        vec_db: None,
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)

@@ -35,7 +35,7 @@ pub async fn create_code_completion_scratchpad<T>(
     scratchpad_patch: &serde_json::Value,
     cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
     tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
-    vecdb_search: Arc<AMutex<Box<T>>>,
+    vecdb_search: Option<Arc<AMutex<Box<T>>>>,
 ) -> Result<Box<dyn ScratchpadAbstract>, String>
     where T: VecdbSearch + 'static {
     let mut result: Box<dyn ScratchpadAbstract>;
@@ -59,7 +59,7 @@ pub async fn create_chat_scratchpad<T>(
     post: ChatPost,
     scratchpad_name: &str,
     scratchpad_patch: &serde_json::Value,
-    vecdb_search: Arc<AMutex<Box<T>>>,
+    vecdb_search: Option<Arc<AMutex<Box<T>>>>,
 ) -> Result<Box<dyn ScratchpadAbstract>, String>
     where T: VecdbSearch + 'static {
     let mut result: Box<dyn ScratchpadAbstract>;

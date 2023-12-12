@@ -35,9 +35,12 @@ pub async fn handle_v1_lsp_initialize(
     let files = retrieve_files_by_proj_folders(
         post.project_roots.iter().map(|x| PathBuf::from(x.path())).collect()
     ).await;
-    global_context.read().await.vec_db.lock().await.add_or_update_files(
-        files, true
-    ).await;
+
+    if let Some(vec_db) = global_context.read().await.vec_db.clone() {
+        vec_db.lock().await.add_or_update_files(
+            files, true
+        ).await;
+    }
 
     // Real work here
     Ok(Response::builder()
@@ -56,9 +59,9 @@ pub async fn handle_v1_lsp_did_changed(
 
     let file_path = PathBuf::from(post.uri.path());
     if is_valid_file(&file_path) {
-        global_context.read().await.vec_db.lock().await.add_or_update_file(
-            file_path, false
-        ).await;
+        if let Some(vec_db) = global_context.read().await.vec_db.clone() {
+            vec_db.lock().await.add_or_update_file(file_path, false).await;
+        }
     }
 
     telemetry::snippets_collection::sources_changed(

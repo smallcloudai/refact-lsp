@@ -22,9 +22,15 @@ pub async fn handle_v1_vecdb_search(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    let cx_locked = global_context.read().await;
-    let vecdb = cx_locked.vec_db.clone();
-    let res = vecdb.lock().await.search(post.query.to_string(), post.top_n).await;
+    let res = match global_context.read().await.vec_db.clone() {
+        Some(vecdb) => {
+            let res = vecdb.lock().await.search(post.query.to_string(), post.top_n).await;
+            res
+        }
+        None => {
+            Err("vecdb is not configured".to_string())
+        }
+    };
 
     match res {
         Ok(search_res) => {
@@ -43,12 +49,26 @@ pub async fn handle_v1_vecdb_status(
     Extension(global_context): Extension<SharedGlobalContext>,
     _: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let cx_locked = global_context.read().await;
-    let vecdb = cx_locked.vec_db.clone();
-    let res = vecdb.lock().await.get_status().await;
+    let res = match &global_context.read().await.vec_db {
+        Some(vecdb) => {
+            let status = vecdb.lock().await.get_status().await;
+            Ok(status)
+        }
+        None => {
+            Err("vecdb is not configured".to_string())
+        }
+    };
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from(json!(res).to_string()))
-        .unwrap())
+    match res {
+        Ok(status) => {
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(json!(status).to_string()))
+                .unwrap()
+            )
+        }
+        Err(e) => {
+            Err(ScratchError::new(StatusCode::BAD_REQUEST, e))
+        }
+    }
 }
