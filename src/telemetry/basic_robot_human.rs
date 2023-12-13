@@ -27,6 +27,7 @@ pub fn increase_counters_from_finished_snippet(
     // Snippet is finished when it stops being valid for correction (user has changed code in a different place) or it timeouts
     fn robot_characters(snip: &SnippetTracker) -> i64 {
         let re = Regex::new(r"\s+").unwrap();
+        info!("snippet: {};\n remaining percent: {}; robot_characters: {}", snip.grey_text, snip.remaining_percentage, (re.replace_all(&snip.grey_text, "").len() as f64 * snip.remaining_percentage) as i64);
         (re.replace_all(&snip.grey_text, "").len() as f64 * snip.remaining_percentage) as i64
     }
     fn human_characters(rec: &TeleRobotHumanAccum, text: &String) -> i64 {
@@ -51,8 +52,9 @@ pub fn increase_counters_from_finished_snippet(
             rec.robot_characters_acc_baseline = 0;
             rec.baseline_text = text.clone();
         }
-        // info!("increasing for {}, human+{}, robot+{}", snip.snippet_telemetry_id, human_characters(rec, text), rec.robot_characters_acc_baseline);
+        info!("increasing for {}, human+{}, robot+{}", snip.snippet_telemetry_id, human_characters(rec, text), robot_characters(snip));
     } else {
+        info!("increase_counters_from_finished_snippet: new uri {}", uri);
         let init_file_text_mb = snip.inputs.sources.get(&snip.inputs.cursor.file);
         if init_file_text_mb.is_none() {
             return;
@@ -79,6 +81,7 @@ fn compress_robot_human(
     }
     let mut compressed_vec= vec![];
     for (key, entries) in unique_combinations {
+        info!("compress_robot_human: compressing {} entries for key {:?}", entries.len(), key);
         let mut record = TeleRobotHuman::new(
             key.0.clone(),
             key.1.clone()

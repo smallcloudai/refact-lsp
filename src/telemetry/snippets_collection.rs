@@ -3,6 +3,7 @@ use std::sync::RwLock as StdRwLock;
 use serde::{Serialize, Deserialize};
 
 use tokio::sync::RwLock as ARwLock;
+use tracing::info;
 
 use crate::global_context;
 use crate::completion_cache;
@@ -125,10 +126,10 @@ pub async fn sources_changed(
         } else {
             if snip.remaining_percentage >= 0. {
                 snip.finished_ts = chrono::Local::now().timestamp();
-                // info!("snip {} is finished with score={}!", snip.grey_text, snip.remaining_percentage);
+                info!("ID{}: snip {} is finished with score={}!", snip.snippet_telemetry_id, snip.grey_text, snip.remaining_percentage);
                 finished_snips.push(snip.clone());
             } else {
-                // info!("snip {} is finished with accepted = false", snip.grey_text);
+                info!("ID{}: snip {} is finished with accepted = false", snip.snippet_telemetry_id, snip.grey_text);
                 snip.accepted_ts = 0;  // that will cleanup and not send
             }
         }
