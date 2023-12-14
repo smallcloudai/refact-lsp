@@ -67,7 +67,7 @@ jobs:
         if: matrix.container == 'ubuntu:18.04'
         shell: bash
         run: |
-          apt-get update && apt-get install -y sudo build-essential curl libssl-dev pkg-config wget
+          apt-get update && apt-get install -y sudo build-essential curl libssl-dev pkg-config wget git cmake
           curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --profile minimal --default-toolchain none -y
           echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
 
@@ -97,22 +97,11 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: choco install protoc
 
-      - name: Install bazel
-        if: matrix.target == 'arm-unknown-linux-gnueabihf' || matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt install apt-transport-https curl gnupg -y
-          curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-archive-keyring.gpg
-          sudo mv bazel-archive-keyring.gpg /usr/share/keyrings
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
-          sudo apt update && sudo apt -y install bazel
-
       - name: Build and install protobuf library
         if: matrix.target == 'arm-unknown-linux-gnueabihf' || matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protobuf-25.1.tar.gz
-          tar -xvzf protobuf-25.1.tar.gz
-          cd protobuf-25.1/
-          bazel build :protoc :protobuf && sudo cp bazel-bin/protoc /usr/local/bin
+          git clone --depth=1 --recursive -b v25.1 https://github.com/protocolbuffers/protobuf
+          cd protobuf && cmake --build . --parallel 10 && sudo cmake --install .
 
       - name: Build artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -145,22 +134,12 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: apk add --no-cache sudo git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ make
-
-      - name: Install bazel
-        run: |
-          sudo apt install apt-transport-https curl gnupg -y
-          curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-archive-keyring.gpg
-          sudo mv bazel-archive-keyring.gpg /usr/share/keyrings
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
-          sudo apt update && sudo apt install -y bazel
+        run: apk add --no-cache sudo git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ make cmake
 
       - name: Build and install protobuf library
         run: |
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protobuf-25.1.tar.gz
-          tar -xvzf protobuf-25.1.tar.gz
-          cd protobuf-25.1/
-          bazel build :protoc :protobuf && sudo cp bazel-bin/protoc /usr/local/bin
+          git clone --depth=1 --recursive -b v25.1 https://github.com/protocolbuffers/protobuf
+          cd protobuf && cmake --build . --parallel 10 && sudo cmake --install .
 
       - name: Checkout repository
         uses: actions/checkout@v3
