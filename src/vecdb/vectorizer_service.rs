@@ -13,7 +13,7 @@ use crate::vecdb::req_client::get_embedding;
 use crate::vecdb::structs::{Record, SplitResult, VecDbStatus, VecDbStatusRef};
 
 #[derive(Debug)]
-pub struct RetrieverService {
+pub struct FileVectorizerService {
     update_request_queue: Arc<Mutex<VecDeque<PathBuf>>>,
     output_queue: Arc<Mutex<VecDeque<PathBuf>>>,
     vecdb_handler: VecDBHandlerRef,
@@ -61,7 +61,7 @@ async fn cooldown_queue_thread(
 }
 
 
-async fn retrieve_thread(
+async fn vectorize_thread(
     queue: Arc<Mutex<VecDeque<PathBuf>>>,
     vecdb_handler_ref: VecDBHandlerRef,
     status: VecDbStatusRef,
@@ -151,7 +151,7 @@ async fn retrieve_thread(
     }
 }
 
-impl RetrieverService {
+impl FileVectorizerService {
     pub async fn new(
         vecdb_handler: VecDBHandlerRef,
         cooldown_secs: u64,
@@ -170,7 +170,7 @@ impl RetrieverService {
                 db_cache_size: 0,
             }
         ));
-        RetrieverService {
+        FileVectorizerService {
             update_request_queue: update_request_queue.clone(),
             output_queue: output_queue.clone(),
             vecdb_handler: vecdb_handler.clone(),
@@ -194,7 +194,7 @@ impl RetrieverService {
         );
 
         let retrieve_thread_handle = tokio::spawn(
-            retrieve_thread(
+            vectorize_thread(
                 self.output_queue.clone(),
                 self.vecdb_handler.clone(),
                 self.status.clone(),

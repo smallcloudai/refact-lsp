@@ -292,7 +292,7 @@ impl VecDBHandler {
         };
 
         match self.cache_table.delete(
-            format!("(file_path = {})", file_path_str).as_str()
+            format!("(file_path = \"{}\")", file_path_str).as_str()  // TODO: Prevent a possible sql injection here
         ).await {
             Ok(_) => {}
             Err(err) => {
@@ -300,7 +300,7 @@ impl VecDBHandler {
             }
         }
         match self.data_table.delete(
-            format!("(file_path = {})", file_path_str).as_str()
+            format!("(file_path = \"{}\")", file_path_str).as_str()  // TODO: Prevent a possible sql injection here
         ).await {
             Ok(_) => {}
             Err(err) => {

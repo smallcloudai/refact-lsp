@@ -7,13 +7,13 @@ use tokio::task::JoinHandle;
 
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
 use crate::vecdb::req_client::get_embedding;
-use crate::vecdb::retriever_service::RetrieverService;
+use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
 
 #[derive(Debug)]
 pub struct VecDb {
     vecdb_handler: VecDBHandlerRef,
-    retriever_service: Arc<Mutex<RetrieverService>>,
+    retriever_service: Arc<Mutex<FileVectorizerService>>,
     embedding_model_name: String,
     cmdline: crate::global_context::CommandLine,
 }
@@ -34,7 +34,7 @@ impl VecDb {
             Err(err) => { return Err(err) }
         };
         let vecdb_handler = Arc::new(Mutex::new(handler));
-        let retriever_service = Arc::new(Mutex::new(RetrieverService::new(
+        let retriever_service = Arc::new(Mutex::new(FileVectorizerService::new(
             vecdb_handler.clone(), cooldown_secs, splitter_window_size, splitter_soft_limit,
             embedding_model_name.clone(), cmdline.api_key.clone(),
         ).await));
