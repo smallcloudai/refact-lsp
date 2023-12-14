@@ -33,14 +33,14 @@ jobs:
           - os: windows-latest
             target: aarch64-pc-windows-msvc
             code-target: win32-arm64
-          - os: ubuntu-20.04
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             code-target: linux-x64
             container: ubuntu:18.04
-          - os: ubuntu-20.04
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             code-target: linux-arm64
-          - os: ubuntu-20.04
+          - os: ubuntu-22.04
             target: arm-unknown-linux-gnueabihf
             code-target: linux-armhf
           - os: macos-11
@@ -67,7 +67,7 @@ jobs:
         if: matrix.container == 'ubuntu:18.04'
         shell: bash
         run: |
-          apt-get update && apt-get install -y sudo build-essential curl libssl-dev pkg-config wget git cmake
+          apt-get update && apt-get install -y sudo build-essential curl libssl-dev pkg-config wget git cmake zlib
           curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --profile minimal --default-toolchain none -y
           echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
 
@@ -134,7 +134,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: apk add --no-cache sudo git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ make cmake
+        run: apk add --no-cache sudo git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ make cmake zlib linux-headers
 
       - name: Build and install protobuf library
         run: |
