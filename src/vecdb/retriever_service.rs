@@ -93,33 +93,33 @@ async fn retrieve_thread(
         };
         info!("Processing file: {}", path.display());
 
-        let splat_data = match file_splitter.split(&path).await {
+        let split_data = match file_splitter.split(&path).await {
             Ok(data) => data,
             Err(_) => { continue }
         };
 
         let mut vecdb_handler = vecdb_handler_ref.lock().await;
-        let mut splat_data_filtered: Vec<SplitResult> = splat_data
+        let mut split_data_filtered: Vec<SplitResult> = split_data
             .iter()
             .filter(|x| !vecdb_handler.contains(&x.window_text_hash))
             .cloned() // Clone to avoid borrowing issues
             .collect();
-        splat_data_filtered = vecdb_handler.try_add_from_cache(splat_data_filtered).await;
+        split_data_filtered = vecdb_handler.try_add_from_cache(split_data_filtered).await;
         drop(vecdb_handler);
-        info!("Retrieving embeddings for {} chunks", splat_data_filtered.len());
+        info!("Retrieving embeddings for {} chunks", split_data_filtered.len());
 
-        let join_handles: Vec<_> = splat_data_filtered.iter().map(
+        let join_handles: Vec<_> = split_data_filtered.iter().map(
             |x| get_embedding(x.window_text.clone(), &embedding_model_name, api_key.clone())
         ).collect();
         status.lock().await.requests_made_since_start += join_handles.len();
 
-        let mut splat_join_data: VecDeque<(SplitResult, JoinHandle<Result<Vec<f32>, String>>)>
-            = splat_data_filtered.into_iter()
+        let mut split_join_data: VecDeque<(SplitResult, JoinHandle<Result<Vec<f32>, String>>)>
+            = split_data_filtered.into_iter()
             .zip(join_handles.into_iter())
             .collect::<VecDeque<_>>();
 
         let mut records: Vec<Record> = Vec::new();
-        while let Some((data_res, handle)) = splat_join_data.pop_front() {
+        while let Some((data_res, handle)) = split_join_data.pop_front() {
             match handle.await {
                 Ok(Ok(result)) => {
                     records.push(
@@ -224,10 +224,16 @@ impl RetrieverService {
         }
     }
 
-    pub async fn status(&self) -> VecDbStatus {
+    pub async fn status(&self) -> Result<VecDbStatus, String> {
         let mut status = self.status.lock().await.clone();
-        status.db_size = self.vecdb_handler.lock().await.size().await;
-        status.db_cache_size = self.vecdb_handler.lock().await.cache_size().await;
-        status
+        status.db_size = match self.vecdb_handler.lock().await.size().await {
+            Ok(res) => res,
+            Err(err) => return Err(err)
+        };
+        status.db_cache_size = match self.vecdb_handler.lock().await.cache_size().await {
+            Ok(res) => res,
+            Err(err) => return Err(err)
+        };
+        Ok(status)
     }
 }

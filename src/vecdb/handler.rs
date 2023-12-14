@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
@@ -11,9 +12,11 @@ use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIter
 use arrow_array::array::Array;
 use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
 use arrow_array::types::{Float32Type, UInt64Type};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use futures_util::TryStreamExt;
 use lance::dataset::{WriteMode, WriteParams};
+use lance::Error;
+use log::info;
 use tempfile::{tempdir, TempDir};
 use tokio::sync::Mutex;
 use vectordb::database::Database;
@@ -40,15 +43,15 @@ pub struct VecDBHandler {
     embedding_size: i32,
 }
 
-async fn table_record_batch(schema: &SchemaRef, table: &Table) -> RecordBatch {
+async fn table_record_batch(schema: &SchemaRef, table: &Table) -> Result<RecordBatch, Error> {
     // expose the private dataset field
     let dataset = table.search(Float32Array::from_iter_values([1.0])).dataset.clone();
     let batches = dataset.scan()
         .try_into_stream()
-        .await.unwrap()
+        .await?
         .try_collect::<Vec<_>>()
-        .await.unwrap();
-    concat_batches(&schema, &batches).unwrap()
+        .await?;
+    Ok(concat_batches(&schema, &batches)?)
 }
 
 fn cosine_similarity(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
@@ -64,10 +67,31 @@ fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
 
 
 impl VecDBHandler {
-    pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> VecDBHandler {
-        let cache_database = Database::connect(cache_dir.join("refact_vecdb_cache").to_str().unwrap()).await.unwrap();
-        let data_database_temp_dir = tempdir().unwrap();
-        let temp_database = Database::connect(data_database_temp_dir.path().to_str().unwrap()).await.unwrap();
+    pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> Result<VecDBHandler, String> {
+        let cache_dir_str = match cache_dir.join("refact_vecdb_cache").to_str() {
+            Some(dir) => dir.to_string(),
+            None => {
+                return Err(format!("{:?}", "Cache directory is not a valid path"));
+            }
+        };
+        let data_database_temp_dir = match tempdir() {
+            Ok(dir) => dir,
+            Err(_) => return Err(format!("{:?}", "Error creating temp dir")),
+        };
+        let data_database_temp_dir_str = match data_database_temp_dir.path().to_str() {
+            Some(path) => path,
+            None => return Err(format!("{:?}", "Temp directory is not a valid path")),
+        };
+
+        let cache_database = match Database::connect(cache_dir_str.as_str()).await {
+            Ok(db) => db,
+            Err(err) => return Err(format!("{:?}", err))
+        };
+        let temp_database = match Database::connect(data_database_temp_dir_str).await {
+            Ok(db) => db,
+            Err(err) => return Err(format!("{:?}", err))
+        };
+
         let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
         let schema = Arc::new(Schema::new(vec![
             Field::new("vector", DataType::FixedSizeList(vec_trait, embedding_size), true),
@@ -81,15 +105,24 @@ impl VecDBHandler {
         ]));
         let cache_table = match cache_database.open_table("data").await {
             Ok(table) => { table }
-            Err(e) => {
+            Err(_) => {
                 let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-                cache_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap()
+                match cache_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await {
+                    Ok(table) => table,
+                    Err(err) => return Err(format!("{:?}", err))
+                }
             }
         };
         let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-        let data_table = temp_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await.unwrap();
+        let data_table = match temp_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await {
+            Ok(table) => table,
+            Err(err) => return Err(format!("{:?}", err))
+        };
 
-        let hashes_record_batch = table_record_batch(&schema, &cache_table).await;
+        let hashes_record_batch = match table_record_batch(&schema, &cache_table).await {
+            Ok(batch) => batch,
+            Err(err) => return Err(format!("{:?}", err))
+        };
         let maybe_hashes_cache_iter = VecDBHandler::parse_table_iter(hashes_record_batch, true, None);
         let hashes_cache: HashMap<String, Record> = match maybe_hashes_cache_iter {
             Ok(hashes_cache_iter) => {
@@ -100,7 +133,7 @@ impl VecDBHandler {
             Err(_) => HashMap::new()
         };
 
-        VecDBHandler {
+        Ok(VecDBHandler {
             cache_database,
             data_database_temp_dir,
             schema,
@@ -109,30 +142,42 @@ impl VecDBHandler {
             data_table_hashes: HashSet::new(),
             hashes_cache,
             embedding_size,
+        })
+    }
+
+    pub async fn size(&self) -> Result<usize, String> {
+        match self.data_table.count_rows().await {
+            Ok(size) => Ok(size),
+            Err(err) => Err(format!("{:?}", err))
         }
     }
 
-    pub async fn size(&self) -> usize { self.data_table.count_rows().await.unwrap() }
-
-    pub async fn cache_size(&self) -> usize { self.cache_table.count_rows().await.unwrap() }
+    pub async fn cache_size(&self) -> Result<usize, String> {
+        match self.cache_table.count_rows().await {
+            Ok(size) => Ok(size),
+            Err(err) => Err(format!("{:?}", err))
+        }
+    }
 
     pub async fn try_add_from_cache(&mut self, data: Vec<SplitResult>) -> Vec<SplitResult> {
         let mut found_records: Vec<Record> = Vec::new();
         let mut left_results: Vec<SplitResult> = Vec::new();
 
         for split_result in data {
-            if self.hashes_cache.contains_key(&split_result.window_text_hash) {
-                found_records.push(self.hashes_cache.get(&split_result.window_text_hash).unwrap().clone());
-            } else {
-                left_results.push(split_result);
+            match self.hashes_cache.get(&split_result.window_text_hash) {
+                Some(value) => found_records.push(value.clone()),
+                None => left_results.push(split_result),
             }
         }
-        self.add_or_update(found_records, false).await.unwrap();
+        match self.add_or_update(found_records, false).await {
+            Ok(_) => {}
+            Err(err) => info!("Error while adding values from cache: {:?}", err),
+        };
         left_results
     }
 
-    pub async fn add_or_update(&mut self, records: Vec<Record>, add_to_cache: bool) -> vectordb::error::Result<()> {
-        fn make_emb_data(records: &Vec<Record>, embedding_size: i32) -> ArrayData {
+    pub async fn add_or_update(&mut self, records: Vec<Record>, add_to_cache: bool) -> Result<(), String> {
+        fn make_emb_data(records: &Vec<Record>, embedding_size: i32) -> Result<ArrayData, String> {
             let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
             let mut emb_builder: Vec<f32> = vec![];
 
@@ -140,30 +185,40 @@ impl VecDBHandler {
                 emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
             }
 
-            let emb_data = ArrayData::builder(DataType::Float32)
+            let emb_data_res = ArrayData::builder(DataType::Float32)
                 .add_buffer(Buffer::from_vec(emb_builder))
                 .len(records.len() * embedding_size as usize)
-                .build()
-                .unwrap();
+                .build();
+            let emb_data = match emb_data_res {
+                Ok(res) => res,
+                Err(err) => { return Err(format!("{:?}", err)); }
+            };
 
-            return ArrayData::builder(DataType::FixedSizeList(vec_trait.clone(), embedding_size))
+            match ArrayData::builder(DataType::FixedSizeList(vec_trait.clone(), embedding_size))
                 .len(records.len())
                 .add_child_data(emb_data.clone())
-                .build()
-                .unwrap();
+                .build() {
+                Ok(res) => Ok(res),
+                Err(err) => return Err(format!("{:?}", err))
+            }
         }
 
         if records.is_empty() {
             return Ok(());
         }
 
-        let vectors: ArrayData = make_emb_data(&records, self.embedding_size);
+        let vectors: ArrayData = match make_emb_data(&records, self.embedding_size) {
+            Ok(res) => res,
+            Err(err) => return Err(format!("{:?}", err))
+        };
         let window_texts: Vec<String> = records.iter().map(|x| x.window_text.clone()).collect();
         let window_text_hashes: Vec<String> = records.iter().map(|x| x.window_text_hash.clone()).collect();
-        let file_paths: Vec<String> = records.iter().map(|x| x.file_path.to_str().unwrap().to_string()).collect();
+        let file_paths: Vec<String> = records.iter().map(|x| x.file_path.to_str().unwrap_or("No filename").to_string()).collect();
         let start_lines: Vec<u64> = records.iter().map(|x| x.start_line).collect();
         let end_lines: Vec<u64> = records.iter().map(|x| x.end_line).collect();
-        let time_adds: Vec<u64> = records.iter().map(|x| x.time_added.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).collect();
+        let time_adds: Vec<u64> = records.iter().map(|x| x.time_added.duration_since(std::time::UNIX_EPOCH).unwrap_or(
+            Duration::from_secs(0)
+        ).as_secs()).collect();
         let model_names: Vec<String> = records.iter().map(|x| x.model_name.clone()).collect();
         let data_batches_iter = RecordBatchIterator::new(
             vec![RecordBatch::try_new(
@@ -198,36 +253,60 @@ impl VecDBHandler {
             self.schema.clone(),
         );
 
+        if add_to_cache {
+            let cache_res = self.cache_table.add(
+                cache_batches_iter, Option::from(WriteParams {
+                    mode: WriteMode::Append,
+                    ..Default::default()
+                }),
+            );
+            self.hashes_cache.extend(
+                records.iter().map(|x| (x.window_text_hash.clone(), x.clone())).collect::<Vec<_>>()
+            );
+            match cache_res.await {
+                Ok(_) => {}
+                Err(err) => return Err(format!("{:?}", err))
+            };
+        }
+
         let data_res = self.data_table.add(
             data_batches_iter, Option::from(WriteParams {
                 mode: WriteMode::Append,
                 ..Default::default()
             }),
         );
-
-        let cache_res = self.cache_table.add(
-            cache_batches_iter, Option::from(WriteParams {
-                mode: WriteMode::Append,
-                ..Default::default()
-            }),
-        );
-        if add_to_cache {
-            self.hashes_cache.extend(
-                records.iter().map(|x| (x.window_text_hash.clone(), x.clone())).collect::<Vec<_>>()
-            );
-            cache_res.await.unwrap();
-        }
         self.data_table_hashes.extend(window_text_hashes);
-        data_res.await
+        match data_res.await {
+            Ok(_) => Ok(()),
+            Err(err) => return Err(format!("{:?}", err))
+        }
     }
 
     pub async fn remove(&mut self, file_path: &PathBuf) {
-        self.cache_table.delete(
-            format!("(file_path = {})", file_path.to_str().unwrap()).as_str()
-        ).await.unwrap();
-        self.data_table.delete(
-            format!("(file_path = {})", file_path.to_str().unwrap()).as_str()
-        ).await.unwrap();
+        let file_path_str = match file_path.to_str() {
+            None => {
+                info!("File path is not a string");
+                return;
+            }
+            Some(res) => res
+        };
+
+        match self.cache_table.delete(
+            format!("(file_path = {})", file_path_str).as_str()
+        ).await {
+            Ok(_) => {}
+            Err(err) => {
+                info!("Error while deleting from cache: {:?}", err);
+            }
+        }
+        match self.data_table.delete(
+            format!("(file_path = {})", file_path_str).as_str()
+        ).await {
+            Ok(_) => {}
+            Err(err) => {
+                info!("Error while deleting from cache: {:?}", err);
+            }
+        }
     }
 
     pub fn contains(&self, hash: &str) -> bool {
@@ -277,7 +356,7 @@ impl VecDBHandler {
                 end_line: as_primitive_array::<UInt64Type>(record_batch.column_by_name("end_line")
                     .expect("Missing column 'end_line'"))
                     .value(idx),
-                time_added: std::time::UNIX_EPOCH + std::time::Duration::from_secs(
+                time_added: std::time::UNIX_EPOCH + Duration::from_secs(
                     as_primitive_array::<UInt64Type>(
                         record_batch.column_by_name("time_added")
                             .expect("Missing column 'time_added'"))

@@ -26,15 +26,15 @@ pub struct GenericChatScratchpad<T> {
     pub keyword_user: String,
     pub keyword_asst: String,
     pub default_system_message: String,
-    pub vecdb_search: Arc<AMutex<Box<T>>>,
+    pub vecdb_search: Arc<AMutex<Option<T>>>,
 }
 
-impl<T: Send + VecdbSearch> GenericChatScratchpad<T> {
+impl<T: Send + Sync + VecdbSearch> GenericChatScratchpad<T> {
     pub fn new(
         tokenizer: Arc<RwLock<Tokenizer>>,
         post: ChatPost,
-        vecdb_search: Arc<AMutex<Box<T>>>,
-    ) -> Self where T: VecdbSearch + 'static {
+        vecdb_search: Arc<AMutex<Option<T>>>,
+    ) -> Self where T: VecdbSearch + 'static + Sync {
         GenericChatScratchpad {
             t: HasTokenizerAndEot::new(tokenizer),
             dd: DeltaDeltaChatStreamer::new(),
@@ -50,7 +50,7 @@ impl<T: Send + VecdbSearch> GenericChatScratchpad<T> {
 }
 
 #[async_trait]
-impl<T: Send + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<T> {
+impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,
@@ -84,7 +84,11 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<T> {
         context_size: usize,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        embed_vecdb_results(self.vecdb_search.clone(), &mut self.post, 6).await;
+        match *self.vecdb_search.lock().await {
+            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6).await,
+            None => {}
+        }
+
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &self.post, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = Some(self.dd.stop_list.clone());
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24

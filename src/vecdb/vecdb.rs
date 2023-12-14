@@ -20,7 +20,7 @@ pub struct VecDb {
 
 
 impl VecDb {
-    pub async fn new(
+    pub async fn init(
         cache_dir: PathBuf,
         cmdline: crate::global_context::CommandLine,
         embedding_size: i32,
@@ -28,21 +28,23 @@ impl VecDb {
         splitter_window_size: usize,
         splitter_soft_limit: usize,
         embedding_model_name: String,
-    ) -> Self {
-        let vecdb_handler = Arc::new(Mutex::new(VecDBHandler::init(
-            cache_dir, embedding_size,
-        ).await));
+    ) -> Result<VecDb, String> {
+        let handler = match VecDBHandler::init(cache_dir, embedding_size).await {
+            Ok(res) => res,
+            Err(err) => { return Err(err) }
+        };
+        let vecdb_handler = Arc::new(Mutex::new(handler));
         let retriever_service = Arc::new(Mutex::new(RetrieverService::new(
             vecdb_handler.clone(), cooldown_secs, splitter_window_size, splitter_soft_limit,
             embedding_model_name.clone(), cmdline.api_key.clone(),
         ).await));
 
-        VecDb {
+        Ok(VecDb {
             vecdb_handler,
             retriever_service,
             embedding_model_name,
             cmdline,
-        }
+        })
     }
 
     pub async fn start_background_tasks(&self) -> Vec<JoinHandle<()>> {
@@ -61,7 +63,7 @@ impl VecDb {
         self.vecdb_handler.lock().await.remove(file_path).await;
     }
 
-    pub async fn get_status(&self) -> VecDbStatus {
+    pub async fn get_status(&self) -> Result<VecDbStatus, String> {
         self.retriever_service.lock().await.status().await
     }
 }
