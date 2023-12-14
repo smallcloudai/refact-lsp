@@ -30,17 +30,17 @@ pub struct SingleFileFIM<T> {
     pub fim_middle: String,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
-    pub vecdb_search: Arc<AMutex<Box<T>>>,
+    pub vecdb_search: Arc<AMutex<Option<T>>>,
 }
 
-impl<T: Send + VecdbSearch> SingleFileFIM<T> {
+impl<T: Send + Sync + VecdbSearch> SingleFileFIM<T> {
     pub fn new(
         tokenizer: Arc<StdRwLock<Tokenizer>>,
         post: CodeCompletionPost,
         order: String,
         cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
         tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
-        vecdb_search: Arc<AMutex<Box<T>>>,
+        vecdb_search: Arc<AMutex<Option<T>>>,
     ) -> Self where T: VecdbSearch + Send {
         let data4cache = completion_cache::CompletionSaveToCache::new(cache_arc, &post);
         let data4snippet = snippets_collection::SaveSnippet::new(tele_storage, &post);
@@ -61,7 +61,7 @@ impl<T: Send + VecdbSearch> SingleFileFIM<T> {
 
 
 #[async_trait]
-impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
+impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
     fn apply_model_adaptation_patch(
         &mut self,
         patch: &serde_json::Value,
@@ -107,17 +107,22 @@ impl<T: Send + VecdbSearch> ScratchpadAbstract for SingleFileFIM<T> {
         let pos = &self.post.inputs.cursor;
         let mut before_iter = text.lines_at(pos.line as usize).reversed();
         let mut after_iter = text.lines_at(pos.line as usize + 1);
-        let (extra_context, mut tokens_used) = match self.post.no_cache || self.post.inputs.multiline {
-            true => {
-                let text_near_cursor = get_context_near_cursor(&text, pos.line as usize, 20);
-                search_vecdb(
-                    self.vecdb_search.clone(),
-                    self.t.clone(),
-                    text_near_cursor,
-                    (limit as f32 * 0.5) as usize
-                ).await
+        let (extra_context, mut tokens_used) = match *self.vecdb_search.lock().await {
+            Some(ref db) => {
+                match self.post.no_cache || self.post.inputs.multiline {
+                    true => {
+                        let text_near_cursor = get_context_near_cursor(&text, pos.line as usize, 20);
+                        search_vecdb(
+                            db,
+                            self.t.clone(),
+                            text_near_cursor,
+                            (limit as f32 * 0.5) as usize
+                        ).await
+                    }
+                    false => (String::new(), 0)
+                }
             }
-            false => (String::new(), 0)
+            None => (String::new(), 0)
         };
 
         let mut before_line = before_iter.next();
@@ -309,12 +314,12 @@ fn get_context_near_cursor(text: &Rope, line_pos: usize, max_lines_count: usize)
 }
 
 async fn search_vecdb<T>(
-    vecdb_search: Arc<AMutex<Box<T>>>,
+    vecdb_search: &T,
     tokenizer: HasTokenizerAndEot,
     text_near_cursor: String,
     max_context_size: usize
 ) -> (String, i32) where T: VecdbSearch + Send {
-    let search_result = vecdb_search.lock().await.search(text_near_cursor, 20).await;
+    let search_result = vecdb_search.search(text_near_cursor, 20).await;
 
     let init_cfc_text = "Here are some relevant code fragments from other files of the repo:\n\n";
     let mut tokens_used = tokenizer.count_tokens(init_cfc_text).expect(

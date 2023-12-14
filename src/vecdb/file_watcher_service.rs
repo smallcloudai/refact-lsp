@@ -71,9 +71,10 @@ pub async fn file_watcher_task(
                 vec![]
             }
         };
-        global_context.read().await.vec_db.lock().await.add_or_update_files(
-            filenames_data, true,
-        ).await;
+        match *global_context.read().await.vec_db.lock().await {
+            Some(ref mut db) => db.add_or_update_files(filenames_data, true).await,
+            None => {}
+        };
     };
 
     if watcher.watch(path.as_ref(), RecursiveMode::Recursive).is_err() {

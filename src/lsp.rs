@@ -7,7 +7,7 @@ use std::time::Instant;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock as ARwLock};
+use tokio::sync::{MutexGuard, RwLock as ARwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::{ClientSocket, LanguageServer, LspService};
 use tower_lsp::jsonrpc::{Error, Result};
@@ -21,6 +21,7 @@ use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
 use crate::telemetry;
 use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
+use crate::vecdb::vecdb::VecDb;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -148,7 +149,7 @@ impl Backend {
             model: "".to_string(),
             scratchpad: "".to_string(),
             stream: false,
-            no_cache: false
+            no_cache: false,
         }
     }
 
@@ -168,18 +169,18 @@ impl Backend {
 
     pub async fn test_if_head_tail_equal_return_added_text(&self, params: TestHeadTailAddedText) -> Result<TestHeadTailAddedTextRes> {
         let (is_valid, grey_corrected) = telemetry::utils::if_head_tail_equal_return_added_text(
-            &params.text_a, &params.text_b, &params.orig_grey_text
+            &params.text_a, &params.text_b, &params.orig_grey_text,
         );
         let mut unchanged_percentage = -1.;
         if is_valid {
             unchanged_percentage = telemetry::utils::unchanged_percentage(
                 &params.orig_grey_text,
-                &grey_corrected
+                &grey_corrected,
             );
         }
-        Ok(TestHeadTailAddedTextRes{is_valid, grey_corrected, unchanged_percentage})
+        Ok(TestHeadTailAddedTextRes { is_valid, grey_corrected, unchanged_percentage })
     }
- }
+}
 
 
 #[tower_lsp::async_trait]
@@ -194,7 +195,12 @@ impl LanguageServer for Backend {
             let files = retrieve_files_by_proj_folders(
                 folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
             ).await;
-            self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, true).await;
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref db) => db.add_or_update_files(files, true).await,
+                None => {
+                    info!("LSP no vec_db");
+                }
+            };
         }
 
         let completion_options: CompletionOptions;
@@ -255,9 +261,10 @@ impl LanguageServer for Backend {
 
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
         }
 
         info!("{} changed, save time: {:?}", uri, t0.elapsed());
@@ -277,9 +284,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
         }
         info!("{uri} saved");
     }
@@ -291,9 +299,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
-            self.gcx.read().await.vec_db.lock().await.add_or_update_file(
-                file_path, false
-            ).await;
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
         }
         info!("{uri} closed");
     }
@@ -316,9 +325,15 @@ impl LanguageServer for Backend {
             .into_iter()
             .map(|x| PathBuf::from(x.uri.replace("file://", "")))
             .filter(|x| is_valid_file(&x));
-        for file in files {
-            self.gcx.read().await.vec_db.lock().await.remove_file(&file).await;
-        }
+
+        match *self.gcx.read().await.vec_db.lock().await {
+            Some(ref mut db) => {
+                for file in files {
+                    db.remove_file(&file).await;
+                }
+            }
+            None => {}
+        };
     }
 
     async fn did_create_files(&self, params: CreateFilesParams) {
@@ -327,7 +342,10 @@ impl LanguageServer for Backend {
             .map(|x| PathBuf::from(x.uri.replace("file://", "")))
             .filter(|x| is_valid_file(&x))
             .collect();
-        self.gcx.read().await.vec_db.lock().await.add_or_update_files(files, false).await;
+        match *self.gcx.read().await.vec_db.lock().await {
+            Some(ref mut db) => db.add_or_update_files(files, false).await,
+            None => {}
+        };
     }
 }
 
@@ -348,12 +366,12 @@ fn build_lsp_service(
 
 pub fn spawn_lsp_task(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
-    cmdline: CommandLine
+    cmdline: CommandLine,
 ) -> Option<JoinHandle<()>> {
     if cmdline.lsp_stdin_stdout == 0 && cmdline.lsp_port > 0 {
         let gcx_t = gcx.clone();
         let addr: std::net::SocketAddr = ([127, 0, 0, 1], cmdline.lsp_port).into();
-        return Some(tokio::spawn( async move {
+        return Some(tokio::spawn(async move {
             let listener: TcpListener = TcpListener::bind(&addr).await.unwrap();
             info!("LSP listening on {}", listener.local_addr().unwrap());
             loop {
@@ -376,7 +394,7 @@ pub fn spawn_lsp_task(
 
     if cmdline.lsp_stdin_stdout != 0 && cmdline.lsp_port == 0 {
         let gcx_t = gcx.clone();
-        return Some(tokio::spawn( async move {
+        return Some(tokio::spawn(async move {
             let stdin = tokio::io::stdin();
             let stdout = tokio::io::stdout();
             let (lsp_service, socket) = build_lsp_service(gcx_t.clone());

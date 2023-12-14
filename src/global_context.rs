@@ -60,7 +60,7 @@ pub struct GlobalContext {
     pub tokenizer_map: HashMap< String, Arc<StdRwLock<Tokenizer>>>,
     pub completions_cache: Arc<StdRwLock<CompletionCache>>,
     pub telemetry: Arc<StdRwLock<telemetry_structs::Storage>>,
-    pub vec_db: Arc<AMutex<Box<VecDb>>>,
+    pub vec_db: Arc<AMutex<Option<VecDb>>>,
     pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
 }
 
@@ -156,22 +156,35 @@ pub async fn create_global_context(
         http_client_builder = http_client_builder.danger_accept_invalid_certs(true)
     }
     let http_client = http_client_builder.build().unwrap();
+    let vec_db = match VecDb::init(
+        cache_dir.clone(), cmdline.clone(),
+        384, 60, 512, 1024,
+        "BAAI/bge-small-en-v1.5".to_string()
+    ).await {
+        Ok(res) => Some(res),
+        Err(err) => {
+            error!("Ooops database is broken!
+                    Last error message: {}
+                    You can report this issue here:
+                    https://github.com/smallcloudai/refact-lsp/issues
+                    Also you can run this to erase your db:
+                    `rm -rf ~/.cache/refact/refact_vecdb_cache`
+                    After that restart this LSP server or your IDE.", err);
+            None
+        }
+    };
 
     let cx = GlobalContext {
         cmdline: cmdline.clone(),
         http_client: http_client,
         http_client_slowdown: Arc::new(Mutex::new(Slowdown { requests_in_flight: 0 })),
-        cache_dir: cache_dir.clone(),
+        cache_dir: cache_dir,
         caps: None,
         caps_last_attempted_ts: 0,
         tokenizer_map: HashMap::new(),
         completions_cache: Arc::new(StdRwLock::new(CompletionCache::new())),
         telemetry: Arc::new(StdRwLock::new(telemetry_structs::Storage::new())),
-        vec_db: Arc::new(AMutex::new(Box::new(VecDb::new(
-            cache_dir, cmdline.clone(),
-            384, 60, 512, 1024,
-            "BAAI/bge-small-en-v1.5".to_string()
-        ).await))),
+        vec_db: Arc::new(AMutex::new(vec_db)),
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
     };
     (Arc::new(ARwLock::new(cx)), ask_shutdown_receiver, cmdline)

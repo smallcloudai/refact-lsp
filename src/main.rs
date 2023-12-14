@@ -6,6 +6,7 @@ use tracing_appender;
 use crate::background_tasks::start_background_tasks;
 use crate::lsp::spawn_lsp_task;
 use crate::telemetry::{basic_transmit, snippets_transmit};
+use crate::vecdb::vecdb::VecDb;
 
 mod global_context;
 mod caps;
@@ -62,9 +63,10 @@ async fn main() {
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
     }
-    background_tasks.extend(
-        gcx.read().await.vec_db.lock().await.start_background_tasks().await
-    );
+    background_tasks.extend(match *gcx.read().await.vec_db.lock().await {
+        Some(ref db) => db.start_background_tasks().await,
+        None => vec![]
+    });
 
     let gcx_clone = gcx.clone();
     let server = http::start_server(gcx_clone, ask_shutdown_receiver);

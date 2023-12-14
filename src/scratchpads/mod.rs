@@ -35,9 +35,9 @@ pub async fn create_code_completion_scratchpad<T>(
     scratchpad_patch: &serde_json::Value,
     cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
     tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
-    vecdb_search: Arc<AMutex<Box<T>>>,
+    vecdb_search: Arc<AMutex<Option<T>>>,
 ) -> Result<Box<dyn ScratchpadAbstract>, String>
-    where T: VecdbSearch + 'static {
+    where T: VecdbSearch + 'static + Sync {
     let mut result: Box<dyn ScratchpadAbstract>;
     let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context, model_name_for_tokenizer).await?;
     if scratchpad_name == "FIM-PSM" {
@@ -59,9 +59,9 @@ pub async fn create_chat_scratchpad<T>(
     post: ChatPost,
     scratchpad_name: &str,
     scratchpad_patch: &serde_json::Value,
-    vecdb_search: Arc<AMutex<Box<T>>>,
+    vecdb_search: Arc<AMutex<Option<T>>>,
 ) -> Result<Box<dyn ScratchpadAbstract>, String>
-    where T: VecdbSearch + 'static {
+    where T: VecdbSearch + 'static + Sync {
     let mut result: Box<dyn ScratchpadAbstract>;
     if scratchpad_name == "CHAT-GENERIC" {
         let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context, model_name_for_tokenizer).await?;
