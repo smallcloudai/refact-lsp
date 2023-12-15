@@ -93,6 +93,7 @@ pub async fn compress_tele_completion_to_file(
         storage_locked.snippet_data_accumulators.clear();
     }
     if records.as_array().unwrap().is_empty() {
+        info!("no completion telemetry to save");
         return;
     }
 

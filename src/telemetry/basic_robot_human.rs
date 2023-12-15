@@ -88,7 +88,7 @@ fn compress_robot_human(
         );
         for entry in entries {
             record.human_characters += entry.human_characters;
-            record.robot_characters += entry.robot_characters;
+            record.robot_characters += entry.robot_characters + entry.robot_characters_acc_baseline;
             record.completions_cnt += entry.used_snip_ids.len() as i64;
         }
         compressed_vec.push(record);
@@ -118,6 +118,7 @@ pub async fn tele_robot_human_compress_to_file(
         storage_locked.tele_robot_human.clear();
     }
     if records.as_array().unwrap().is_empty() {
+        info!("no robot_human telemetry to save");
         return;
     }
     let (dir, _) = utils::telemetry_storage_dirs(&cache_dir).await;
