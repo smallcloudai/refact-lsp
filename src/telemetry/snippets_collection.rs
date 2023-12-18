@@ -11,6 +11,7 @@ use crate::call_validation::CodeCompletionPost;
 use crate::telemetry::telemetry_structs;
 use crate::telemetry::basic_robot_human;
 use crate::telemetry::basic_comp_counters;
+use crate::telemetry::telemetry_structs::SnippetTracker;
 use crate::telemetry::utils;
 
 
@@ -88,6 +89,7 @@ pub async fn snippet_accepted(
     let snip = storage_locked.tele_snippets.iter_mut().find(|s| s.snippet_telemetry_id == snippet_telemetry_id);
     if let Some(snip) = snip {
         snip.accepted_ts = chrono::Local::now().timestamp();
+        info!("snippet_accepted: ID{}: snippet is accepted", snippet_telemetry_id);
         return true;
     }
     return false;
@@ -101,7 +103,7 @@ pub async fn sources_changed(
 ) {
     let tele_storage = gcx.read().await.telemetry.clone();
     let mut storage_locked = tele_storage.write().unwrap();
-    let mut finished_snips = vec![];
+    let mut accepted_snippets = vec![];
     for snip in storage_locked.tele_snippets.iter_mut() {
         if snip.accepted_ts == 0 || !uri.ends_with(&snip.inputs.cursor.file) {
             continue;
@@ -113,6 +115,13 @@ pub async fn sources_changed(
         if !orig_text.is_some() {
             continue;
         }
+
+        // if snip.id is not in the list of finished snippets, add it
+        if !accepted_snippets.iter().any(|s: &SnippetTracker| s.snippet_telemetry_id == snip.snippet_telemetry_id) {
+            accepted_snippets.push(snip.clone());
+            info!("sources_changed: ID{}: snippet is added to accepted", snip.snippet_telemetry_id);
+        }
+
         let (grey_valid, mut grey_corrected) = utils::if_head_tail_equal_return_added_text(
             orig_text.unwrap(),
             text,
@@ -126,16 +135,13 @@ pub async fn sources_changed(
         } else {
             if snip.remaining_percentage >= 0. {
                 snip.finished_ts = chrono::Local::now().timestamp();
-                info!("ID{}: snip {} is finished with score={}!", snip.snippet_telemetry_id, snip.grey_text, snip.remaining_percentage);
-                finished_snips.push(snip.clone());
             } else {
-                info!("ID{}: snip {} is finished with accepted = false", snip.snippet_telemetry_id, snip.grey_text);
                 snip.accepted_ts = 0;  // that will cleanup and not send
             }
         }
     }
 
-    for snip in finished_snips {
+    for snip in accepted_snippets {
         basic_robot_human::increase_counters_from_finished_snippet(&mut storage_locked.tele_robot_human, uri, text, &snip);
         basic_comp_counters::create_data_accumulator_for_finished_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
     }
