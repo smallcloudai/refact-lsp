@@ -34,7 +34,7 @@ pub async fn on_did_open(
 ) {
     let t0 = Instant::now();
     let gcx_locked = gcx.read().await;
-    let document_map = &gcx_locked.lsp_backend_data.document_map;
+    let document_map = &gcx_locked.lsp_backend_document_state.document_map;
     let rope = ropey::Rope::from_str(&text);
     let mut document_map_locked = document_map.write().await;
     *document_map_locked
@@ -52,7 +52,7 @@ pub async fn on_did_change(
     let t0 = Instant::now();
 
     let gcx_locked = gcx.read().await;
-    let document_map = &gcx_locked.lsp_backend_data.document_map;
+    let document_map = &gcx_locked.lsp_backend_document_state.document_map;
     let rope = ropey::Rope::from_str(&text);
     let mut document_map_locked = document_map.write().await;
     let doc = document_map_locked

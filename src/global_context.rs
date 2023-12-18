@@ -48,7 +48,7 @@ pub struct Slowdown {
     pub requests_in_flight: u64,
 }
 
-pub struct LSPBackendData {
+pub struct LSPBackendDocumentState {
     pub document_map: Arc<ARwLock<HashMap<String, Document>>>,
     pub workspace_folders: Arc<ARwLock<Option<Vec<WorkspaceFolder>>>>,
 }
@@ -66,7 +66,7 @@ pub struct GlobalContext {
     pub telemetry: Arc<StdRwLock<telemetry_structs::Storage>>,
     pub vecdb_search: Arc<AMutex<Box<dyn VecdbSearch + Send>>>,
     pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
-    pub lsp_backend_data: LSPBackendData,
+    pub lsp_backend_document_state: LSPBackendDocumentState,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;
@@ -174,7 +174,7 @@ pub async fn create_global_context(
         telemetry: Arc::new(StdRwLock::new(telemetry_structs::Storage::new())),
         vecdb_search: Arc::new(AMutex::new(Box::new(crate::vecdb_search::VecdbSearchTest::new()))),
         ask_shutdown_sender: Arc::new(Mutex::new(ask_shutdown_sender)),
-        lsp_backend_data: LSPBackendData {
+        lsp_backend_document_state: LSPBackendDocumentState {
             document_map: Arc::new(ARwLock::new(HashMap::new())),
             workspace_folders: Arc::new(ARwLock::new(None)),
         },

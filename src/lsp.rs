@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPosition, SamplingParameters};
 use crate::global_context;
-use crate::global_context::{CommandLine};
+use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
 use crate::telemetry;
 use crate::receive_workspace_changes;
@@ -107,7 +107,7 @@ pub struct CompletionRes {
 impl Backend {
     async fn flat_params_to_code_completion_post(&self, params: &CompletionParams1) -> CodeCompletionPost {
         let txt = {
-            let document_map = self.gcx.read().await.lsp_backend_data.document_map.clone();
+            let document_map = self.gcx.read().await.lsp_backend_document_state.document_map.clone();
             let document_map = document_map.read().await;
             let document = document_map
                 .get(params.text_document_position.text_document.uri.as_str())
@@ -174,8 +174,8 @@ impl LanguageServer for Backend {
         info!("LSP client_info {:?}", params.client_info);
         {
             let mut gcx_locked = self.gcx.write().await;
-            *gcx_locked.lsp_backend_data.workspace_folders.write().await = params.workspace_folders;
-            info!("LSP workspace_folders {:?}", gcx_locked.lsp_backend_data.workspace_folders);
+            *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders;
+            info!("LSP workspace_folders {:?}", gcx_locked.lsp_backend_document_state.workspace_folders);
         }
 
         let completion_options: CompletionOptions;

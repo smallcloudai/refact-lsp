@@ -29,7 +29,6 @@ pub async fn handle_v1_lsp_initialize(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    // Real work here
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(json!({"success": 1}).to_string()))
@@ -50,7 +49,6 @@ pub async fn handle_v1_lsp_did_change(
         &post.text,
     ).await;
 
-    // Real work here
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(json!({"success": 1}).to_string()))
