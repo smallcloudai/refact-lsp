@@ -73,8 +73,7 @@ async fn main() {
     }
 
     background_tasks.abort().await;
-    info!("starting: saving telemetry without sending, so should be quick");
+    info!("saving telemetry without sending, so should be quick");
     basic_transmit::telemetry_full_cycle(gcx.clone(), true).await;
-    info!("done: telemetry saving");
     info!("bb\n");
 }

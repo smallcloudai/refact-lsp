@@ -28,7 +28,7 @@ pub fn increase_counters_from_finished_snippet(
     fn robot_characters(snip: &SnippetTracker) -> i64 {
         let re = Regex::new(r"\s+").unwrap();
         let robot_characters = re.replace_all(&snip.grey_text, "").len() as i64;
-        info!("snippet: {}; robot_characters: {}", snip.grey_text, robot_characters);
+        info!("increase_counters_from_finished_snippet: ID: {}; robot_characters: {}", snip.snippet_telemetry_id, robot_characters);
         robot_characters
     }
     fn human_characters(rec: &TeleRobotHumanAccum, text: &String) -> i64 {

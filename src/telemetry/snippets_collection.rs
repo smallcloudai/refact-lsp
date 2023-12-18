@@ -135,6 +135,7 @@ pub async fn sources_changed(
         } else {
             if snip.remaining_percentage >= 0. {
                 snip.finished_ts = chrono::Local::now().timestamp();
+                // info!("ID{}: snippet is finished, remaining_percentage={}", snip.snippet_telemetry_id, snip.remaining_percentage);
             } else {
                 snip.accepted_ts = 0;  // that will cleanup and not send
             }

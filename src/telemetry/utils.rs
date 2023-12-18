@@ -208,12 +208,9 @@ pub fn unchanged_percentage(
     text_a: &String,
     text_b: &String,
 ) -> f64 {
-    let re = Regex::new(r"\s+").unwrap();
-    let text_a = re.replace_all(text_a, "").to_string();
-    let text_b = re.replace_all(text_b, "").to_string();
 
-    let diff = TextDiff::from_chars(&text_a, &text_b);
-    let mut common = 0;
+    let diff = TextDiff::from_chars(text_a, text_b);
+    let mut common_text = "".to_string();
     for c in diff.iter_all_changes() {
         match c.tag() {
             ChangeTag::Delete => {
@@ -221,10 +218,15 @@ pub fn unchanged_percentage(
             ChangeTag::Insert => {
             }
             ChangeTag::Equal => {
-                common += c.value().len();
+                common_text += c.value();
             }
         }
     }
+    let re = Regex::new(r"\s+").unwrap();
+    let text_a = re.replace_all(text_a, "").to_string();
+    let text_b = re.replace_all(text_b, "").to_string();
+    let common = re.replace_all(&common_text, "").len();
+
     let largest_of_two = text_a.len().max(text_b.len());
     (common as f64) / (largest_of_two as f64)
 }
