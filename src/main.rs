@@ -2,6 +2,8 @@ use std::io::Write;
 
 use tracing::{error, info};
 use tracing_appender;
+use std::sync::Arc;
+use tokio::sync::Mutex as AMutex;
 
 use crate::background_tasks::start_background_tasks;
 use crate::lsp::spawn_lsp_task;
@@ -24,6 +26,7 @@ mod http;
 mod background_tasks;
 mod receive_workspace_changes;
 mod vecdb;
+mod fetch_embedding;
 
 
 #[tokio::main]
@@ -63,10 +66,6 @@ async fn main() {
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
     }
-    background_tasks.extend(match *gcx.read().await.vec_db.lock().await {
-        Some(ref db) => db.start_background_tasks().await,
-        None => vec![]
-    });
 
     let gcx_clone = gcx.clone();
     let server = http::start_server(gcx_clone, ask_shutdown_receiver);
