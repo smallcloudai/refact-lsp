@@ -27,7 +27,7 @@ fn get_base_url() -> String {
 pub fn get_embedding(
     text: String,
     model_name: &String,
-    api_key: String,
+    api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
     let url = format!("{}/models/{}", get_base_url(), model_name);
     let client = reqwest::Client::new();

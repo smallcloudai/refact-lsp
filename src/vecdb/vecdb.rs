@@ -2,8 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tracing::info;
+use tokio::sync::Mutex as AMutex;
 use tokio::task::JoinHandle;
+use crate::global_context::GlobalContext;
+use tokio::sync::RwLock as ARwLock;
+use tracing::error;
 
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
 use crate::vecdb::req_client::get_embedding;
@@ -13,9 +17,42 @@ use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
 #[derive(Debug)]
 pub struct VecDb {
     vecdb_handler: VecDBHandlerRef,
-    retriever_service: Arc<Mutex<FileVectorizerService>>,
+    retriever_service: Arc<AMutex<FileVectorizerService>>,
     embedding_model_name: String,
     cmdline: crate::global_context::CommandLine,
+}
+
+
+pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> Option<VecDb> {
+    let gcx_locked = gcx.read().await;
+    let cache_dir = gcx_locked.cache_dir.clone();
+    let cmdline = gcx_locked.cmdline.clone();
+    let mut vec_db = None;
+
+    let caps_mb = gcx_locked.caps.clone();
+    if caps_mb.is_none() {
+        return None;
+    }
+    let _caps = caps_mb.unwrap();
+
+    vec_db = match VecDb::init(
+        cache_dir, cmdline,
+        384, 60, 512, 1024,
+        "BAAI/bge-small-en-v1.5".to_string()
+    ).await {
+        Ok(res) => Some(res),
+        Err(err) => {
+            error!("Ooops database is broken!
+                Last error message: {}
+                You can report this issue here:
+                https://github.com/smallcloudai/refact-lsp/issues
+                Also, you can run this to erase your db:
+                `rm -rf ~/.cache/refact/refact_vecdb_cache`
+                After that restart this LSP server or your IDE.", err);
+            None
+        }
+    };
+    vec_db
 }
 
 
@@ -33,8 +70,8 @@ impl VecDb {
             Ok(res) => res,
             Err(err) => { return Err(err) }
         };
-        let vecdb_handler = Arc::new(Mutex::new(handler));
-        let retriever_service = Arc::new(Mutex::new(FileVectorizerService::new(
+        let vecdb_handler = Arc::new(AMutex::new(handler));
+        let retriever_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(), cooldown_secs, splitter_window_size, splitter_soft_limit,
             embedding_model_name.clone(), cmdline.api_key.clone(),
         ).await));
@@ -73,7 +110,7 @@ impl VecDb {
 impl VecdbSearch for VecDb {
     async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let embedding = get_embedding(
-            query.clone(), &self.embedding_model_name, self.cmdline.api_key.clone(),
+            query.clone(), &self.embedding_model_name, &self.cmdline.api_key,
         ).await.unwrap();
         match embedding {
             Ok(vector) => {
