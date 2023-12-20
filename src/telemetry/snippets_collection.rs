@@ -11,7 +11,7 @@ use crate::call_validation::CodeCompletionPost;
 use crate::telemetry::telemetry_structs;
 use crate::telemetry::basic_robot_human;
 use crate::telemetry::basic_comp_counters;
-use crate::telemetry::telemetry_structs::SnippetTracker;
+use crate::telemetry::telemetry_structs::{InitFileText, SnippetTracker};
 use crate::telemetry::utils;
 
 
@@ -96,6 +96,23 @@ pub async fn snippet_accepted(
 }
 
 
+fn get_init_file_text(
+    init_file_text_mb: Option<&InitFileText>,
+    snip: &SnippetTracker
+) -> String {
+    if init_file_text_mb.is_some() {
+        init_file_text_mb.unwrap().file_text.clone()
+    } else {
+        let sources_init_file_text_mb = snip.inputs.sources.get(&snip.inputs.cursor.file);
+        if sources_init_file_text_mb.is_some() {
+            sources_init_file_text_mb.unwrap().clone()
+        } else {
+            String::new()
+        }
+    }
+}
+
+
 pub async fn sources_changed(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
     uri: &String,
@@ -103,6 +120,30 @@ pub async fn sources_changed(
 ) {
     let tele_storage = gcx.read().await.telemetry.clone();
     let mut storage_locked = tele_storage.write().unwrap();
+
+    // fill init_file_texts if not filled yet
+    if storage_locked.init_file_texts.iter().find(|s| s.uri == *uri).is_none() {
+        storage_locked.init_file_texts.push(telemetry_structs::InitFileText {
+            uri: uri.clone(),
+            file_text: text.clone(),
+        });
+    }
+
+    if storage_locked.progress_file_texts.iter().find(|s| s.uri == *uri).is_none() {
+        storage_locked.progress_file_texts.push(telemetry_structs::ProgressFileText {
+            uri: uri.clone(),
+            file_text: text.clone(),
+        });
+    } else {
+        let mut progress_file_text = storage_locked.progress_file_texts.iter_mut().find(|s| s.uri == *uri).unwrap();
+        progress_file_text.file_text = text.clone();
+    }
+
+    if storage_locked.progress_file_texts.len() > 100 {
+        storage_locked.progress_file_texts.remove(0);
+    }
+
+
     let mut accepted_snippets = vec![];
     for snip in storage_locked.tele_snippets.iter_mut() {
         if snip.accepted_ts == 0 || !uri.ends_with(&snip.inputs.cursor.file) {
@@ -142,8 +183,12 @@ pub async fn sources_changed(
         }
     }
 
+
     for snip in accepted_snippets {
-        basic_robot_human::increase_counters_from_finished_snippet(&mut storage_locked.tele_robot_human, uri, text, &snip);
+        let init_file_text_mb = storage_locked.init_file_texts.iter().find(|s| s.uri == *uri);
+        let init_file_text = get_init_file_text(init_file_text_mb, &snip);
+
+        basic_robot_human::increase_counters_from_finished_snippet(&mut storage_locked.tele_robot_human, uri, text, &snip, &init_file_text);
         basic_comp_counters::create_data_accumulator_for_finished_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
     }
     basic_comp_counters::on_file_text_changed(&mut storage_locked.snippet_data_accumulators, uri, text);

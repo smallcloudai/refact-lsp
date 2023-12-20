@@ -91,6 +91,7 @@ pub async fn send_telemetry_files_to_mothership(
 pub async fn telemetry_full_cycle(
     global_context: Arc<ARwLock<global_context::GlobalContext>>,
     skip_sending_part: bool,
+    skip_compression_part: bool,
 ) -> () {
     info!("basic telemetry compression starts");
     let caps: Option<Arc<StdRwLock<CodeAssistantCaps>>>;
@@ -111,9 +112,13 @@ pub async fn telemetry_full_cycle(
         telemetry_basic_dest = caps.clone().unwrap().read().unwrap().telemetry_basic_dest.clone();
     }
 
-    basic_network::compress_basic_telemetry_to_file(global_context.clone()).await;
-    basic_robot_human::tele_robot_human_compress_to_file(global_context.clone()).await;
-    basic_comp_counters::compress_tele_completion_to_file(global_context.clone()).await;
+    if !skip_compression_part {
+        basic_network::compress_basic_telemetry_to_file(global_context.clone()).await;
+        basic_robot_human::tele_robot_human_compress_to_file(global_context.clone()).await;
+        basic_comp_counters::compress_tele_completion_to_file(global_context.clone()).await;
+    } else {
+        info!("skip_compression_part is true, skip");
+    }
 
     if enable_basic_telemetry && !telemetry_basic_dest.is_empty() && !skip_sending_part {
         send_telemetry_files_to_mothership(
@@ -141,9 +146,15 @@ pub async fn telemetry_full_cycle(
 pub async fn telemetry_background_task(
     global_context: Arc<ARwLock<global_context::GlobalContext>>,
 ) -> () {
+    let mut skip_compression_part = true;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
-        telemetry_full_cycle(global_context.clone(), false).await;
+        telemetry_full_cycle(
+            global_context.clone(),
+            false,
+            skip_compression_part,
+        ).await;
+        skip_compression_part = false;
         tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS - TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
     }
 }

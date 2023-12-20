@@ -12,6 +12,9 @@ pub struct Storage {
     pub tele_snippets: Vec<SnippetTracker>,
     pub tele_snippet_next_id: u64,
     pub snippet_data_accumulators: Vec<TeleCompletionAccum>,
+
+    pub init_file_texts: Vec<InitFileText>,
+    pub progress_file_texts: Vec<ProgressFileText>,
 }
 
 impl Storage {
@@ -23,8 +26,24 @@ impl Storage {
             tele_snippets: Vec::new(),
             tele_snippet_next_id: 100,
             snippet_data_accumulators: Vec::new(),
+
+            init_file_texts: Vec::new(),
+            progress_file_texts: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ProgressFileText {
+    pub uri: String,
+    pub file_text: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct InitFileText {
+    pub uri: String,
+    pub file_text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -60,7 +79,7 @@ pub struct SnippetTracker {
     pub finished_ts: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct TeleRobotHumanAccum {
     // Internal struct, not sent anywhere
     pub uri: String,
@@ -78,7 +97,7 @@ pub struct TeleRobotHumanAccum {
 
 impl TeleRobotHumanAccum {
     pub fn new(
-        uri: String, model: String, baseline_text: String, robot_characters_acc_baseline: i64, used_snip_ids: Vec<u64>
+        uri: String, model: String, baseline_text: String, robot_characters_acc_baseline: i64, human_characters: i64, used_snip_ids: Vec<u64>
     ) -> Self {
         Self {
             uri: uri.clone(),
@@ -88,7 +107,7 @@ impl TeleRobotHumanAccum {
             baseline_updated_ts: 0,
             robot_characters_acc_baseline,
             robot_characters: 0,
-            human_characters: 0,
+            human_characters,
             used_snip_ids,
         }
     }
