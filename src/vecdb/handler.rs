@@ -45,7 +45,7 @@ pub struct VecDBHandler {
 
 async fn table_record_batch(schema: &SchemaRef, table: &Table) -> Result<RecordBatch, Error> {
     // expose the private dataset field
-    let dataset = table.search(Float32Array::from_iter_values([1.0])).dataset.clone();
+    let dataset = table.search(Some(Float32Array::from_iter_values([1.0]))).dataset.clone();
     let batches = dataset.scan()
         .try_into_stream()
         .await?
@@ -373,7 +373,7 @@ impl VecDBHandler {
 
     pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
         let query = self.data_table
-            .search(Float32Array::from(embedding.clone()))
+            .search(Some(Float32Array::from(embedding.clone())))
             .limit(top_n)
             .use_index(true)
             .execute()
