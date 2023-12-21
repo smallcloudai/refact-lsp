@@ -4,7 +4,7 @@ use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-
+use std::time::SystemTime;
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
 use arrow::compute::concat_batches;
@@ -17,8 +17,10 @@ use futures_util::TryStreamExt;
 use lance::dataset::{WriteMode, WriteParams};
 use lance::Error;
 use log::info;
+use similar::DiffableStr;
 use tempfile::{tempdir, TempDir};
 use tokio::sync::Mutex;
+use tracing::error;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
@@ -39,19 +41,7 @@ pub struct VecDBHandler {
     data_table: Table,
     schema: SchemaRef,
     data_table_hashes: HashSet<String>,
-    hashes_cache: HashMap<String, Record>,
     embedding_size: i32,
-}
-
-async fn table_record_batch(schema: &SchemaRef, table: &Table) -> Result<RecordBatch, Error> {
-    // expose the private dataset field
-    let dataset = table.search(Some(Float32Array::from_iter_values([1.0]))).dataset.clone();
-    let batches = dataset.scan()
-        .try_into_stream()
-        .await?
-        .try_collect::<Vec<_>>()
-        .await?;
-    Ok(concat_batches(&schema, &batches)?)
 }
 
 fn cosine_similarity(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
@@ -101,7 +91,9 @@ impl VecDBHandler {
             Field::new("start_line", DataType::UInt64, true),
             Field::new("end_line", DataType::UInt64, true),
             Field::new("time_added", DataType::UInt64, true),
+            Field::new("time_last_used", DataType::UInt64, true),
             Field::new("model_name", DataType::Utf8, true),
+            Field::new("used_counter", DataType::UInt64, true),
         ]));
         let cache_table = match cache_database.open_table("data").await {
             Ok(table) => { table }
@@ -119,20 +111,6 @@ impl VecDBHandler {
             Err(err) => return Err(format!("{:?}", err))
         };
 
-        let hashes_record_batch = match table_record_batch(&schema, &cache_table).await {
-            Ok(batch) => batch,
-            Err(err) => return Err(format!("{:?}", err))
-        };
-        let maybe_hashes_cache_iter = VecDBHandler::parse_table_iter(hashes_record_batch, true, None);
-        let hashes_cache: HashMap<String, Record> = match maybe_hashes_cache_iter {
-            Ok(hashes_cache_iter) => {
-                hashes_cache_iter.iter().map(|x| {
-                    (x.window_text_hash.clone(), x.clone())
-                }).collect()
-            }
-            Err(_) => HashMap::new()
-        };
-
         Ok(VecDBHandler {
             cache_database,
             data_database_temp_dir,
@@ -140,11 +118,21 @@ impl VecDBHandler {
             cache_table,
             data_table,
             data_table_hashes: HashSet::new(),
-            hashes_cache,
             embedding_size,
         })
     }
-
+    
+    async fn checkout(&mut self) {
+        match self.data_table.checkout_latest().await {
+            Ok(table) => { self.data_table = table }
+            Err(err) => error!("Error while checking out data table: {:?}", err)
+        }
+        match self.cache_table.checkout_latest().await {
+            Ok(table) => { self.cache_table = table }
+            Err(err) => error!("Error while checking out data table: {:?}", err)
+        }
+    }
+    
     pub async fn size(&self) -> Result<usize, String> {
         match self.data_table.count_rows().await {
             Ok(size) => Ok(size),
@@ -158,17 +146,59 @@ impl VecDBHandler {
             Err(err) => Err(format!("{:?}", err))
         }
     }
+    
+    async fn get_records(&mut self, table: Table, _hashes: Vec<String>) -> (Vec<Record>, Vec<String>) {
+        let mut hashes: HashSet<String> = HashSet::from_iter(_hashes);
+        let q = hashes.iter().map(|x| format!("'{}'", x)).collect::<Vec<String>>().join(", ");
+        let records = table
+            .filter(format!("window_text_hash in ({})", q))
+            .execute()
+            .await.unwrap()
+            .try_collect::<Vec<_>>()
+            .await.unwrap();
+        let record_batch = concat_batches(&self.schema, &records).unwrap();
+        let records = VecDBHandler::parse_table_iter(record_batch, true, None).unwrap();
+        for r in &records {
+            hashes.remove(&r.window_text_hash);
+        }
+        (records, hashes.into_iter().collect())
+    }
+
+    pub async fn get_records_from_data(&mut self, hashes: Vec<String>) -> (Vec<Record>, Vec<String>) {
+        self.get_records(self.data_table.clone(), hashes).await
+    }
+    pub async fn get_records_from_cache(&mut self, hashes: Vec<String>) -> (Vec<Record>, Vec<String>) {
+        self.get_records(self.cache_table.clone(), hashes).await
+    }
+    
+    async fn get_record(&mut self, table: Table, hash: String) -> vectordb::error::Result<Record> {
+        let records = table
+            .filter(format!("window_text_hash == '{}'", hash))
+            .execute()
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        let record_batch = concat_batches(&self.schema, &records)?;
+        let records = VecDBHandler::parse_table_iter(record_batch, true, None)?;
+        match records.get(0) {
+            Some(x) => Ok(x.clone()),
+            None => Err(vectordb::error::Error::Lance{ message: format!("No record found for hash: {}", hash)})
+        }
+    }
+    
+    pub async fn get_record_from_data(&mut self, hash: String) -> vectordb::error::Result<Record> {
+        self.get_record(self.data_table.clone(), hash).await
+    }
+    pub async fn get_record_from_cache(&mut self, hash: String) -> vectordb::error::Result<Record> {
+        self.get_record(self.cache_table.clone(), hash).await
+    }
 
     pub async fn try_add_from_cache(&mut self, data: Vec<SplitResult>) -> Vec<SplitResult> {
-        let mut found_records: Vec<Record> = Vec::new();
-        let mut left_results: Vec<SplitResult> = Vec::new();
-
-        for split_result in data {
-            match self.hashes_cache.get(&split_result.window_text_hash) {
-                Some(value) => found_records.push(value.clone()),
-                None => left_results.push(split_result),
-            }
-        }
+        let hashes = data.iter().map(|x| x.window_text_hash.clone()).collect();
+        let (found_records, left_hashes) = self.get_records_from_cache(hashes).await;
+        let mut left_results: Vec<SplitResult> = 
+            data.into_iter().filter(|x|left_hashes.contains(&x.window_text_hash)).collect();
+        
         match self.add_or_update(found_records, false).await {
             Ok(_) => {}
             Err(err) => info!("Error while adding values from cache: {:?}", err),
@@ -219,7 +249,11 @@ impl VecDBHandler {
         let time_adds: Vec<u64> = records.iter().map(|x| x.time_added.duration_since(std::time::UNIX_EPOCH).unwrap_or(
             Duration::from_secs(0)
         ).as_secs()).collect();
+        let time_last_used: Vec<u64> = records.iter().map(|x| x.time_last_used.duration_since(std::time::UNIX_EPOCH).unwrap_or(
+            Duration::from_secs(0)
+        ).as_secs()).collect();
         let model_names: Vec<String> = records.iter().map(|x| x.model_name.clone()).collect();
+        let used_counters: Vec<u64> = records.iter().map(|x| x.used_counter).collect();
         let data_batches_iter = RecordBatchIterator::new(
             vec![RecordBatch::try_new(
                 self.schema.clone(),
@@ -231,7 +265,9 @@ impl VecDBHandler {
                     Arc::new(UInt64Array::from(start_lines.clone())),
                     Arc::new(UInt64Array::from(end_lines.clone())),
                     Arc::new(UInt64Array::from(time_adds.clone())),
+                    Arc::new(UInt64Array::from(time_last_used.clone())),
                     Arc::new(StringArray::from(model_names.clone())),
+                    Arc::new(UInt64Array::from(used_counters.clone())),
                 ],
             )],
             self.schema.clone(),
@@ -247,7 +283,9 @@ impl VecDBHandler {
                     Arc::new(UInt64Array::from(start_lines)),
                     Arc::new(UInt64Array::from(end_lines)),
                     Arc::new(UInt64Array::from(time_adds)),
+                    Arc::new(UInt64Array::from(time_last_used)),
                     Arc::new(StringArray::from(model_names)),
+                    Arc::new(UInt64Array::from(used_counters)),
                 ],
             )],
             self.schema.clone(),
@@ -259,9 +297,6 @@ impl VecDBHandler {
                     mode: WriteMode::Append,
                     ..Default::default()
                 }),
-            );
-            self.hashes_cache.extend(
-                records.iter().map(|x| (x.window_text_hash.clone(), x.clone())).collect::<Vec<_>>()
             );
             match cache_res.await {
                 Ok(_) => {}
@@ -362,17 +397,26 @@ impl VecDBHandler {
                             .expect("Missing column 'time_added'"))
                         .value(idx)
                 ),
+                time_last_used: std::time::UNIX_EPOCH + Duration::from_secs(
+                    as_primitive_array::<UInt64Type>(
+                        record_batch.column_by_name("time_last_used")
+                            .expect("Missing column 'time_last_used'"))
+                        .value(idx)
+                ),
                 model_name: as_string_array(record_batch.column_by_name("model_name")
                     .expect("Missing column 'model_name'"))
                     .value(idx)
                     .to_string(),
+                used_counter: as_primitive_array::<UInt64Type>(record_batch.column_by_name("used_counter")
+                    .expect("Missing column 'used_counter'"))
+                    .value(idx),
                 distance,
             })
         }).collect()
     }
 
-    pub async fn search(&self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
-        let query = self.data_table
+    pub async fn search(&mut self, embedding: Vec<f32>, top_n: usize) -> vectordb::error::Result<Vec<Record>> {
+        let query = self.data_table.clone()
             .search(Some(Float32Array::from(embedding.clone())))
             .limit(top_n)
             .use_index(true)
@@ -382,6 +426,20 @@ impl VecDBHandler {
             .await?;
         let record_batch = concat_batches(&self.schema, &query)?;
         VecDBHandler::parse_table_iter(record_batch, false, Some(&embedding))
+    }
+    
+    pub async fn update_record_statistic(&mut self, records: Vec<Record>) {
+        let now = SystemTime::now();
+        for record in records {
+            for mut table in vec![self.data_table.clone(), self.cache_table.clone()] {
+                let _ = table.update(Some(format!("window_text_hash == '{}'", record.window_text_hash.clone()).as_str()),
+                            vec![
+                                ("used_counter", &(&record.used_counter + 1).to_string()),
+                                ("time_last_used", &*now.elapsed().unwrap().as_secs().to_string()),
+                            ]).await.unwrap();
+            }
+            self.checkout().await;
+        }
     }
 }
 
@@ -425,7 +483,9 @@ mod tests {
                 start_line: 1,
                 end_line: 2,
                 time_added: SystemTime::now(),
+                time_last_used: SystemTime::now(),
                 model_name: "model1".to_string(),
+                used_counter: 0,
                 distance: 1.0,
             },
         ];
@@ -457,7 +517,9 @@ mod tests {
                 start_line: 3,
                 end_line: 4,
                 time_added: time_added,
+                time_last_used: time_added,
                 model_name: "model2".to_string(),
+                used_counter: 0,
                 distance: 1.0,
             },
         ];

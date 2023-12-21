@@ -122,6 +122,7 @@ async fn vectorize_thread(
         while let Some((data_res, handle)) = split_join_data.pop_front() {
             match handle.await {
                 Ok(Ok(result)) => {
+                    let now = SystemTime::now();
                     records.push(
                         Record {
                             vector: Some(result),
@@ -130,8 +131,10 @@ async fn vectorize_thread(
                             file_path: data_res.file_path,
                             start_line: data_res.start_line,
                             end_line: data_res.end_line,
-                            time_added: SystemTime::now(),
+                            time_added: now,
+                            time_last_used: now,
                             model_name: embedding_model_name.clone(),
+                            used_counter: 0,
                             distance: -1.0,
                         }
                     );

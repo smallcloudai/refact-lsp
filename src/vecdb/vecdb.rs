@@ -77,12 +77,13 @@ impl VecdbSearch for VecDb {
         ).await.unwrap();
         match embedding {
             Ok(vector) => {
-                let binding = self.vecdb_handler.lock().await;
-                let results = binding.search(vector, top_n);
+                let mut binding = self.vecdb_handler.lock().await;
+                let results = binding.search(vector, top_n).await.unwrap();
+                binding.update_record_statistic(results.clone()).await;
                 Ok(
                     SearchResult {
                         query_text: query,
-                        results: results.await.unwrap(),
+                        results: results,
                     }
                 )
             }
