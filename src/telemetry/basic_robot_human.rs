@@ -34,7 +34,7 @@ fn get_human_characters(
     let (added_characters, removed_characters) = utils::get_add_del_from_texts(baseline_text, text);
     // info!("added_characters: {}", added_characters);
     let real_characters_added = re.replace_all(&added_characters, "").len() as i64 - re.replace_all(&removed_characters, "").len() as i64;
-    let human_characters = 0.max(real_characters_added - robot_characters_acc_baseline);
+    let human_characters = real_characters_added - robot_characters_acc_baseline;
     // info!("human_characters: {}", human_characters);
     human_characters
 }
