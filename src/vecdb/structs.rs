@@ -37,7 +37,9 @@ pub struct Record {
     pub start_line: u64,
     pub end_line: u64,
     pub time_added: SystemTime,
+    pub time_last_used: SystemTime,
     pub model_name: String,
+    pub used_counter: u64,
     pub distance: f32,
 }
 
