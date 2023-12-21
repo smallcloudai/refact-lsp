@@ -74,6 +74,6 @@ async fn main() {
 
     background_tasks.abort().await;
     info!("saving telemetry without sending, so should be quick");
-    basic_transmit::basic_telemetry_send(gcx.clone()).await;
+    basic_transmit::basic_telemetry_compress(gcx.clone()).await;
     info!("bb\n");
 }
