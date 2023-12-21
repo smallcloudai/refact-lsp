@@ -14,31 +14,7 @@ pub struct Storage {
     pub snippet_data_accumulators: Vec<TeleCompletionAccum>,
 
     pub init_file_texts: Vec<InitFileText>,
-    pub progress_file_texts: Vec<ProgressFileText>,
 }
-
-impl Storage {
-    pub fn new() -> Self {
-        Self {
-            last_flushed_ts: chrono::Local::now().timestamp(),
-            tele_net: Vec::new(),
-            tele_robot_human: Vec::new(),
-            tele_snippets: Vec::new(),
-            tele_snippet_next_id: 100,
-            snippet_data_accumulators: Vec::new(),
-
-            init_file_texts: Vec::new(),
-            progress_file_texts: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ProgressFileText {
-    pub uri: String,
-    pub file_text: String,
-}
-
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct InitFileText {

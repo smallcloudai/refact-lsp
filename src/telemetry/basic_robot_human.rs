@@ -63,9 +63,9 @@ pub fn increase_counters_from_finished_snippet(
             rec.robot_characters_acc_baseline = 0;
             rec.baseline_text = text.clone();
         }
-        // info!("increasing for {}, human+{}, robot+{}", snip.snippet_telemetry_id, human_characters, robot_characters);
+        info!("increase_counters_from_finished_snippet for {}, human+{}, robot+{}", snip.snippet_telemetry_id, human_characters, robot_characters);
     } else {
-        // info!("increase_counters_from_finished_snippet: new uri {}", uri);
+        info!("increase_counters_from_finished_snippet: new uri {}", uri);
         let robot_characters = get_robot_characters(snip);
         let human_characters = get_human_characters(&init_file_text, text, robot_characters);
         tele_robot_human.push(TeleRobotHumanAccum::new(
@@ -98,18 +98,6 @@ fn compress_robot_human(
             key.1.clone()
         );
         for entry in entries {
-            let progress_file_text_mb= storage_locked.progress_file_texts.iter().find(|s| s.uri == entry.uri);
-            if let Some(progress_file_text) = progress_file_text_mb {
-                let human_characters = get_human_characters(
-                    &entry.baseline_text,
-                    &progress_file_text.file_text,
-                    entry.robot_characters_acc_baseline
-                );
-                // info!("entry_baseline_text: {}", entry.baseline_text);
-                // info!("progress_file_text: {}", progress_file_text.file_text);
-                // info!("compress_robot_human: human_characters: {}", human_characters);
-                record.human_characters += human_characters;
-            }
             record.human_characters += entry.human_characters;
             record.robot_characters += entry.robot_characters + entry.robot_characters_acc_baseline;
             record.completions_cnt += entry.used_snip_ids.len() as i64;
@@ -141,7 +129,7 @@ pub async fn tele_robot_human_compress_to_file(
         storage_locked.tele_robot_human.clear();
     }
     if records.as_array().unwrap().is_empty() {
-        // info!("no robot_human telemetry to save");
+        info!("no robot_human telemetry to save");
         return;
     }
     let (dir, _) = utils::telemetry_storage_dirs(&cache_dir).await;
@@ -154,7 +142,7 @@ pub async fn tele_robot_human_compress_to_file(
         "teletype": "robot_human",
         "enduser_client_version": enduser_client_version,
     });
-    // info!("robot_human telemetry save \"{}\"", fn_rh.to_str().unwrap());
+    info!("robot_human telemetry save \"{}\"", fn_rh.to_str().unwrap());
     let io_result = utils::file_save(fn_rh.clone(), big_json_rh).await;
     if io_result.is_err() {
         error!("error: {}", io_result.err().unwrap());

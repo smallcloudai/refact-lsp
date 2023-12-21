@@ -88,12 +88,19 @@ pub async fn send_telemetry_files_to_mothership(
     }
 }
 
-pub async fn telemetry_full_cycle(
+pub async fn basic_telemetry_compress(
     global_context: Arc<ARwLock<global_context::GlobalContext>>,
-    skip_sending_part: bool,
-    skip_compression_part: bool,
-) -> () {
+) {
     info!("basic telemetry compression starts");
+    basic_network::compress_basic_telemetry_to_file(global_context.clone()).await;
+    basic_robot_human::tele_robot_human_compress_to_file(global_context.clone()).await;
+    basic_comp_counters::compress_tele_completion_to_file(global_context.clone()).await;
+}
+
+pub async fn basic_telemetry_send(
+    global_context: Arc<ARwLock<global_context::GlobalContext>>,
+) -> () {
+    info!("basic telemetry sending starts");
     let caps: Option<Arc<StdRwLock<CodeAssistantCaps>>>;
     let api_key: String;
     let enable_basic_telemetry: bool;   // from command line, will not send anything if false
@@ -112,15 +119,7 @@ pub async fn telemetry_full_cycle(
         telemetry_basic_dest = caps.clone().unwrap().read().unwrap().telemetry_basic_dest.clone();
     }
 
-    if !skip_compression_part {
-        basic_network::compress_basic_telemetry_to_file(global_context.clone()).await;
-        basic_robot_human::tele_robot_human_compress_to_file(global_context.clone()).await;
-        basic_comp_counters::compress_tele_completion_to_file(global_context.clone()).await;
-    } else {
-        info!("skip_compression_part is true, skip");
-    }
-
-    if enable_basic_telemetry && !telemetry_basic_dest.is_empty() && !skip_sending_part {
+    if enable_basic_telemetry && !telemetry_basic_dest.is_empty() {
         send_telemetry_files_to_mothership(
             dir_compressed.clone(),
             dir_sent.clone(),
@@ -135,9 +134,6 @@ pub async fn telemetry_full_cycle(
         if telemetry_basic_dest.is_empty() {
             info!("basic telemetry dest is empty, skip");
         }
-        if skip_sending_part {
-            info!("skip_sending_part is true, skip");
-        }
     }
     cleanup_old_files(dir_compressed, TELEMETRY_FILES_KEEP).await;
     cleanup_old_files(dir_sent, TELEMETRY_FILES_KEEP).await;
@@ -149,12 +145,15 @@ pub async fn telemetry_background_task(
     let mut skip_compression_part = true;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
-        telemetry_full_cycle(
-            global_context.clone(),
-            false,
-            skip_compression_part,
-        ).await;
+
+        if !skip_compression_part {
+            basic_telemetry_compress(global_context.clone()).await;
+        }
         skip_compression_part = false;
+
+        basic_telemetry_send(global_context.clone()).await;
+
+
         tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS - TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
     }
 }

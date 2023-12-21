@@ -129,18 +129,8 @@ pub async fn sources_changed(
         });
     }
 
-    if storage_locked.progress_file_texts.iter().find(|s| s.uri == *uri).is_none() {
-        storage_locked.progress_file_texts.push(telemetry_structs::ProgressFileText {
-            uri: uri.clone(),
-            file_text: text.clone(),
-        });
-    } else {
-        let mut progress_file_text = storage_locked.progress_file_texts.iter_mut().find(|s| s.uri == *uri).unwrap();
-        progress_file_text.file_text = text.clone();
-    }
-
-    if storage_locked.progress_file_texts.len() > 100 {
-        storage_locked.progress_file_texts.remove(0);
+    if storage_locked.init_file_texts.len() > 50 {
+        storage_locked.init_file_texts.remove(0);
     }
 
 
