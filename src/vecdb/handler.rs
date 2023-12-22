@@ -21,6 +21,7 @@ use similar::DiffableStr;
 use tempfile::{tempdir, TempDir};
 use tokio::sync::Mutex;
 use tracing::error;
+use tracing_subscriber::fmt::format;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
@@ -55,6 +56,9 @@ fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
     1.0 - cosine_similarity(vec1, vec2)
 }
 
+const TWO_WEEKS: i32 = 2 * 7 * 24 * 3600;
+const ONE_MONTH: i32 = 30 * 24 * 3600;
+const MIN_LIKES: i32 = 3;
 
 impl VecDBHandler {
     pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> Result<VecDBHandler, String> {
@@ -440,6 +444,19 @@ impl VecDBHandler {
             }
             self.checkout().await;
         }
+    }
+    pub async fn cleanup_old_records(&mut self) -> Result<(), String> {
+        let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        let q = format!("{} - time_last_used > {TWO_WEEKS} AND used_counter < {MIN_LIKES}", now.as_secs());
+        self.cache_table.delete(&*q).await.expect("could not delete old records");
+        self.data_table.delete(&*q).await.expect("could not delete old records");
+        self.checkout().await;
+        
+        let q = format!("{} - time_last_used > {ONE_MONTH}", now.as_secs());
+        self.cache_table.delete(&*q).await.expect("could not delete old records");
+        self.data_table.delete(&*q).await.expect("could not delete old records");
+        self.checkout().await;
+        Ok(())
     }
 }
 
