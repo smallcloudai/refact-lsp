@@ -30,7 +30,7 @@ fn update_human_characters(
     text: &String,
 ) {
     let re = Regex::new(r"\s+").unwrap();
-    let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text);
+    let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text, true);
     let real_characters_added = re.replace_all(&added_characters, "").len() as i64 - re.replace_all(&removed_characters, "").len() as i64;
     let human_characters = real_characters_added - rec.robot_characters_acc_baseline;
     info!("human_characters: +{}; robot_characters: +{}", human_characters, rec.robot_characters_acc_baseline);

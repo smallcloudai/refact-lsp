@@ -19,6 +19,7 @@ pub async fn telemetry_storage_dirs(cache_dir: &PathBuf) -> (PathBuf, PathBuf) {
 pub fn get_add_del_from_texts(
     text_a: &String,
     text_b: &String,
+    only_one_deletion_allowed: bool,
 ) -> (String, String) {
     let mut text_a_copy = text_a.clone();
 
@@ -49,8 +50,16 @@ pub fn get_add_del_from_texts(
     for change in diff.iter_all_changes() {
         match change.tag() {
             ChangeTag::Delete => {
-                removed += change.value();
+                // if removed.is_empty()  {
+                //     removed += change.value();
+                // }
                 // info!("rem: {}; len: {}", change.value(), change.value().len());
+                if only_one_deletion_allowed {
+                    if !removed.is_empty() {
+                        continue;
+                    }
+                }
+                removed += change.value();
             }
             ChangeTag::Insert => {
                 added += change.value();
@@ -306,7 +315,7 @@ pub fn unchanged_percentage_approx(
         }
     }
 
-    let (texts_ab_added, _) = get_add_del_from_texts(text_a, text_b);
+    let (texts_ab_added, _) = get_add_del_from_texts(text_a, text_b, false);
 
     // info!("unchanged_percentage_approx for snip:\n{grey_text_a}");
     if texts_ab_added.is_empty() {
