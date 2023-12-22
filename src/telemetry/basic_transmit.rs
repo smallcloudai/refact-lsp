@@ -16,7 +16,7 @@ use crate::telemetry::utils::{sorted_json_files, read_file, cleanup_old_files, t
 
 
 const TELEMETRY_TRANSMIT_AFTER_START_SECONDS: u64 = 60;
-const TELEMETRY_TRANSMIT_EACH_N_SECONDS: u64 = 3600*3;
+const TELEMETRY_TRANSMIT_EACH_N_SECONDS: u64 = 3600;
 const TELEMETRY_FILES_KEEP: i32 = 128;
 
 
