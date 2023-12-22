@@ -154,6 +154,16 @@ async fn vectorize_thread(
     }
 }
 
+async fn cleanup_thread(vecdb_handler: VecDBHandlerRef) {
+    loop {
+        {
+            let mut vecdb = vecdb_handler.lock().await;
+            vecdb.cleanup_old_records().await;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(2 * 3600)).await;
+    }
+}
+
 impl FileVectorizerService {
     pub async fn new(
         vecdb_handler: VecDBHandlerRef,
@@ -207,8 +217,14 @@ impl FileVectorizerService {
                 self.api_key.clone(),
             )
         );
+        
+        let cleanup_thread_handle = tokio::spawn(
+            cleanup_thread(
+                self.vecdb_handler.clone()
+            )
+        );
 
-        return vec![cooldown_queue_join_handle, retrieve_thread_handle];
+        return vec![cooldown_queue_join_handle, retrieve_thread_handle, cleanup_thread_handle];
     }
 
     pub async fn process_file(&self, path: PathBuf, force: bool) {
