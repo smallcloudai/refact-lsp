@@ -158,7 +158,7 @@ async fn cleanup_thread(vecdb_handler: VecDBHandlerRef) {
     loop {
         {
             let mut vecdb = vecdb_handler.lock().await;
-            vecdb.cleanup_old_records().await;
+            let _ = vecdb.cleanup_old_records().await;
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(2 * 3600)).await;
     }

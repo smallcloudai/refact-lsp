@@ -40,6 +40,8 @@ pub struct CommandLine {
     pub lsp_stdin_stdout: u16,
     #[structopt(long, help="Trust self-signed SSL certificates")]
     pub insecure: bool,
+    #[structopt(long, help="Whether to use a vector database")]
+    pub vecdb: bool,
     #[structopt(long, short = "f", default_value = "", help = "The path to jsonl file which contains filtered source files")]
     pub files_set_path: String,
 }
@@ -69,7 +71,6 @@ pub struct GlobalContext {
     pub vec_db: Arc<AMutex<Option<VecDb>>>,
     pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
     pub lsp_backend_document_state: LSPBackendDocumentState,
-    pub ask_shutdown_sender: Arc<Mutex<std::sync::mpsc::Sender<String>>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;
@@ -164,23 +165,26 @@ pub async fn create_global_context(
         http_client_builder = http_client_builder.danger_accept_invalid_certs(true)
     }
     let http_client = http_client_builder.build().unwrap();
-    let vec_db = match VecDb::init(
-        cache_dir.clone(), cmdline.clone(),
-        384, 60, 512, 1024,
-        "BAAI/bge-small-en-v1.5".to_string()
-    ).await {
-        Ok(res) => Some(res),
-        Err(err) => {
-            error!("Ooops database is broken!
+    let mut vec_db: Option<VecDb> = None;
+    if cmdline.vecdb {
+        vec_db = match VecDb::init(
+            cache_dir.clone(), cmdline.clone(),
+            384, 60, 512, 1024,
+            "BAAI/bge-small-en-v1.5".to_string(),
+        ).await {
+            Ok(res) => Some(res),
+            Err(err) => {
+                error!("Ooops database is broken!
                     Last error message: {}
                     You can report this issue here:
                     https://github.com/smallcloudai/refact-lsp/issues
                     Also you can run this to erase your db:
                     `rm -rf ~/.cache/refact/refact_vecdb_cache`
                     After that restart this LSP server or your IDE.", err);
-            None
-        }
-    };
+                None
+            }
+        };
+    }
 
     let cx = GlobalContext {
         cmdline: cmdline.clone(),

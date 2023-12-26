@@ -1,27 +1,24 @@
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
+
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
 use arrow::compute::concat_batches;
 use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt64Array};
-use arrow_array::array::Array;
 use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
 use arrow_array::types::{Float32Type, UInt64Type};
-use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::TryStreamExt;
 use lance::dataset::{WriteMode, WriteParams};
-use lance::Error;
 use log::info;
-use similar::DiffableStr;
 use tempfile::{tempdir, TempDir};
 use tokio::sync::Mutex;
 use tracing::error;
-use tracing_subscriber::fmt::format;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
@@ -125,7 +122,7 @@ impl VecDBHandler {
             embedding_size,
         })
     }
-    
+
     async fn checkout(&mut self) {
         match self.data_table.checkout_latest().await {
             Ok(table) => { self.data_table = table }
@@ -136,7 +133,7 @@ impl VecDBHandler {
             Err(err) => error!("Error while checking out data table: {:?}", err)
         }
     }
-    
+
     pub async fn size(&self) -> Result<usize, String> {
         match self.data_table.count_rows().await {
             Ok(size) => Ok(size),
@@ -150,7 +147,7 @@ impl VecDBHandler {
             Err(err) => Err(format!("{:?}", err))
         }
     }
-    
+
     async fn get_records(&mut self, table: Table, _hashes: Vec<String>) -> (Vec<Record>, Vec<String>) {
         let mut hashes: HashSet<String> = HashSet::from_iter(_hashes);
         let q = hashes.iter().map(|x| format!("'{}'", x)).collect::<Vec<String>>().join(", ");
@@ -174,7 +171,7 @@ impl VecDBHandler {
     pub async fn get_records_from_cache(&mut self, hashes: Vec<String>) -> (Vec<Record>, Vec<String>) {
         self.get_records(self.cache_table.clone(), hashes).await
     }
-    
+
     async fn get_record(&mut self, table: Table, hash: String) -> vectordb::error::Result<Record> {
         let records = table
             .filter(format!("window_text_hash == '{}'", hash))
@@ -186,10 +183,10 @@ impl VecDBHandler {
         let records = VecDBHandler::parse_table_iter(record_batch, true, None)?;
         match records.get(0) {
             Some(x) => Ok(x.clone()),
-            None => Err(vectordb::error::Error::Lance{ message: format!("No record found for hash: {}", hash)})
+            None => Err(vectordb::error::Error::Lance { message: format!("No record found for hash: {}", hash) })
         }
     }
-    
+
     pub async fn get_record_from_data(&mut self, hash: String) -> vectordb::error::Result<Record> {
         self.get_record(self.data_table.clone(), hash).await
     }
@@ -200,9 +197,9 @@ impl VecDBHandler {
     pub async fn try_add_from_cache(&mut self, data: Vec<SplitResult>) -> Vec<SplitResult> {
         let hashes = data.iter().map(|x| x.window_text_hash.clone()).collect();
         let (found_records, left_hashes) = self.get_records_from_cache(hashes).await;
-        let mut left_results: Vec<SplitResult> = 
-            data.into_iter().filter(|x|left_hashes.contains(&x.window_text_hash)).collect();
-        
+        let left_results: Vec<SplitResult> =
+            data.into_iter().filter(|x| left_hashes.contains(&x.window_text_hash)).collect();
+
         match self.add_or_update(found_records, false).await {
             Ok(_) => {}
             Err(err) => info!("Error while adding values from cache: {:?}", err),
@@ -431,16 +428,16 @@ impl VecDBHandler {
         let record_batch = concat_batches(&self.schema, &query)?;
         VecDBHandler::parse_table_iter(record_batch, false, Some(&embedding))
     }
-    
+
     pub async fn update_record_statistic(&mut self, records: Vec<Record>) {
         let now = SystemTime::now();
         for record in records {
             for mut table in vec![self.data_table.clone(), self.cache_table.clone()] {
                 let _ = table.update(Some(format!("window_text_hash == '{}'", record.window_text_hash.clone()).as_str()),
-                            vec![
-                                ("used_counter", &(&record.used_counter + 1).to_string()),
-                                ("time_last_used", &*now.elapsed().unwrap().as_secs().to_string()),
-                            ]).await.unwrap();
+                                     vec![
+                                         ("used_counter", &(&record.used_counter + 1).to_string()),
+                                         ("time_last_used", &*now.elapsed().unwrap().as_secs().to_string()),
+                                     ]).await.unwrap();
             }
             self.checkout().await;
         }
@@ -451,7 +448,7 @@ impl VecDBHandler {
         self.cache_table.delete(&*q).await.expect("could not delete old records");
         self.data_table.delete(&*q).await.expect("could not delete old records");
         self.checkout().await;
-        
+
         let q = format!("{} - time_last_used > {ONE_MONTH}", now.as_secs());
         self.cache_table.delete(&*q).await.expect("could not delete old records");
         self.data_table.delete(&*q).await.expect("could not delete old records");

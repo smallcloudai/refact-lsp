@@ -6,7 +6,6 @@ use tracing_appender;
 use crate::background_tasks::start_background_tasks;
 use crate::lsp::spawn_lsp_task;
 use crate::telemetry::{basic_transmit, snippets_transmit};
-use crate::vecdb::vecdb::VecDb;
 
 mod global_context;
 mod caps;
@@ -23,7 +22,6 @@ mod telemetry;
 mod lsp;
 mod http;
 mod background_tasks;
-
 mod receive_workspace_changes;
 mod vecdb;
 

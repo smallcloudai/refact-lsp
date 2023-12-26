@@ -1,27 +1,24 @@
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{MutexGuard, RwLock as ARwLock};
+use tokio::sync::RwLock as ARwLock;
 use tokio::task::JoinHandle;
 use tower_lsp::{ClientSocket, LanguageServer, LspService};
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tracing::{error, info};
-use walkdir::WalkDir;
 
 use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPosition, SamplingParameters};
-use crate::{global_context};
+use crate::global_context;
 use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
+use crate::receive_workspace_changes;
 use crate::telemetry;
 use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
-use crate::receive_workspace_changes;
-use crate::vecdb::vecdb::VecDb;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -38,13 +35,10 @@ impl Display for APIError {
 }
 
 
-
 // #[derive(Debug)]  GlobalContext does not implement Debug
 pub struct Backend {
     pub gcx: Arc<ARwLock<global_context::GlobalContext>>,
     pub client: tower_lsp::Client,
-    pub document_map: Arc<ARwLock<HashMap<String, Document>>>,
-    pub workspace_folders: Arc<ARwLock<Option<Vec<WorkspaceFolder>>>>,
 }
 
 
@@ -179,13 +173,12 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("LSP client_info {:?}", params.client_info);
         {
-            let mut gcx_locked = self.gcx.write().await;
-            *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders;
+            let gcx_locked = self.gcx.write().await;
+            *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders.clone();
             info!("LSP workspace_folders {:?}", gcx_locked.lsp_backend_document_state.workspace_folders);
         }
-        let maybe_folders = self.workspace_folders.read().await.clone();
 
-        if let Some(folders) = maybe_folders {
+        if let Some(folders) = params.workspace_folders {
             let files = retrieve_files_by_proj_folders(
                 folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
             ).await;
@@ -235,20 +228,11 @@ impl LanguageServer for Backend {
             self.gcx.clone(),
             &params.text_document.uri.to_string(),
             &params.text_document.text,
-            &params.text_document.language_id
+            &params.text_document.language_id,
         ).await
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let t0 = Instant::now();
-        let rope = ropey::Rope::from_str(&params.content_changes[0].text);
-        let uri = params.text_document.uri.to_string();
-        let mut document_map = self.document_map.write().await;
-        let doc = document_map
-            .entry(uri.clone())
-            .or_insert(Document::new("unknown".to_owned(), Rope::new()));
-        doc.text = rope;
-
         let file_path = PathBuf::from(params.text_document.uri.path());
         if is_valid_file(&file_path) {
             match *self.gcx.read().await.vec_db.lock().await {
@@ -260,7 +244,7 @@ impl LanguageServer for Backend {
         receive_workspace_changes::on_did_change(
             self.gcx.clone(),
             &params.text_document.uri.to_string(),
-            &params.content_changes[0].text
+            &params.content_changes[0].text,
         ).await
     }
 
