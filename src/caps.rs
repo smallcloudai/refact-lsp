@@ -44,6 +44,10 @@ pub struct CodeAssistantCaps {
     #[serde(default)]
     pub code_chat_models: HashMap<String, ModelRecord>,
     pub code_chat_default_model: String,
+    #[serde(default)]
+    pub embeddings_default_model: String,
+    #[serde(default)]
+    pub embeddings_endpoint_template: String,
     pub running_models: Vec<String>,
     #[serde(default)]
     pub caps_version: i64,  // need to reload if it increases on server, that happens when server configuration changes
@@ -344,11 +348,26 @@ pub async fn load_caps(
     r1.endpoint_chat_passthrough = relative_to_full_url(&caps_url, &r1.endpoint_chat_passthrough)?;
     r1.telemetry_basic_dest = relative_to_full_url(&caps_url, &r1.telemetry_basic_dest)?;
     r1.telemetry_corrected_snippets_dest = relative_to_full_url(&caps_url, &r1.telemetry_corrected_snippets_dest)?;
+    r1.embeddings_endpoint_template = embeddings_endpoint_template_to_url(&caps_url, &r1)?;
     info!("caps {} completion models", r1.code_completion_models.len());
     info!("caps default completion model: \"{}\"", r1.code_completion_default_model);
     info!("caps {} chat models", r1.code_chat_models.len());
     info!("caps default chat model: \"{}\"", r1.code_chat_default_model);
     Ok(Arc::new(StdRwLock::new(r1)))
+}
+
+fn embeddings_endpoint_template_to_url(
+    caps_url: &String,
+    r1: &CodeAssistantCaps,
+) -> Result<String, String> {
+    let mut embeddings_endpoint_template = r1.embeddings_endpoint_template.clone();
+    if r1.cloud_name == "Hugging Face" {
+        embeddings_endpoint_template = format!("{}/models/{}", "https://api-inference.huggingface.co".to_string(), r1.embeddings_default_model);
+        Ok(embeddings_endpoint_template)
+    } else {
+        embeddings_endpoint_template = relative_to_full_url(&caps_url, &embeddings_endpoint_template)?;
+        Ok(embeddings_endpoint_template)
+    }
 }
 
 fn relative_to_full_url(

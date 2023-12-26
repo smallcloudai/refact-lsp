@@ -20,6 +20,8 @@ pub struct VecDb {
     retriever_service: Arc<AMutex<FileVectorizerService>>,
     embedding_model_name: String,
     cmdline: crate::global_context::CommandLine,
+    embedding_endpoint: String,
+    embedding_endpoint_style: String,
 }
 
 
@@ -33,12 +35,29 @@ pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> O
     if caps_mb.is_none() {
         return None;
     }
-    let _caps = caps_mb.unwrap();
+    let caps = caps_mb.unwrap();
+    let caps_locked = caps.read().unwrap();
+    // info!("caps {:?}", caps_locked);
+
+    if !cmdline.vecdb {
+        info!("VecDB is disabled by cmdline");
+        return None;
+    }
+    if caps_locked.embeddings_default_model.is_empty() {
+        info!("no embeddings_default_model in caps");
+        return None;
+    }
+    if caps_locked.embeddings_endpoint_template.is_empty() {
+        info!("no embeddings_endpoint_template in caps");
+        return None;
+    }
 
     vec_db = match VecDb::init(
-        cache_dir, cmdline,
+        cache_dir, cmdline.clone(),
         384, 60, 512, 1024,
-        "BAAI/bge-small-en-v1.5".to_string()
+        caps_locked.embeddings_default_model.clone(),
+        caps_locked.embeddings_endpoint_template.clone(),
+        caps_locked.endpoint_style.clone(),
     ).await {
         Ok(res) => Some(res),
         Err(err) => {
@@ -65,6 +84,8 @@ impl VecDb {
         splitter_window_size: usize,
         splitter_soft_limit: usize,
         embedding_model_name: String,
+        embedding_endpoint: String,
+        embedding_endpoint_style: String,
     ) -> Result<VecDb, String> {
         let handler = match VecDBHandler::init(cache_dir, embedding_size).await {
             Ok(res) => res,
@@ -72,8 +93,14 @@ impl VecDb {
         };
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let retriever_service = Arc::new(AMutex::new(FileVectorizerService::new(
-            vecdb_handler.clone(), cooldown_secs, splitter_window_size, splitter_soft_limit,
-            embedding_model_name.clone(), cmdline.api_key.clone(),
+            vecdb_handler.clone(),
+            cooldown_secs,
+            splitter_window_size,
+            splitter_soft_limit,
+            embedding_model_name.clone(),
+            cmdline.api_key.clone(),
+            embedding_endpoint_style.clone(),
+            embedding_endpoint.clone(),
         ).await));
 
         Ok(VecDb {
@@ -81,6 +108,8 @@ impl VecDb {
             retriever_service,
             embedding_model_name,
             cmdline,
+            embedding_endpoint,
+            embedding_endpoint_style,
         })
     }
 
@@ -110,7 +139,11 @@ impl VecDb {
 impl VecdbSearch for VecDb {
     async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let embedding = get_embedding(
-            query.clone(), &self.embedding_model_name, &self.cmdline.api_key,
+            &self.embedding_endpoint_style,
+            &self.embedding_model_name,
+            &self.embedding_endpoint,
+            query.clone(),
+            &self.cmdline.api_key,
         ).await.unwrap();
         match embedding {
             Ok(vector) => {

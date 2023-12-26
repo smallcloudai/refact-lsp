@@ -23,6 +23,8 @@ pub struct FileVectorizerService {
     splitter_soft_limit: usize,
     embedding_model_name: String,
     api_key: String,
+    endpoint_style: String,
+    url: String,
 }
 
 async fn cooldown_queue_thread(
@@ -69,6 +71,8 @@ async fn vectorize_thread(
     splitter_soft_limit: usize,
     embedding_model_name: String,
     api_key: String,
+    endpoint_style: String,
+    url: String,
     max_concurrent_tasks: usize,
 ) {
     let file_splitter = FileSplitter::new(splitter_window_size, splitter_soft_limit);
@@ -113,6 +117,8 @@ async fn vectorize_thread(
         let join_handles: Vec<_> = split_data_filtered.into_iter().map(|x| {
             let embedding_model_name_clone = embedding_model_name.clone();
             let api_key_clone = api_key.clone();
+            let endpoint_style_clone = endpoint_style.clone();
+            let url_clone = url.clone();
 
             let semaphore_clone = Arc::clone(&semaphore);
             tokio::spawn(async move {
@@ -123,7 +129,13 @@ async fn vectorize_thread(
                     }
                 };
 
-                let result = get_embedding(x.window_text.clone(), &embedding_model_name_clone, &api_key_clone).await;
+                let result = get_embedding(
+                    &endpoint_style_clone,
+                    &embedding_model_name_clone,
+                    &url_clone,
+                    x.window_text.clone(),
+                    &api_key_clone,
+                ).await;
 
                 drop(_permit);
                 Some((x, result))
@@ -186,6 +198,8 @@ impl FileVectorizerService {
         splitter_soft_limit: usize,
         embedding_model_name: String,
         api_key: String,
+        endpoint_style: String,
+        url: String,
     ) -> Self {
         let update_request_queue = Arc::new(Mutex::new(VecDeque::new()));
         let output_queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -207,6 +221,8 @@ impl FileVectorizerService {
             splitter_soft_limit,
             embedding_model_name,
             api_key,
+            endpoint_style,
+            url,
         }
     }
 
@@ -229,6 +245,8 @@ impl FileVectorizerService {
                 self.splitter_soft_limit,
                 self.embedding_model_name.clone(),
                 self.api_key.clone(),
+                self.endpoint_style.clone(),
+                self.url.clone(),
                 4,
             )
         );
