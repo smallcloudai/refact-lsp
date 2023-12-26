@@ -72,7 +72,7 @@ async fn main() {
     }
 
     let mut background_tasks = start_background_tasks(gcx.clone());
-    let lsp_task = spawn_lsp_task(gcx.clone(), cmdline.clone());  // execution stays inside if stdin-stdout
+    let lsp_task = spawn_lsp_task(gcx.clone(), cmdline.clone()).await;  // execution stays inside if stdin-stdout
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
     }
