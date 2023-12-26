@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -15,9 +16,9 @@ use crate::call_validation::{CodeCompletionInputs, CodeCompletionPost, CursorPos
 use crate::global_context;
 use crate::global_context::CommandLine;
 use crate::http::routers::v1::code_completion::handle_v1_code_completion;
-use crate::telemetry;
 use crate::receive_workspace_changes;
-
+use crate::telemetry;
+use crate::vecdb::file_filter::{is_valid_file, retrieve_files_by_proj_folders};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,7 +33,6 @@ impl Display for APIError {
         write!(f, "{}", self.error)
     }
 }
-
 
 
 // #[derive(Debug)]  GlobalContext does not implement Debug
@@ -134,7 +134,7 @@ impl Backend {
             model: "".to_string(),
             scratchpad: "".to_string(),
             stream: false,
-            no_cache: false
+            no_cache: false,
         }
     }
 
@@ -154,18 +154,18 @@ impl Backend {
 
     pub async fn test_if_head_tail_equal_return_added_text(&self, params: TestHeadTailAddedText) -> Result<TestHeadTailAddedTextRes> {
         let (is_valid, grey_corrected) = telemetry::utils::if_head_tail_equal_return_added_text(
-            &params.text_a, &params.text_b, &params.orig_grey_text
+            &params.text_a, &params.text_b, &params.orig_grey_text,
         );
         let mut unchanged_percentage = -1.;
         if is_valid {
             unchanged_percentage = telemetry::utils::unchanged_percentage(
                 &params.orig_grey_text,
-                &grey_corrected
+                &grey_corrected,
             );
         }
-        Ok(TestHeadTailAddedTextRes{is_valid, grey_corrected, unchanged_percentage})
+        Ok(TestHeadTailAddedTextRes { is_valid, grey_corrected, unchanged_percentage })
     }
- }
+}
 
 
 #[tower_lsp::async_trait]
@@ -173,9 +173,21 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("LSP client_info {:?}", params.client_info);
         {
-            let mut gcx_locked = self.gcx.write().await;
-            *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders;
+            let gcx_locked = self.gcx.write().await;
+            *gcx_locked.lsp_backend_document_state.workspace_folders.write().await = params.workspace_folders.clone();
             info!("LSP workspace_folders {:?}", gcx_locked.lsp_backend_document_state.workspace_folders);
+        }
+
+        if let Some(folders) = params.workspace_folders {
+            let files = retrieve_files_by_proj_folders(
+                folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
+            ).await;
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref db) => db.add_or_update_files(files, true).await,
+                None => {
+                    info!("LSP no vec_db");
+                }
+            };
         }
 
         let completion_options: CompletionOptions;
@@ -216,15 +228,23 @@ impl LanguageServer for Backend {
             self.gcx.clone(),
             &params.text_document.uri.to_string(),
             &params.text_document.text,
-            &params.text_document.language_id
+            &params.text_document.language_id,
         ).await
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
+        }
+
         receive_workspace_changes::on_did_change(
             self.gcx.clone(),
             &params.text_document.uri.to_string(),
-            &params.content_changes[0].text
+            &params.content_changes[0].text,
         ).await
     }
 
@@ -233,6 +253,13 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "{refact-lsp} file saved")
             .await;
         let uri = params.text_document.uri.to_string();
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
+        }
         info!("{uri} saved");
     }
 
@@ -241,6 +268,13 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "{refact-lsp} file closed")
             .await;
         let uri = params.text_document.uri.to_string();
+        let file_path = PathBuf::from(params.text_document.uri.path());
+        if is_valid_file(&file_path) {
+            match *self.gcx.read().await.vec_db.lock().await {
+                Some(ref mut db) => db.add_or_update_file(file_path, false).await,
+                None => {}
+            };
+        }
         info!("{uri} closed");
     }
 
@@ -255,6 +289,34 @@ impl LanguageServer for Backend {
             CompletionItem::new_simple("Hello".to_string(), "Some detail".to_string()),
             CompletionItem::new_simple("Bye".to_string(), "More detail".to_string()),
         ])))
+    }
+
+    async fn did_delete_files(&self, params: DeleteFilesParams) {
+        let files = params.files
+            .into_iter()
+            .map(|x| PathBuf::from(x.uri.replace("file://", "")))
+            .filter(|x| is_valid_file(&x));
+
+        match *self.gcx.read().await.vec_db.lock().await {
+            Some(ref mut db) => {
+                for file in files {
+                    db.remove_file(&file).await;
+                }
+            }
+            None => {}
+        };
+    }
+
+    async fn did_create_files(&self, params: CreateFilesParams) {
+        let files = params.files
+            .into_iter()
+            .map(|x| PathBuf::from(x.uri.replace("file://", "")))
+            .filter(|x| is_valid_file(&x))
+            .collect();
+        match *self.gcx.read().await.vec_db.lock().await {
+            Some(ref mut db) => db.add_or_update_files(files, false).await,
+            None => {}
+        };
     }
 }
 
@@ -273,12 +335,12 @@ async fn build_lsp_service(
 
 pub async fn spawn_lsp_task(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
-    cmdline: CommandLine
+    cmdline: CommandLine,
 ) -> Option<JoinHandle<()>> {
     if cmdline.lsp_stdin_stdout == 0 && cmdline.lsp_port > 0 {
         let gcx_t = gcx.clone();
         let addr: std::net::SocketAddr = ([127, 0, 0, 1], cmdline.lsp_port).into();
-        return Some(tokio::spawn( async move {
+        return Some(tokio::spawn(async move {
             let listener: TcpListener = TcpListener::bind(&addr).await.unwrap();
             info!("LSP listening on {}", listener.local_addr().unwrap());
             loop {
@@ -301,7 +363,7 @@ pub async fn spawn_lsp_task(
 
     if cmdline.lsp_stdin_stdout != 0 && cmdline.lsp_port == 0 {
         let gcx_t = gcx.clone();
-        return Some(tokio::spawn( async move {
+        return Some(tokio::spawn(async move {
             let stdin = tokio::io::stdin();
             let stdout = tokio::io::stdout();
             let (lsp_service, socket) = build_lsp_service(gcx_t.clone()).await;

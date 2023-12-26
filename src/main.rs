@@ -19,11 +19,12 @@ mod restream;
 mod custom_error;
 mod completion_cache;
 mod telemetry;
-mod vecdb_search;
 mod lsp;
 mod http;
 mod background_tasks;
 mod receive_workspace_changes;
+mod vecdb;
+
 
 #[tokio::main]
 async fn main() {
@@ -62,6 +63,10 @@ async fn main() {
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
     }
+    background_tasks.extend(match *gcx.read().await.vec_db.lock().await {
+        Some(ref db) => db.start_background_tasks().await,
+        None => vec![]
+    });
 
     let gcx_clone = gcx.clone();
     let server = http::start_server(gcx_clone, ask_shutdown_receiver);
