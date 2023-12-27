@@ -3,9 +3,9 @@ use tracing::{error, info};
 use std::sync::{Arc, RwLockWriteGuard};
 use std::sync::RwLock as StdRwLock;
 use std::path::PathBuf;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use regex::Regex;
 
 use tokio::sync::RwLock as ARwLock;
 
@@ -13,6 +13,25 @@ use crate::global_context;
 use crate::telemetry::utils;
 use crate::telemetry::telemetry_structs;
 use crate::telemetry::telemetry_structs::{SnippetTracker, TeleRobotHumanAccum};
+
+
+
+pub fn create_robot_human_record_if_not_exists(
+    tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
+    uri: &String,
+    text: &String
+) {
+    let record_mb = tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri));
+    if record_mb.is_some() {
+        return;
+    }
+    info!("create_robot_human_rec_if_not_exists: new uri {}", uri);
+    let record = TeleRobotHumanAccum::new(
+        uri.clone(),
+        text.clone(),
+    );
+    tele_robot_human.push(record);
+}
 
 
 fn update_robot_characters_baseline(
@@ -24,57 +43,48 @@ fn update_robot_characters_baseline(
     rec.robot_characters_acc_baseline += robot_characters;
 }
 
-fn update_human_characters(
+fn basetext_to_text_leap_calculations(
     rec: &mut TeleRobotHumanAccum,
     baseline_text: String,
     text: &String,
 ) {
     let re = Regex::new(r"\s+").unwrap();
     let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text, true);
-    let real_characters_added = re.replace_all(&added_characters, "").len() as i64 - re.replace_all(&removed_characters, "").len() as i64;
-    let human_characters = real_characters_added - rec.robot_characters_acc_baseline;
+
+    let (added_characters, _) = utils::get_add_del_chars_from_texts(&removed_characters, &added_characters);
+
+    // let real_characters_added = re.replace_all(&added_characters, "").len() as i64 - re.replace_all(&removed_characters, "").len() as i64;
+    let human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
     info!("human_characters: +{}; robot_characters: +{}", human_characters, rec.robot_characters_acc_baseline);
     rec.human_characters += human_characters;
     rec.robot_characters += rec.robot_characters_acc_baseline;
     rec.robot_characters_acc_baseline = 0;
 }
 
+
 pub fn increase_counters_from_finished_snippet(
     tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
     uri: &String,
     text: &String,
     snip: &SnippetTracker,
-    init_file_text: &String,
 ) {
-    // info!("snip grey_text: {}", snip.grey_text);
+    info!("snip grey_text: {}", snip.grey_text);
     let now = chrono::Local::now().timestamp();
-
     if let Some(rec) = tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
         if rec.used_snip_ids.contains(&snip.snippet_telemetry_id) {
             return;
         }
 
+        if rec.used_snip_ids.is_empty() {
+            rec.model = snip.model.clone();
+        }
+
         update_robot_characters_baseline(rec, snip);
-        update_human_characters(rec, rec.baseline_text.clone(), text);
+        basetext_to_text_leap_calculations(rec, rec.baseline_text.clone(), text);
 
         rec.used_snip_ids.push(snip.snippet_telemetry_id);
         rec.baseline_updated_ts = now;
         rec.baseline_text = text.clone();
-    } else {
-        info!("increase_counters_from_finished_snippet: new uri {}", uri);
-        let mut record = TeleRobotHumanAccum::new(
-            uri.clone(),
-            snip.model.clone(),
-            text.clone(),
-            0,
-            0,
-            vec![snip.snippet_telemetry_id],
-        );
-
-        update_robot_characters_baseline(&mut record, snip);
-        update_human_characters(&mut record, init_file_text.clone(), text);
-
-        tele_robot_human.push(record);
     }
 }
 

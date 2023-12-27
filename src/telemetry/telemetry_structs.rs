@@ -12,8 +12,6 @@ pub struct Storage {
     pub tele_snippets: Vec<SnippetTracker>,
     pub tele_snippet_next_id: u64,
     pub snippet_data_accumulators: Vec<TeleCompletionAccum>,
-
-    pub init_file_texts: Vec<InitFileText>,
 }
 
 impl Storage {
@@ -25,17 +23,8 @@ impl Storage {
             tele_snippets: Vec::new(),
             tele_snippet_next_id: 100,
             snippet_data_accumulators: Vec::new(),
-
-            init_file_texts: Vec::new(),
         }
     }
-}
-
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct InitFileText {
-    pub uri: String,
-    pub file_text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -89,18 +78,18 @@ pub struct TeleRobotHumanAccum {
 
 impl TeleRobotHumanAccum {
     pub fn new(
-        uri: String, model: String, baseline_text: String, robot_characters_acc_baseline: i64, human_characters: i64, used_snip_ids: Vec<u64>
+        uri: String, baseline_text: String
     ) -> Self {
         Self {
             uri: uri.clone(),
             file_extension: utils::extract_extension_or_filename(&uri),
-            model,
+            model: "".to_string(),
             baseline_text,
             baseline_updated_ts: 0,
-            robot_characters_acc_baseline,
+            robot_characters_acc_baseline: 0,
             robot_characters: 0,
-            human_characters,
-            used_snip_ids,
+            human_characters: 0,
+            used_snip_ids: vec![],
         }
     }
 }

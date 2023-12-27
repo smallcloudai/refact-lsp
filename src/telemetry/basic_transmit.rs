@@ -142,18 +142,11 @@ pub async fn basic_telemetry_send(
 pub async fn telemetry_background_task(
     global_context: Arc<ARwLock<global_context::GlobalContext>>,
 ) -> () {
-    let mut skip_compression_part = true;
+    tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
+    basic_telemetry_send(global_context.clone()).await;
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
-
-        if !skip_compression_part {
-            basic_telemetry_compress(global_context.clone()).await;
-        }
-        skip_compression_part = false;
-
+        tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS)).await;
         basic_telemetry_send(global_context.clone()).await;
-
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS - TELEMETRY_TRANSMIT_AFTER_START_SECONDS)).await;
+        basic_telemetry_compress(global_context.clone()).await;
     }
 }

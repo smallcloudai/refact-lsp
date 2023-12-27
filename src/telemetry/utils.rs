@@ -21,9 +21,7 @@ pub fn get_add_del_from_texts(
     text_b: &String,
     only_one_deletion_allowed: bool,
 ) -> (String, String) {
-    let mut text_a_copy = text_a.clone();
-
-    let mut text_a_lines = text_a_copy.lines().collect::<Vec<&str>>();
+    let mut text_a_lines = text_a.lines().collect::<Vec<&str>>();
     let mut text_b_lines = text_b.lines().collect::<Vec<&str>>();
 
     for s in &mut text_a_lines {
@@ -50,16 +48,12 @@ pub fn get_add_del_from_texts(
     for change in diff.iter_all_changes() {
         match change.tag() {
             ChangeTag::Delete => {
-                // if removed.is_empty()  {
-                //     removed += change.value();
-                // }
                 // info!("rem: {}; len: {}", change.value(), change.value().len());
                 if only_one_deletion_allowed {
-                    if !removed.is_empty() {
-                        continue;
-                    }
+                    removed = change.value().to_string();
+                } else {
+                    removed += change.value();
                 }
-                removed += change.value();
             }
             ChangeTag::Insert => {
                 added += change.value();
@@ -73,6 +67,29 @@ pub fn get_add_del_from_texts(
     (added, removed)
 }
 
+
+pub fn get_add_del_chars_from_texts(
+    text_a: &String,
+    text_b: &String,
+) -> (String, String) {
+    let diff = TextDiff::from_chars(text_a, text_b);
+    let mut added = "".to_string();
+    let mut removed = "".to_string();
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Delete => {
+                removed += change.value();
+            }
+            ChangeTag::Insert => {
+                added += change.value();
+            }
+            ChangeTag::Equal => {
+            }
+        }
+    }
+    
+    (added, removed)
+}
 
 pub async fn file_save(path: PathBuf, json: serde_json::Value) -> Result<(), String> {
     let mut f = tokio::fs::File::create(path).await.map_err(|e| format!("{:?}", e))?;
