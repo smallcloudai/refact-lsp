@@ -49,7 +49,7 @@ fn basetext_to_text_leap_calculations(
     text: &String,
 ) {
     let re = Regex::new(r"\s+").unwrap();
-    let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text, true);
+    let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text, false);
 
     let (added_characters, _) = utils::get_add_del_chars_from_texts(&removed_characters, &added_characters);
 
