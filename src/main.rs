@@ -26,6 +26,7 @@ mod http;
 mod background_tasks;
 mod receive_workspace_changes;
 mod vecdb;
+mod fetch_embedding;
 
 
 #[tokio::main]

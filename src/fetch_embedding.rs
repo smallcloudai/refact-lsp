@@ -1,30 +1,22 @@
 use std::time::Duration;
+
 use reqwest;
 use serde::Serialize;
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 
-#[derive(Serialize)]
-struct PayloadHF {
-    pub inputs: String,
-}
-
-#[derive(Serialize)]
-struct PayloadOpenAI {
-    pub input: String,
-    pub model: String,
-}
+use crate::forward_to_hf_endpoint::get_embedding_hf_style;
+use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 
 
 pub fn get_embedding(
-    endpoint_style: &String,
+    provider_embedding: &String,
     model_name: &String,
     url: &String,
     text: String,
     api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
 
-    if endpoint_style == "hf" {
+    if provider_embedding == "hf" {
         return get_embedding_hf_style(
             text,
             url,
@@ -32,7 +24,7 @@ pub fn get_embedding(
             3,
             Duration::from_secs(5),
         )
-    } else if endpoint_style == "openai" {
+    } else if provider_embedding == "openai" || provider_embedding == "Refact" {
         return get_embedding_openai_style(
             text,
             model_name,
@@ -43,124 +35,8 @@ pub fn get_embedding(
         )
     }
     else {
-        panic!("Invalid endpoint style: {}", endpoint_style);
+        panic!("Invalid provider_embedding: {}", provider_embedding);
     }
-}
-
-
-fn get_embedding_hf_style(
-    text: String,
-    url: &String,
-    api_key: &String,
-    max_attempts: i32,
-    delay: Duration,
-) -> JoinHandle<Result<Vec<f32>, String>> {
-    let client = reqwest::Client::new();
-    let payload = PayloadHF { inputs: text };
-
-    let url_clone = url.clone();
-    let api_key_clone = api_key.clone();
-
-    tokio::spawn(async move {
-        let mut attempts = 0;
-
-        while attempts < max_attempts {
-            let maybe_response = client
-                .post(&url_clone)
-                .bearer_auth(api_key_clone.clone())
-                .json(&payload)
-                .send()
-                .await;
-
-            match maybe_response {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        match response.json::<Vec<f32>>().await {
-                            Ok(embedding) => return Ok(embedding),
-                            Err(err) => return Err(format!("Failed to parse the response: {:?}", err)),
-                        }
-                    } else if response.status().is_server_error() {
-                        // Retry in case of 5xx server errors
-                        attempts += 1;
-                        sleep(delay).await;
-                        continue;
-                    } else {
-                        return Err(format!("Failed to get a response: {:?}", response.status()));
-                    }
-                },
-                Err(err) => return Err(format!("Failed to send a request: {:?}", err)),
-            }
-        }
-
-        Err("Exceeded maximum attempts to reach the server".to_string())
-    })
-}
-
-
-fn get_embedding_openai_style(
-    text: String,
-    model_name: &String,
-    url: &String,
-    api_key: &String,
-    max_attempts: i32,
-    delay: Duration,
-) -> JoinHandle<Result<Vec<f32>, String>> {
-    let client = reqwest::Client::new();
-    let payload = PayloadOpenAI { input: text, model: model_name.clone() };
-
-    let url_clone = url.clone();
-    let api_key_clone = api_key.clone();
-
-    tokio::spawn(async move {
-        let mut attempts = 0;
-
-        while attempts < max_attempts {
-            let maybe_response = client
-                .post(&url_clone)
-                .bearer_auth(api_key_clone.clone())
-                .json(&payload)
-                .send()
-                .await;
-
-            match maybe_response {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        let response_json = response.json::<serde_json::Value>().await;
-
-                        return match response_json {
-                            Ok(json) => {
-                                match &json["data"][0]["embedding"] {
-                                    serde_json::Value::Array(embedding) => {
-                                        let embedding_values: Result<Vec<f32>, _> =
-                                            serde_json::from_value(serde_json::Value::Array(embedding.clone()));
-                                        embedding_values.map_err(|err| {
-                                            format!("Failed to parse the response: {:?}", err)
-                                        })
-                                    }
-                                    _ => {
-                                        Err("Response is missing 'data[0].embedding' field or it's not an array".to_string())
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                Err(format!("Failed to parse the response: {:?}", err))
-                            }
-                        }
-                    } else if response.status().is_server_error() {
-                        // Retry in case of 5xx server errors
-                        attempts += 1;
-                        sleep(delay).await;
-                        continue;
-                    } else {
-                        return Err(format!("Failed to get a response: {:?}", response.status()));
-                    }
-                }
-                Err(err) => return Err(format!("Failed to send a request: {:?}", err)),
-            }
-        }
-
-        Err("Exceeded maximum attempts to reach the server".to_string())
-    })
 }
 
 

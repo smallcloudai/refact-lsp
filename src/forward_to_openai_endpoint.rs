@@ -1,9 +1,13 @@
+use std::time::Duration;
 use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest_eventsource::EventSource;
+use serde::Serialize;
 use serde_json::json;
+use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use crate::call_validation;
 use crate::call_validation::SamplingParameters;
 
@@ -102,4 +106,78 @@ fn _passthrough_messages_to_json(
     let messages_str = &prompt[12..];
     let messages: Vec<call_validation::ChatMessage> = serde_json::from_str(&messages_str).unwrap();
     data["messages"] = serde_json::json!(messages);
+}
+
+
+#[derive(Serialize)]
+struct EmbeddingsPayloadOpenAI {
+    pub input: String,
+    pub model: String,
+}
+
+
+pub fn get_embedding_openai_style(
+    text: String,
+    model_name: &String,
+    url: &String,
+    api_key: &String,
+    max_attempts: i32,
+    delay: Duration,
+) -> JoinHandle<Result<Vec<f32>, String>> {
+    let client = reqwest::Client::new();
+    let payload = EmbeddingsPayloadOpenAI { input: text, model: model_name.clone() };
+
+    let url_clone = url.clone();
+    let api_key_clone = api_key.clone();
+
+    tokio::spawn(async move {
+        let mut attempts = 0;
+
+        while attempts < max_attempts {
+            let maybe_response = client
+                .post(&url_clone)
+                .bearer_auth(api_key_clone.clone())
+                .json(&payload)
+                .send()
+                .await;
+
+            match maybe_response {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let response_json = response.json::<serde_json::Value>().await;
+
+                        return match response_json {
+                            Ok(json) => {
+                                match &json["data"][0]["embedding"] {
+                                    serde_json::Value::Array(embedding) => {
+                                        let embedding_values: Result<Vec<f32>, _> =
+                                            serde_json::from_value(serde_json::Value::Array(embedding.clone()));
+                                        embedding_values.map_err(|err| {
+                                            format!("Failed to parse the response: {:?}", err)
+                                        })
+                                    }
+                                    _ => {
+                                        Err("Response is missing 'data[0].embedding' field or it's not an array".to_string())
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                Err(format!("Failed to parse the response: {:?}", err))
+                            }
+                        }
+                    } else if response.status().is_server_error() {
+                        // Retry in case of 5xx server errors
+                        attempts += 1;
+                        sleep(delay).await;
+                        continue;
+                    } else {
+                        return Err(format!("Failed to get a response: {:?}", response.status()));
+                    }
+                }
+                Err(err) => return Err(format!("Failed to send a request: {:?}", err)),
+            }
+        }
+
+        Err("Exceeded maximum attempts to reach the server".to_string())
+    })
 }

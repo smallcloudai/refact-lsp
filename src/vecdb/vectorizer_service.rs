@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::vecdb::file_splitter::FileSplitter;
 use crate::vecdb::handler::VecDBHandlerRef;
-use crate::vecdb::req_client::get_embedding;
+use crate::fetch_embedding::get_embedding;
 use crate::vecdb::structs::{Record, SplitResult, VecDbStatus, VecDbStatusRef};
 
 #[derive(Debug)]
@@ -145,13 +145,17 @@ async fn vectorize_thread(
         let mut records = vec![];
 
         for handle in join_handles {
-            if let Some((data_res, result)) = handle.await.unwrap() {
-                match result {
-                    Ok(result) => {
+            if let Some((data_res, result_mb)) = handle.await.unwrap() {
+                match result_mb {
+                    Ok(result_mb) => {
                         let now = SystemTime::now();
+                        if result_mb.is_err() {
+                            continue;
+                        }
+                        // TODO: error handling
                         records.push(
                             Record {
-                                vector: Some(result.unwrap()),
+                                vector: Some(result_mb.unwrap()),
                                 window_text: data_res.window_text,
                                 window_text_hash: data_res.window_text_hash,
                                 file_path: data_res.file_path,

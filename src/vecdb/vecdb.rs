@@ -10,7 +10,7 @@ use tokio::sync::RwLock as ARwLock;
 use tracing::error;
 
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
-use crate::vecdb::req_client::get_embedding;
+use crate::fetch_embedding::get_embedding;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
 
@@ -20,16 +20,31 @@ pub struct VecDb {
     retriever_service: Arc<AMutex<FileVectorizerService>>,
     embedding_model_name: String,
     cmdline: crate::global_context::CommandLine,
-    embedding_endpoint: String,
-    embedding_endpoint_style: String,
+    endpoint_embedding: String,
+    provider_embedding: String,
 }
 
+
+fn resolve_endpoint_embeddings_url(
+    endpoint_embeddings_template: &String,
+    vecdb_provider: &String,
+    embeddings_default_model: &String,
+) -> String {
+    return if vecdb_provider == "hf" {
+        format!("{}/models/{}", "https://api-inference.huggingface.co".to_string(), embeddings_default_model)
+    } else if vecdb_provider == "Refact" {
+        endpoint_embeddings_template.clone()
+    } else if vecdb_provider == "openai" {
+        "".to_string()
+    } else {
+        "".to_string()
+    }
+}
 
 pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> Option<VecDb> {
     let gcx_locked = gcx.read().await;
     let cache_dir = gcx_locked.cache_dir.clone();
     let cmdline = gcx_locked.cmdline.clone();
-    let mut vec_db = None;
 
     let caps_mb = gcx_locked.caps.clone();
     if caps_mb.is_none() {
@@ -43,21 +58,30 @@ pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> O
         info!("VecDB is disabled by cmdline");
         return None;
     }
-    if caps_locked.embeddings_default_model.is_empty() {
-        info!("no embeddings_default_model in caps");
+    if caps_locked.default_embeddings_model.is_empty() {
+        info!("no default_embeddings_model in caps");
         return None;
     }
-    if caps_locked.embeddings_endpoint_template.is_empty() {
-        info!("no embeddings_endpoint_template in caps");
-        return None;
+    if cmdline.vecdb_provider.is_empty() || cmdline.vecdb_api_key.is_empty() {
+        info!("vecdb_provider or vecdb_api_key is empty");
+        return None
+    }
+    let endpoint_embeddings_url = resolve_endpoint_embeddings_url(
+        &caps_locked.endpoint_embeddings_template,
+        &cmdline.vecdb_provider,
+        &caps_locked.default_embeddings_model,
+    );
+    if endpoint_embeddings_url.is_empty() {
+        info!("endpoint_embeddings_url is empty");
+        return None
     }
 
-    vec_db = match VecDb::init(
+    let vec_db = match VecDb::init(
         cache_dir, cmdline.clone(),
         384, 60, 512, 1024,
-        caps_locked.embeddings_default_model.clone(),
-        caps_locked.embeddings_endpoint_template.clone(),
-        caps_locked.endpoint_style.clone(),
+        caps_locked.default_embeddings_model.clone(),
+        endpoint_embeddings_url,
+        cmdline.vecdb_provider.clone(),
     ).await {
         Ok(res) => Some(res),
         Err(err) => {
@@ -84,8 +108,8 @@ impl VecDb {
         splitter_window_size: usize,
         splitter_soft_limit: usize,
         embedding_model_name: String,
-        embedding_endpoint: String,
-        embedding_endpoint_style: String,
+        endpoint_embedding: String,
+        provider_embedding: String,
     ) -> Result<VecDb, String> {
         let handler = match VecDBHandler::init(cache_dir, embedding_size).await {
             Ok(res) => res,
@@ -98,9 +122,9 @@ impl VecDb {
             splitter_window_size,
             splitter_soft_limit,
             embedding_model_name.clone(),
-            cmdline.api_key.clone(),
-            embedding_endpoint_style.clone(),
-            embedding_endpoint.clone(),
+            cmdline.vecdb_api_key.clone(),
+            provider_embedding.clone(),
+            endpoint_embedding.clone(),
         ).await));
 
         Ok(VecDb {
@@ -108,8 +132,8 @@ impl VecDb {
             retriever_service,
             embedding_model_name,
             cmdline,
-            embedding_endpoint,
-            embedding_endpoint_style,
+            endpoint_embedding,
+            provider_embedding,
         })
     }
 
@@ -139,11 +163,11 @@ impl VecDb {
 impl VecdbSearch for VecDb {
     async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let embedding = get_embedding(
-            &self.embedding_endpoint_style,
+            &self.provider_embedding,
             &self.embedding_model_name,
-            &self.embedding_endpoint,
+            &self.endpoint_embedding,
             query.clone(),
-            &self.cmdline.api_key,
+            &self.cmdline.vecdb_api_key,
         ).await.unwrap();
         match embedding {
             Ok(vector) => {
