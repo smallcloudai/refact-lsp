@@ -132,6 +132,9 @@ pub async fn tele_robot_human_compress_to_file(
 
         let mut storage_locked = storage.write().unwrap();
         for rec in compress_robot_human(&mut storage_locked) {
+            if rec.model.is_empty() && rec.robot_characters == 0 && rec.human_characters == 0 {
+                continue;
+            }
             let json_dict = serde_json::to_value(rec).unwrap();
             records.as_array_mut().unwrap().push(json_dict);
         }
