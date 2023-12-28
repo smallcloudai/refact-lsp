@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use tracing::{error, info};
+use tracing::{error, info, Level};
 use tracing_appender;
 
 use crate::background_tasks::start_background_tasks;
@@ -41,6 +41,7 @@ async fn main() {
         ))
     };
     let _tracing = tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
         .with_writer(logs_writer)
         .with_target(true)
         .with_line_number(true)
