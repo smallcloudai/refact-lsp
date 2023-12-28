@@ -146,7 +146,7 @@ pub async fn telemetry_background_task(
     basic_telemetry_send(global_context.clone()).await;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(TELEMETRY_TRANSMIT_EACH_N_SECONDS)).await;
-        basic_telemetry_send(global_context.clone()).await;
         basic_telemetry_compress(global_context.clone()).await;
+        basic_telemetry_send(global_context.clone()).await;
     }
 }
