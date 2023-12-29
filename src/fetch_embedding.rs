@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use reqwest;
 use serde::Serialize;
 use tokio::task::JoinHandle;
@@ -11,7 +9,7 @@ use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 pub fn get_embedding(
     provider_embedding: &String,
     model_name: &String,
-    url: &String,
+    endpoint_template: &String,
     text: String,
     api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
@@ -19,14 +17,15 @@ pub fn get_embedding(
     if provider_embedding == "hf" {
         return get_embedding_hf_style(
             text,
-            url,
+            endpoint_template,
+            model_name,
             api_key,
         )
     } else if provider_embedding == "openai" || provider_embedding == "Refact" {
         return get_embedding_openai_style(
             text,
+            endpoint_template,
             model_name,
-            url,
             api_key,
         )
     }

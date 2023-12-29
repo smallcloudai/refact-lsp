@@ -276,6 +276,10 @@ const HF_DEFAULT_CAPS: &str = r#"
     "cloud_name": "Hugging Face",
     "endpoint_template": "https://api-inference.huggingface.co/models/$MODEL",
     "endpoint_style": "hf",
+
+    "default_embeddings_model": "BAAI/bge-small-en-v1.5"
+    "endpoint_embeddings_template": "https://api-inference.huggingface.co/models/$MODEL",
+
     "tokenizer_path_template": "https://huggingface.co/$MODEL/resolve/main/tokenizer.json",
     "tokenizer_rewrite_path": {
         "meta-llama/Llama-2-70b-chat-hf": "TheBloke/Llama-2-70B-fp16"

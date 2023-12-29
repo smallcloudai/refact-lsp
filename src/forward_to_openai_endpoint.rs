@@ -118,8 +118,8 @@ struct EmbeddingsPayloadOpenAI {
 
 pub fn get_embedding_openai_style(
     text: String,
+    endpoint_template: &String,
     model_name: &String,
-    url: &String,
     api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
     let client = reqwest::Client::new();
@@ -127,13 +127,12 @@ pub fn get_embedding_openai_style(
         input: text,
         model: model_name.clone(),
     };
-
-    let url_clone = url.clone();
+    let url = endpoint_template.clone();
     let api_key_clone = api_key.clone();
 
     tokio::spawn(async move {
         let maybe_response = client
-            .post(&url_clone)
+            .post(&url)
             .bearer_auth(api_key_clone.clone())
             .json(&payload)
             .send()

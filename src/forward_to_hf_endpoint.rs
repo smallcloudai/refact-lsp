@@ -99,18 +99,18 @@ struct EmbeddingsPayloadHF {
 
 pub fn get_embedding_hf_style(
     text: String,
-    url: &String,
+    endpoint_template: &String,
+    model_name: &String,
     api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
     let client = reqwest::Client::new();
     let payload = EmbeddingsPayloadHF { inputs: text };
-
-    let url_clone = url.clone();
+    let url = endpoint_template.clone().replace("$MODEL", &model_name);
     let api_key_clone = api_key.clone();
 
     tokio::spawn(async move {
         let maybe_response = client
-            .post(&url_clone)
+            .post(&url)
             .bearer_auth(api_key_clone.clone())
             .json(&payload)
             .send()

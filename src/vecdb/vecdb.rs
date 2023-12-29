@@ -25,22 +25,6 @@ pub struct VecDb {
 }
 
 
-fn resolve_endpoint_embeddings_url(
-    endpoint_embeddings_template: &String,
-    vecdb_provider: &String,
-    embeddings_default_model: &String,
-) -> String {
-    return if vecdb_provider == "hf" {
-        format!("{}/models/{}", "https://api-inference.huggingface.co".to_string(), embeddings_default_model)
-    } else if vecdb_provider == "Refact" {
-        endpoint_embeddings_template.clone()
-    } else if vecdb_provider == "openai" {
-        "".to_string()
-    } else {
-        "".to_string()
-    }
-}
-
 pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> Option<VecDb> {
     let gcx_locked = gcx.read().await;
     let cache_dir = gcx_locked.cache_dir.clone();
@@ -66,13 +50,8 @@ pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> O
         info!("vecdb_provider or vecdb_api_key is empty");
         return None
     }
-    let endpoint_embeddings_url = resolve_endpoint_embeddings_url(
-        &caps_locked.endpoint_embeddings_template,
-        &cmdline.vecdb_provider,
-        &caps_locked.default_embeddings_model,
-    );
-    if endpoint_embeddings_url.is_empty() {
-        info!("endpoint_embeddings_url is empty");
+    if caps_locked.endpoint_embeddings_template.is_empty() {
+        info!("endpoint_embeddings_template is empty");
         return None
     }
 
@@ -80,7 +59,7 @@ pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> O
         cache_dir, cmdline.clone(),
         384, 60, 512, 1024,
         caps_locked.default_embeddings_model.clone(),
-        endpoint_embeddings_url,
+        caps_locked.endpoint_embeddings_template.clone(),
         cmdline.vecdb_provider.clone(),
     ).await {
         Ok(res) => Some(res),
