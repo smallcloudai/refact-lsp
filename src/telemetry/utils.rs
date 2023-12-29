@@ -19,7 +19,6 @@ pub async fn telemetry_storage_dirs(cache_dir: &PathBuf) -> (PathBuf, PathBuf) {
 pub fn get_add_del_from_texts(
     text_a: &String,
     text_b: &String,
-    only_one_deletion_allowed: bool,
 ) -> (String, String) {
     let mut text_a_lines = text_a.lines().collect::<Vec<&str>>();
     let mut text_b_lines = text_b.lines().collect::<Vec<&str>>();
@@ -49,11 +48,7 @@ pub fn get_add_del_from_texts(
         match change.tag() {
             ChangeTag::Delete => {
                 // info!("rem: {}; len: {}", change.value(), change.value().len());
-                if only_one_deletion_allowed {
-                    removed = change.value().to_string();
-                } else {
-                    removed += change.value();
-                }
+                removed += change.value();
             }
             ChangeTag::Insert => {
                 added += change.value();
@@ -332,7 +327,7 @@ pub fn unchanged_percentage_approx(
         }
     }
 
-    let (texts_ab_added, _) = get_add_del_from_texts(text_a, text_b, false);
+    let (texts_ab_added, _) = get_add_del_from_texts(text_a, text_b);
 
     // info!("unchanged_percentage_approx for snip:\n{grey_text_a}");
     if texts_ab_added.is_empty() {
