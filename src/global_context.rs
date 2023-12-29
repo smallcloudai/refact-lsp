@@ -43,10 +43,6 @@ pub struct CommandLine {
     #[structopt(long, help="Whether to use a vector database")]
     pub vecdb: bool,
     #[structopt(long, default_value="Refact", help="vecdb provider")]
-    pub vecdb_provider: String,
-    #[structopt(long, default_value="", help="vecdb api key")]
-    pub vecdb_api_key: String,
-    #[structopt(long, short = "f", default_value = "", help = "The path to jsonl file which contains filtered source files")]
     pub files_set_path: String,
 }
 

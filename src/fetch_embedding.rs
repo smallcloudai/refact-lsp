@@ -7,21 +7,21 @@ use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 
 
 pub fn get_embedding(
-    provider_embedding: &String,
+    cloud_name: &String,
     model_name: &String,
     endpoint_template: &String,
     text: String,
     api_key: &String,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
 
-    if provider_embedding == "hf" {
+    if cloud_name == "Hugging Face" {
         return get_embedding_hf_style(
             text,
             endpoint_template,
             model_name,
             api_key,
         )
-    } else if provider_embedding == "openai" || provider_embedding == "Refact" {
+    } else if cloud_name == "Refact" || cloud_name == "Refact Self-Hosted" {
         return get_embedding_openai_style(
             text,
             endpoint_template,
@@ -30,7 +30,7 @@ pub fn get_embedding(
         )
     }
     else {
-        panic!("Invalid provider_embedding: {}", provider_embedding);
+        panic!("Invalid cloud_name: {}", cloud_name);
     }
 }
 

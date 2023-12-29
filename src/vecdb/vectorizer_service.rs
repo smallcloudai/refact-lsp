@@ -21,10 +21,11 @@ pub struct FileVectorizerService {
     cooldown_secs: u64,
     splitter_window_size: usize,
     splitter_soft_limit: usize,
-    embedding_model_name: String,
+
+    model_name: String,
     api_key: String,
-    endpoint_style: String,
-    url: String,
+    cloud_name: String,
+    endpoint_template: String,
 }
 
 async fn cooldown_queue_thread(
@@ -69,10 +70,12 @@ async fn vectorize_thread(
     status: VecDbStatusRef,
     splitter_window_size: usize,
     splitter_soft_limit: usize,
-    embedding_model_name: String,
+
+    model_name: String,
     api_key: String,
-    endpoint_style: String,
-    url: String,
+    cloud_name: String,
+    endpoint_template: String,
+
     max_concurrent_tasks: usize,
 ) {
     let file_splitter = FileSplitter::new(splitter_window_size, splitter_soft_limit);
@@ -115,10 +118,10 @@ async fn vectorize_thread(
         info!("Retrieving embeddings for {} chunks", split_data_filtered.len());
 
         let join_handles: Vec<_> = split_data_filtered.into_iter().map(|x| {
-            let embedding_model_name_clone = embedding_model_name.clone();
+            let model_name_clone = model_name.clone();
             let api_key_clone = api_key.clone();
-            let endpoint_style_clone = endpoint_style.clone();
-            let url_clone = url.clone();
+            let cloud_name_clone = cloud_name.clone();
+            let endpoint_template_clone = endpoint_template.clone();
 
             let semaphore_clone = Arc::clone(&semaphore);
             tokio::spawn(async move {
@@ -130,9 +133,9 @@ async fn vectorize_thread(
                 };
 
                 let result = get_embedding(
-                    &endpoint_style_clone,
-                    &embedding_model_name_clone,
-                    &url_clone,
+                    &cloud_name_clone,
+                    &model_name_clone,
+                    &endpoint_template_clone,
                     x.window_text.clone(),
                     &api_key_clone,
                 ).await;
@@ -162,7 +165,7 @@ async fn vectorize_thread(
                                 start_line: data_res.start_line,
                                 end_line: data_res.end_line,
                                 time_added: SystemTime::now(),
-                                model_name: embedding_model_name.clone(),
+                                model_name: model_name.clone(),
                                 distance: -1.0,
                                 used_counter: 0,
                                 time_last_used: now,
@@ -200,10 +203,11 @@ impl FileVectorizerService {
         cooldown_secs: u64,
         splitter_window_size: usize,
         splitter_soft_limit: usize,
-        embedding_model_name: String,
+
+        model_name: String,
         api_key: String,
-        endpoint_style: String,
-        url: String,
+        cloud_name: String,
+        endpoint_template: String,
     ) -> Self {
         let update_request_queue = Arc::new(Mutex::new(VecDeque::new()));
         let output_queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -223,10 +227,11 @@ impl FileVectorizerService {
             cooldown_secs,
             splitter_window_size,
             splitter_soft_limit,
-            embedding_model_name,
+
+            model_name,
             api_key,
-            endpoint_style,
-            url,
+            cloud_name,
+            endpoint_template,
         }
     }
 
@@ -247,10 +252,12 @@ impl FileVectorizerService {
                 self.status.clone(),
                 self.splitter_window_size,
                 self.splitter_soft_limit,
-                self.embedding_model_name.clone(),
+
+                self.model_name.clone(),
                 self.api_key.clone(),
-                self.endpoint_style.clone(),
-                self.url.clone(),
+                self.cloud_name.clone(),
+                self.endpoint_template.clone(),
+
                 4,
             )
         );

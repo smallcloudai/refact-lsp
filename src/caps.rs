@@ -277,7 +277,7 @@ const HF_DEFAULT_CAPS: &str = r#"
     "endpoint_template": "https://api-inference.huggingface.co/models/$MODEL",
     "endpoint_style": "hf",
 
-    "default_embeddings_model": "BAAI/bge-small-en-v1.5"
+    "default_embeddings_model": "BAAI/bge-small-en-v1.5",
     "endpoint_embeddings_template": "https://api-inference.huggingface.co/models/$MODEL",
 
     "tokenizer_path_template": "https://huggingface.co/$MODEL/resolve/main/tokenizer.json",
