@@ -21,8 +21,6 @@ pub fn get_embedding(
             text,
             url,
             api_key,
-            3,
-            Duration::from_secs(5),
         )
     } else if provider_embedding == "openai" || provider_embedding == "Refact" {
         return get_embedding_openai_style(
@@ -30,8 +28,6 @@ pub fn get_embedding(
             model_name,
             url,
             api_key,
-            3,
-            Duration::from_secs(5),
         )
     }
     else {

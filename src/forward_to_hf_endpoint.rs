@@ -101,8 +101,6 @@ pub fn get_embedding_hf_style(
     text: String,
     url: &String,
     api_key: &String,
-    max_attempts: i32,
-    delay: Duration,
 ) -> JoinHandle<Result<Vec<f32>, String>> {
     let client = reqwest::Client::new();
     let payload = EmbeddingsPayloadHF { inputs: text };
@@ -111,36 +109,25 @@ pub fn get_embedding_hf_style(
     let api_key_clone = api_key.clone();
 
     tokio::spawn(async move {
-        let mut attempts = 0;
+        let maybe_response = client
+            .post(&url_clone)
+            .bearer_auth(api_key_clone.clone())
+            .json(&payload)
+            .send()
+            .await;
 
-        while attempts < max_attempts {
-            let maybe_response = client
-                .post(&url_clone)
-                .bearer_auth(api_key_clone.clone())
-                .json(&payload)
-                .send()
-                .await;
-
-            match maybe_response {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        match response.json::<Vec<f32>>().await {
-                            Ok(embedding) => return Ok(embedding),
-                            Err(err) => return Err(format!("Failed to parse the response: {:?}", err)),
-                        }
-                    } else if response.status().is_server_error() {
-                        // Retry in case of 5xx server errors
-                        attempts += 1;
-                        sleep(delay).await;
-                        continue;
-                    } else {
-                        return Err(format!("Failed to get a response: {:?}", response.status()));
+        return match maybe_response {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.json::<Vec<f32>>().await {
+                        Ok(embedding) => Ok(embedding),
+                        Err(err) => Err(format!("Failed to parse the response: {:?}", err)),
                     }
-                },
-                Err(err) => return Err(format!("Failed to send a request: {:?}", err)),
-            }
+                } else {
+                    Err(format!("Failed to get a response: {:?}", response.status()))
+                }
+            },
+            Err(err) => Err(format!("Failed to send a request: {:?}", err)),
         }
-
-        Err("Exceeded maximum attempts to reach the server".to_string())
     })
 }
