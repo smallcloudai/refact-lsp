@@ -5,20 +5,22 @@ use async_trait::async_trait;
 use tracing::info;
 use tokio::sync::Mutex as AMutex;
 use tokio::task::JoinHandle;
-use crate::global_context::GlobalContext;
+use crate::global_context::{CommandLine, GlobalContext};
 use tokio::sync::RwLock as ARwLock;
 use tracing::error;
+use crate::background_tasks::BackgroundTasksHolder;
 
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
 use crate::fetch_embedding::get_embedding;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
 
+
 #[derive(Debug)]
 pub struct VecDb {
     vecdb_handler: VecDBHandlerRef,
     retriever_service: Arc<AMutex<FileVectorizerService>>,
-    cmdline: crate::global_context::CommandLine,
+    cmdline: CommandLine,
 
     model_name: String,
     api_key: String,
@@ -27,39 +29,98 @@ pub struct VecDb {
 }
 
 
-pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> Option<VecDb> {
-    let gcx_locked = gcx.read().await;
-    let cache_dir = gcx_locked.cache_dir.clone();
-    let cmdline = gcx_locked.cmdline.clone();
+const VECDB_BACKGROUND_RELOAD_ON_SUCCESS: u64 = 1200;
+const VECDB_BACKGROUND_RELOAD_ON_FAIL: u64 = 30;
 
-    let caps_mb = gcx_locked.caps.clone();
-    if caps_mb.is_none() {
-        return None;
-    }
-    let caps = caps_mb.unwrap();
-    let caps_locked = caps.read().unwrap();
-    // info!("caps {:?}", caps_locked);
 
-    if !cmdline.vecdb {
-        info!("VecDB is disabled by cmdline");
-        return None;
-    }
-    if caps_locked.default_embeddings_model.is_empty() {
-        info!("no default_embeddings_model in caps");
-        return None;
-    }
-    if caps_locked.endpoint_embeddings_template.is_empty() {
-        info!("endpoint_embeddings_template is empty");
-        return None
-    }
+pub async fn vecdb_background_reload(
+    global_context: Arc<ARwLock<GlobalContext>>,
+) {
+    let mut background_tasks = BackgroundTasksHolder::new(vec![]);
 
+    let mut vecdb_fetched = false;
+    let mut first_loop = true;
+    loop {
+        if !first_loop {
+            if vecdb_fetched {
+                tokio::time::sleep(tokio::time::Duration::from_secs(VECDB_BACKGROUND_RELOAD_ON_SUCCESS)).await;
+            } else {
+                tokio::time::sleep(tokio::time::Duration::from_secs(VECDB_BACKGROUND_RELOAD_ON_FAIL)).await;
+            }
+        }
+        background_tasks.abort().await;
+        background_tasks = BackgroundTasksHolder::new(vec![]);
+
+        vecdb_fetched = false;
+        first_loop = false;
+        info!("attempting to fetch vecdb");
+
+        let mut gcx_locked = global_context.write().await;
+        let caps_mb = gcx_locked.caps.clone();
+        if caps_mb.is_none() {
+            info!("vecd fetch failed: no caps");
+            continue;
+        }
+
+        let cache_dir = &gcx_locked.cache_dir;
+        let cmdline = &gcx_locked.cmdline;
+
+        if !cmdline.vecdb {
+            info!("VecDB is disabled by cmdline");
+            vecdb_fetched = true;
+            continue;
+        }
+
+        let (default_embeddings_model, cloud_name, endpoint_embeddings_template) = {
+            let caps = caps_mb.unwrap();
+            let caps_locked = caps.read().unwrap();
+            (
+                caps_locked.default_embeddings_model.clone(),
+                caps_locked.cloud_name.clone(),
+                caps_locked.endpoint_embeddings_template.clone()
+            )
+        };
+
+        if default_embeddings_model.is_empty() || endpoint_embeddings_template.is_empty() {
+            info!("vecd fetch failed: default_embeddings_model.is_empty() || endpoint_embeddings_template.is_empty()");
+            continue;
+        }
+
+        let vecdb_mb = create_vecdb_if_caps_present(
+            default_embeddings_model, cloud_name, endpoint_embeddings_template, cmdline, cache_dir
+        ).await;
+
+        if vecdb_mb.is_none() {
+            info!("vecd fetch failed: vecdb_mb.is_none()");
+            continue;
+        }
+        gcx_locked.vec_db = Arc::new(AMutex::new(vecdb_mb));
+        info!("VECDB is successfully fetched");
+        vecdb_fetched = true;
+
+        background_tasks.extend(match *gcx_locked.vec_db.lock().await {
+            Some(ref db) => db.start_background_tasks().await,
+            None => vec![]
+        });
+    }
+}
+
+
+pub async fn create_vecdb_if_caps_present(
+    default_embeddings_model: String,
+    cloud_name: String,
+    endpoint_embeddings_template: String,
+
+    cmdline: &CommandLine,
+    cache_dir: &PathBuf,
+) -> Option<VecDb> {
     let vec_db = match VecDb::init(
-        cache_dir, cmdline.clone(),
+        &cache_dir, cmdline.clone(),
         384, 60, 512, 1024,
-        caps_locked.default_embeddings_model.clone(),
+        default_embeddings_model.clone(),
         cmdline.api_key.clone(),
-        caps_locked.cloud_name.clone(),
-        caps_locked.endpoint_template.clone(),
+        cloud_name.clone(),
+        endpoint_embeddings_template.clone(),
     ).await {
         Ok(res) => Some(res),
         Err(err) => {
@@ -79,7 +140,7 @@ pub async fn create_vecdb_if_caps_present(gcx: Arc<ARwLock<GlobalContext>>) -> O
 
 impl VecDb {
     pub async fn init(
-        cache_dir: PathBuf,
+        cache_dir: &PathBuf,
         cmdline: crate::global_context::CommandLine,
         embedding_size: i32,
         cooldown_secs: u64,
@@ -121,6 +182,7 @@ impl VecDb {
     }
 
     pub async fn start_background_tasks(&self) -> Vec<JoinHandle<()>> {
+        info!("vecdb: start_background_tasks");
         return self.retriever_service.lock().await.start_background_tasks().await;
     }
 

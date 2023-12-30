@@ -60,32 +60,11 @@ async fn main() {
             info!("{:>20} {}", k, v);
         }
     }
-    let caps_mb = global_context::try_load_caps_quickly_if_not_present(gcx.clone()).await;
-    if let Ok(caps) = &caps_mb {
-        {
-            let mut gcx_locked = gcx.write().await;
-            let caps_locked = caps.read().unwrap();
-            info!("caps version: {}", caps_locked.caps_version);
-            gcx_locked.caps = Some(caps.clone());
-        }
-    } else if let Err(e) = &caps_mb {
-        error!("failed to load caps: {}", e);
-    }
 
     let mut background_tasks = start_background_tasks(gcx.clone());
     let lsp_task = spawn_lsp_task(gcx.clone(), cmdline.clone()).await;  // execution stays inside if stdin-stdout
     if lsp_task.is_some() {
         background_tasks.push_back(lsp_task.unwrap())
-    }
-    {
-        let vecdb_mb = vecdb::vecdb::create_vecdb_if_caps_present(gcx.clone()).await;
-        if vecdb_mb.is_some() {
-            *gcx.write().await.vec_db.lock().await = vecdb_mb;
-            background_tasks.extend(match *gcx.read().await.vec_db.lock().await {
-                Some(ref db) => db.start_background_tasks().await,
-                None => vec![]
-            });
-        }
     }
 
     let gcx_clone = gcx.clone();
