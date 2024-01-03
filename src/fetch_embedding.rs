@@ -13,9 +13,9 @@ pub async fn get_embedding(
     text: String,
     api_key: &String,
 ) -> Result<Vec<f32>, String> {
-    match address_url.as_str() {
+    match address_url.to_lowercase().as_str() {
         "hf" => Ok(get_embedding_hf_style(text, endpoint_template, model_name, api_key).await?),
-        url if url == "Refact" || url.starts_with("http") => {
+        url if url == "refact" || url.starts_with("http") => {
             Ok(get_embedding_openai_style(text, endpoint_template, model_name, api_key).await?)
         }
         _ => {
