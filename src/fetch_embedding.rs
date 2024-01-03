@@ -1,36 +1,27 @@
 use reqwest;
 use serde::Serialize;
-use tokio::task::JoinHandle;
+use tracing::error;
 
 use crate::forward_to_hf_endpoint::get_embedding_hf_style;
 use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 
 
-pub fn get_embedding(
-    cloud_name: &String,
+pub async fn get_embedding(
+    address_url: &String,
     model_name: &String,
     endpoint_template: &String,
     text: String,
     api_key: &String,
-) -> JoinHandle<Result<Vec<f32>, String>> {
-
-    if cloud_name == "Hugging Face" {
-        return get_embedding_hf_style(
-            text,
-            endpoint_template,
-            model_name,
-            api_key,
-        )
-    } else if cloud_name == "Refact" || cloud_name == "Refact Self-Hosted" {
-        return get_embedding_openai_style(
-            text,
-            endpoint_template,
-            model_name,
-            api_key,
-        )
-    }
-    else {
-        panic!("Invalid cloud_name: {}", cloud_name);
+) -> Result<Vec<f32>, String> {
+    match address_url.as_str() {
+        "hf" => Ok(get_embedding_hf_style(text, endpoint_template, model_name, api_key).await?),
+        url if url == "Refact" || url.starts_with("http") => {
+            Ok(get_embedding_openai_style(text, endpoint_template, model_name, api_key).await?)
+        }
+        _ => {
+            error!("Invalid address_url: {}", address_url);
+            Err("Invalid address_url".to_string())
+        }
     }
 }
 

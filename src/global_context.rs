@@ -42,7 +42,7 @@ pub struct CommandLine {
     pub insecure: bool,
     #[structopt(long, help="Whether to use a vector database")]
     pub vecdb: bool,
-    #[structopt(long, default_value="Refact", help="vecdb provider")]
+    #[structopt(long, short = "f", default_value = "", help = "The path to jsonl file which contains filtered source files")]
     pub files_set_path: String,
 }
 

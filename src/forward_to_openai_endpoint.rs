@@ -116,12 +116,12 @@ struct EmbeddingsPayloadOpenAI {
 }
 
 
-pub fn get_embedding_openai_style(
+pub async fn get_embedding_openai_style(
     text: String,
     endpoint_template: &String,
     model_name: &String,
     api_key: &String,
-) -> JoinHandle<Result<Vec<f32>, String>> {
+) -> Result<Vec<f32>, String> {
     let client = reqwest::Client::new();
     let payload = EmbeddingsPayloadOpenAI {
         input: text,
@@ -130,7 +130,7 @@ pub fn get_embedding_openai_style(
     let url = endpoint_template.clone();
     let api_key_clone = api_key.clone();
 
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         let maybe_response = client
             .post(&url)
             .bearer_auth(api_key_clone.clone())
@@ -162,5 +162,7 @@ pub fn get_embedding_openai_style(
             }
             Err(err) => Err(format!("Failed to send a request: {:?}", err)),
         }
-    })
+    });
+
+    join_handle.await.unwrap_or_else(|_| Err("Task join error".to_string()))
 }

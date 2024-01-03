@@ -150,15 +150,12 @@ async fn vectorize_thread(
         for handle in join_handles {
             if let Some((data_res, result_mb)) = handle.await.unwrap() {
                 match result_mb {
-                    Ok(result_mb) => {
+                    Ok(result) => {
                         let now = SystemTime::now();
-                        if result_mb.is_err() {
-                            continue;
-                        }
-                        // TODO: error handling
+
                         records.push(
                             Record {
-                                vector: Some(result_mb.unwrap()),
+                                vector: Some(result),
                                 window_text: data_res.window_text,
                                 window_text_hash: data_res.window_text_hash,
                                 file_path: data_res.file_path,
