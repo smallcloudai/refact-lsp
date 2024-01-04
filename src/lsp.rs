@@ -171,6 +171,7 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // TODO: vecdb can be initialized after LSP, so retrieve_files_by_proj_folders won't start
         info!("LSP client_info {:?}", params.client_info);
         {
             let gcx_locked = self.gcx.write().await;

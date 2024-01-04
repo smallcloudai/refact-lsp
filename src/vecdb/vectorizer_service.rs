@@ -24,7 +24,7 @@ pub struct FileVectorizerService {
 
     model_name: String,
     api_key: String,
-    address_url: String,
+    endpoint_embeddings_style: String,
     endpoint_template: String,
 }
 
@@ -73,7 +73,7 @@ async fn vectorize_thread(
 
     model_name: String,
     api_key: String,
-    address_url: String,
+    endpoint_embeddings_style: String,
     endpoint_template: String,
 
     max_concurrent_tasks: usize,
@@ -120,7 +120,7 @@ async fn vectorize_thread(
         let join_handles: Vec<_> = split_data_filtered.into_iter().map(|x| {
             let model_name_clone = model_name.clone();
             let api_key_clone = api_key.clone();
-            let address_url_clone = address_url.clone();
+            let endpoint_embeddings_style_clone = endpoint_embeddings_style.clone();
             let endpoint_template_clone = endpoint_template.clone();
 
             let semaphore_clone = Arc::clone(&semaphore);
@@ -133,7 +133,7 @@ async fn vectorize_thread(
                 };
 
                 let result = get_embedding(
-                    &address_url_clone,
+                    &endpoint_embeddings_style_clone,
                     &model_name_clone,
                     &endpoint_template_clone,
                     x.window_text.clone(),
@@ -203,7 +203,7 @@ impl FileVectorizerService {
 
         model_name: String,
         api_key: String,
-        address_url: String,
+        endpoint_embeddings_style: String,
         endpoint_template: String,
     ) -> Self {
         let update_request_queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -227,7 +227,7 @@ impl FileVectorizerService {
 
             model_name,
             api_key,
-            address_url,
+            endpoint_embeddings_style,
             endpoint_template,
         }
     }
@@ -252,7 +252,7 @@ impl FileVectorizerService {
 
                 self.model_name.clone(),
                 self.api_key.clone(),
-                self.address_url.clone(),
+                self.endpoint_embeddings_style.clone(),
                 self.endpoint_template.clone(),
 
                 4,

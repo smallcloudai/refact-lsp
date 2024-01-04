@@ -7,20 +7,18 @@ use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 
 
 pub async fn get_embedding(
-    address_url: &String,
+    endpoint_embeddings_style: &String,
     model_name: &String,
     endpoint_template: &String,
     text: String,
     api_key: &String,
 ) -> Result<Vec<f32>, String> {
-    match address_url.to_lowercase().as_str() {
+    match endpoint_embeddings_style.to_lowercase().as_str() {
         "hf" => Ok(get_embedding_hf_style(text, endpoint_template, model_name, api_key).await?),
-        url if url == "refact" || url.starts_with("http") => {
-            Ok(get_embedding_openai_style(text, endpoint_template, model_name, api_key).await?)
-        }
+        "openai" => Ok(get_embedding_openai_style(text, endpoint_template, model_name, api_key).await?),
         _ => {
-            error!("Invalid address_url: {}", address_url);
-            Err("Invalid address_url".to_string())
+            error!("Invalid endpoint_embeddings_style: {}", endpoint_embeddings_style);
+            Err("Invalid endpoint_embeddings_style".to_string())
         }
     }
 }

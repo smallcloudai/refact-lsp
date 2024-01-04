@@ -69,12 +69,13 @@ pub async fn vecdb_background_reload(
             continue;
         }
 
-        let (default_embeddings_model, endpoint_embeddings_template) = {
+        let (default_embeddings_model, endpoint_embeddings_template, endpoint_embeddings_style) = {
             let caps = caps_mb.unwrap();
             let caps_locked = caps.read().unwrap();
             (
                 caps_locked.default_embeddings_model.clone(),
-                caps_locked.endpoint_embeddings_template.clone()
+                caps_locked.endpoint_embeddings_template.clone(),
+                caps_locked.endpoint_embeddings_style.clone(),
             )
         };
 
@@ -84,7 +85,11 @@ pub async fn vecdb_background_reload(
         }
 
         let vecdb_mb = create_vecdb_if_caps_present(
-            default_embeddings_model, endpoint_embeddings_template, cmdline, cache_dir
+            default_embeddings_model,
+            endpoint_embeddings_template,
+            endpoint_embeddings_style,
+            cmdline,
+            cache_dir
         ).await;
 
         if vecdb_mb.is_none() {
@@ -106,6 +111,7 @@ pub async fn vecdb_background_reload(
 pub async fn create_vecdb_if_caps_present(
     default_embeddings_model: String,
     endpoint_embeddings_template: String,
+    endpoint_embeddings_style: String,
 
     cmdline: &CommandLine,
     cache_dir: &PathBuf,
@@ -115,6 +121,7 @@ pub async fn create_vecdb_if_caps_present(
         384, 60, 512, 1024,
         default_embeddings_model.clone(),
         endpoint_embeddings_template.clone(),
+        endpoint_embeddings_style.clone(),
     ).await {
         Ok(res) => Some(res),
         Err(err) => {
@@ -143,6 +150,7 @@ impl VecDb {
 
         model_name: String,
         endpoint_template: String,
+        endpoint_embeddings_style: String,
     ) -> Result<VecDb, String> {
         let handler = match VecDBHandler::init(cache_dir, embedding_size).await {
             Ok(res) => res,
@@ -157,7 +165,7 @@ impl VecDb {
 
             model_name.clone(),
             cmdline.api_key.clone(),
-            cmdline.address_url.clone(),
+            endpoint_embeddings_style.clone(),
             endpoint_template.clone(),
         ).await));
 
