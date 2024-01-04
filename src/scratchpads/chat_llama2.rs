@@ -70,11 +70,11 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatLlama2<T> {
         context_size: usize,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        match *self.vecdb_search.lock().await {
-            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6).await,
-            None => {}
-        }
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &self.post, context_size, &self.default_system_message)?;
+        let augmented_msgs = match *self.vecdb_search.lock().await {
+            Some(ref db) => embed_vecdb_results(db, &self.post.messages, 6).await,
+            None => { self.post.messages.clone() }
+        };
+        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &augmented_msgs, self.post.parameters.max_new_tokens, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = Some(self.dd.stop_list.clone());
         // loosely adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
         let mut prompt = "".to_string();

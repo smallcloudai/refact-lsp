@@ -45,6 +45,8 @@ pub struct CodeCompletionPost {
 pub struct ContextFile {
     pub file_name: String,
     pub file_content: String,
+    pub line1: i32,
+    pub line2: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

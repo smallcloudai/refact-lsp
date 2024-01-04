@@ -53,11 +53,11 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
         _context_size: usize,
         _sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        match *self.vecdb_search.lock().await {
-            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6).await,
-            None => {}
-        }
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post, self.limit_bytes, &self.default_system_message)?;
+        let augmented_msgs = match *self.vecdb_search.lock().await {
+            Some(ref db) => embed_vecdb_results(db, &self.post.messages, 6).await,
+            None => { self.post.messages.clone() }
+        };
+        let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&augmented_msgs, self.limit_bytes, &self.default_system_message)?;
         info!("chat passthrough {} messages -> {} messages after applying limits and possibly adding the default system message", &limited_msgs.len(), &limited_msgs.len());
         let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
         for msg in &limited_msgs {
@@ -68,7 +68,7 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
                 for context_file in &vector_of_context_files {
                     filtered_msgs.push(ChatMessage {
                         role: "user".to_string(),
-                        content: format!("{}\n```\n{}```", context_file.file_name, context_file.file_content),
+                        content: format!("{}:{}-{}\n```\n{}```", context_file.file_name, context_file.line1, context_file.line2, context_file.file_content),
                     });
                 }
             }
