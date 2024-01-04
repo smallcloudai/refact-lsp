@@ -7,7 +7,7 @@ use tracing::info;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history_in_bytes;
-use crate::scratchpads::chat_utils_rag::embed_vecdb_results;
+use crate::scratchpads::chat_utils_rag::{embed_vecdb_results, HasVecdb, HasVecdbResults};
 use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = true;
@@ -19,6 +19,7 @@ pub struct ChatPassthrough<T> {
     pub default_system_message: String,
     pub limit_bytes: usize,
     pub vecdb_search: Arc<AMutex<Option<T>>>,
+    pub has_vecdb_results: HasVecdbResults,
 }
 
 const DEFAULT_LIMIT_BYTES: usize = 4096*6;
@@ -33,6 +34,7 @@ impl<T: Send + Sync + VecdbSearch> ChatPassthrough<T> {
             default_system_message: "".to_string(),
             limit_bytes: DEFAULT_LIMIT_BYTES,  // one token translates to 3 bytes (not unicode chars)
             vecdb_search,
+            has_vecdb_results: HasVecdbResults::new(),
         }
     }
 }
@@ -54,7 +56,7 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
         _sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         match *self.vecdb_search.lock().await {
-            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6).await,
+            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6, &mut self.has_vecdb_results).await,
             None => {}
         }
         let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post, self.limit_bytes, &self.default_system_message)?;
@@ -122,5 +124,8 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
             "choices": json_choices,
         });
         Ok((ans, finished))
+    }
+    fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> {
+        return self.has_vecdb_results.response_streaming();
     }
 }
