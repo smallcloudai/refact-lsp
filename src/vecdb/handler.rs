@@ -58,7 +58,7 @@ const ONE_MONTH: i32 = 30 * 24 * 3600;
 const MIN_LIKES: i32 = 3;
 
 impl VecDBHandler {
-    pub async fn init(cache_dir: PathBuf, embedding_size: i32) -> Result<VecDBHandler, String> {
+    pub async fn init(cache_dir: &PathBuf, embedding_size: i32) -> Result<VecDBHandler, String> {
         let cache_dir_str = match cache_dir.join("refact_vecdb_cache").to_str() {
             Some(dir) => dir.to_string(),
             None => {

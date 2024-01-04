@@ -1,73 +1,28 @@
-use std::time::Duration;
 use reqwest;
 use serde::Serialize;
-use tokio::task::JoinHandle;
-use tokio::time::sleep;
+use tracing::error;
 
-#[derive(Serialize)]
-struct Payload {
-    pub inputs: String,
-}
+use crate::forward_to_hf_endpoint::get_embedding_hf_style;
+use crate::forward_to_openai_endpoint::get_embedding_openai_style;
 
 
-fn get_base_url() -> String {
-    #[cfg(test)]
-    {
-        // When running tests, return the mockito server URL
-        mockito::server_url()
-    }
-
-    #[cfg(not(test))]
-    {
-        // In a regular run, return the actual URL
-        "https://api-inference.huggingface.co".to_string()
-    }
-}
-
-pub fn get_embedding(
-    text: String,
+pub async fn get_embedding(
+    endpoint_embeddings_style: &String,
     model_name: &String,
-    api_key: String,
-) -> JoinHandle<Result<Vec<f32>, String>> {
-    let url = format!("{}/models/{}", get_base_url(), model_name);
-    let client = reqwest::Client::new();
-    let payload = Payload { inputs: text };
-
-    tokio::spawn(async move {
-        let mut attempts = 0;
-        let max_attempts = 3;
-        let delay = Duration::from_secs(5);
-
-        while attempts < max_attempts {
-            let maybe_response = client.post(&url)
-                .bearer_auth("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".clone())
-                .json(&payload)
-                .send()
-                .await;
-
-            match maybe_response {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        match response.json::<Vec<f32>>().await {
-                            Ok(embedding) => return Ok(embedding),
-                            Err(err) => return Err(format!("Failed to parse the response: {:?}", err)),
-                        }
-                    } else if response.status().is_server_error() {
-                        // Retry in case of 5xx server errors
-                        attempts += 1;
-                        sleep(delay).await;
-                        continue;
-                    } else {
-                        return Err(format!("Failed to get a response: {:?}", response.status()));
-                    }
-                },
-                Err(err) => return Err(format!("Failed to send a request: {:?}", err))
-            }
+    endpoint_template: &String,
+    text: String,
+    api_key: &String,
+) -> Result<Vec<f32>, String> {
+    match endpoint_embeddings_style.to_lowercase().as_str() {
+        "hf" => Ok(get_embedding_hf_style(text, endpoint_template, model_name, api_key).await?),
+        "openai" => Ok(get_embedding_openai_style(text, endpoint_template, model_name, api_key).await?),
+        _ => {
+            error!("Invalid endpoint_embeddings_style: {}", endpoint_embeddings_style);
+            Err("Invalid endpoint_embeddings_style".to_string())
         }
-
-        Err("Exceeded maximum attempts to reach the server".to_string())
-    })
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

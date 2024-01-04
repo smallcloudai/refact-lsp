@@ -46,6 +46,7 @@ pub fn start_background_tasks(global_context: Arc<ARwLock<GlobalContext>>) -> Ba
         tokio::spawn(global_context::caps_background_reload(global_context.clone())),
         tokio::spawn(basic_transmit::telemetry_background_task(global_context.clone())),
         tokio::spawn(snippets_transmit::tele_snip_background_task(global_context.clone())),
+        tokio::spawn(vecdb::vecdb::vecdb_background_reload(global_context.clone())),
         tokio::spawn(vecdb::file_watcher_service::file_watcher_task(global_context.clone())),
     ])
 }
