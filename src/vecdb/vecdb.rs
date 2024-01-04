@@ -24,6 +24,7 @@ pub struct VecDb {
 
     model_name: String,
     endpoint_template: String,
+    endpoint_embeddings_style: String,
 }
 
 
@@ -176,6 +177,7 @@ impl VecDb {
 
             model_name,
             endpoint_template,
+            endpoint_embeddings_style,
         })
     }
 
@@ -206,7 +208,7 @@ impl VecDb {
 impl VecdbSearch for VecDb {
     async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let embedding_mb = get_embedding(
-            &self.cmdline.address_url,
+            &self.endpoint_embeddings_style,
             &self.model_name,
             &self.endpoint_template,
             query.clone(),

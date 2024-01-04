@@ -11,7 +11,7 @@ use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::scratchpads::chat_utils_rag::embed_vecdb_results;
+use crate::scratchpads::chat_utils_rag::{embed_vecdb_results, HasVecdb, HasVecdbResults};
 use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = true;
@@ -27,6 +27,7 @@ pub struct GenericChatScratchpad<T> {
     pub keyword_asst: String,
     pub default_system_message: String,
     pub vecdb_search: Arc<AMutex<Option<T>>>,
+    pub has_vecdb_results: HasVecdbResults,
 }
 
 impl<T: Send + Sync + VecdbSearch> GenericChatScratchpad<T> {
@@ -44,7 +45,8 @@ impl<T: Send + Sync + VecdbSearch> GenericChatScratchpad<T> {
             keyword_user: "".to_string(),
             keyword_asst: "".to_string(),
             default_system_message: "".to_string(),
-            vecdb_search
+            vecdb_search,
+            has_vecdb_results: HasVecdbResults::new(),
         }
     }
 }
@@ -85,7 +87,7 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         match *self.vecdb_search.lock().await {
-            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6).await,
+            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6, &mut self.has_vecdb_results).await,
             None => {}
         }
 
@@ -148,6 +150,10 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<
         stop_length: bool,
     ) -> Result<(serde_json::Value, bool), String> {
         self.dd.response_streaming(delta, stop_toks)
+    }
+
+    fn response_spontaneous(&mut self) -> Result<serde_json::Value, String> {
+        return self.has_vecdb_results.response_streaming();
     }
 }
 
