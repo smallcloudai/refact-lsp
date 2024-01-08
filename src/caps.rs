@@ -50,6 +50,8 @@ pub struct CodeAssistantCaps {
     pub endpoint_embeddings_template: String,
     #[serde(default)]
     pub endpoint_embeddings_style: String,
+    #[serde(default)]
+    pub size_embeddings: i32,
     pub running_models: Vec<String>,
     #[serde(default)]
     pub caps_version: i64,  // need to reload if it increases on server, that happens when server configuration changes
@@ -282,6 +284,7 @@ const HF_DEFAULT_CAPS: &str = r#"
     "default_embeddings_model": "BAAI/bge-small-en-v1.5",
     "endpoint_embeddings_template": "https://api-inference.huggingface.co/models/$MODEL",
     "endpoint_embeddings_style": "hf",
+    "size_embeddings": 384,
 
     "tokenizer_path_template": "https://huggingface.co/$MODEL/resolve/main/tokenizer.json",
     "tokenizer_rewrite_path": {

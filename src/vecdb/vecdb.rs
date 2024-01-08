@@ -34,6 +34,37 @@ const VECDB_BACKGROUND_RELOAD_ON_SUCCESS: u64 = 1200;
 const VECDB_BACKGROUND_RELOAD_ON_FAIL: u64 = 30;
 
 
+pub async fn create_vecdb(
+    default_embeddings_model: String,
+    endpoint_embeddings_template: String,
+    endpoint_embeddings_style: String,
+    size_embeddings: i32,
+
+    cmdline: &CommandLine,
+    cache_dir: &PathBuf,
+) -> Option<VecDb> {
+    let vec_db = match VecDb::init(
+        &cache_dir, cmdline.clone(),
+        size_embeddings, 60, 512, 1024,
+        default_embeddings_model.clone(),
+        endpoint_embeddings_template.clone(),
+        endpoint_embeddings_style.clone(),
+    ).await {
+        Ok(res) => Some(res),
+        Err(err) => {
+            error!("Ooops database is broken!
+                Last error message: {}
+                You can report this issue here:
+                https://github.com/smallcloudai/refact-lsp/issues
+                Also, you can run this to erase your db:
+                `rm -rf ~/.cache/refact/refact_vecdb_cache`
+                After that restart this LSP server or your IDE.", err);
+            None
+        }
+    };
+    vec_db
+}
+
 pub async fn vecdb_background_reload(
     global_context: Arc<ARwLock<GlobalContext>>,
 ) {
@@ -73,13 +104,19 @@ pub async fn vecdb_background_reload(
             continue;
         }
 
-        let (default_embeddings_model, endpoint_embeddings_template, endpoint_embeddings_style) = {
+        let (
+            default_embeddings_model, 
+            endpoint_embeddings_template, 
+            endpoint_embeddings_style,
+            size_embeddings,
+        ) = {
             let caps = caps_mb.unwrap();
             let caps_locked = caps.read().unwrap();
             (
                 caps_locked.default_embeddings_model.clone(),
                 caps_locked.endpoint_embeddings_template.clone(),
                 caps_locked.endpoint_embeddings_style.clone(),
+                caps_locked.size_embeddings.clone(),
             )
         };
 
@@ -88,10 +125,12 @@ pub async fn vecdb_background_reload(
             continue;
         }
 
-        let vecdb_mb = create_vecdb_if_caps_present(
-            default_embeddings_model,
+        let vecdb_mb = create_vecdb(
+            default_embeddings_model.clone(),
             endpoint_embeddings_template,
             endpoint_embeddings_style,
+            size_embeddings,
+            
             cmdline,
             cache_dir
         ).await;
@@ -113,6 +152,7 @@ pub async fn vecdb_background_reload(
             if let Some(folders) = gcx_locked.lsp_backend_document_state.workspace_folders.clone().read().await.clone() {
                 let mut vec_db_lock = gcx_locked.vec_db.lock().await;
                 if let Some(ref mut db) = *vec_db_lock {
+                    db.remove_where_old_model(&default_embeddings_model).await;
                     db.init_folders(folders).await;
                 }
             }
@@ -120,38 +160,6 @@ pub async fn vecdb_background_reload(
 
     }
 }
-
-
-pub async fn create_vecdb_if_caps_present(
-    default_embeddings_model: String,
-    endpoint_embeddings_template: String,
-    endpoint_embeddings_style: String,
-
-    cmdline: &CommandLine,
-    cache_dir: &PathBuf,
-) -> Option<VecDb> {
-    let vec_db = match VecDb::init(
-        &cache_dir, cmdline.clone(),
-        384, 60, 512, 1024,
-        default_embeddings_model.clone(),
-        endpoint_embeddings_template.clone(),
-        endpoint_embeddings_style.clone(),
-    ).await {
-        Ok(res) => Some(res),
-        Err(err) => {
-            error!("Ooops database is broken!
-                Last error message: {}
-                You can report this issue here:
-                https://github.com/smallcloudai/refact-lsp/issues
-                Also, you can run this to erase your db:
-                `rm -rf ~/.cache/refact/refact_vecdb_cache`
-                After that restart this LSP server or your IDE.", err);
-            None
-        }
-    };
-    vec_db
-}
-
 
 impl VecDb {
     pub async fn init(
@@ -209,6 +217,10 @@ impl VecDb {
 
     pub async fn remove_file(&self, file_path: &PathBuf) {
         self.vecdb_handler.lock().await.remove(file_path).await;
+    }
+
+    pub async fn remove_where_old_model(&self, new_model: &String) {
+        self.vecdb_handler.lock().await.remove_where_old_model(new_model).await;
     }
 
     pub async fn get_status(&self) -> Result<VecDbStatus, String> {

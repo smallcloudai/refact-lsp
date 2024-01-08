@@ -59,7 +59,7 @@ const MIN_LIKES: i32 = 3;
 
 impl VecDBHandler {
     pub async fn init(cache_dir: &PathBuf, embedding_size: i32) -> Result<VecDBHandler, String> {
-        let cache_dir_str = match cache_dir.join("refact_vecdb_cache").to_str() {
+        let cache_dir_str = match cache_dir.join("refact_vecdb_cache").join(format!("emb_size_{}", embedding_size)).to_str() {
             Some(dir) => dir.to_string(),
             None => {
                 return Err(format!("{:?}", "Cache directory is not a valid path"));
@@ -341,6 +341,25 @@ impl VecDBHandler {
             Ok(_) => {}
             Err(err) => {
                 info!("Error while deleting from cache: {:?}", err);
+            }
+        }
+    }
+
+    pub async fn remove_where_old_model(&mut self, model: &str) {
+        match self.cache_table.delete(
+            format!("(model_name != \"{}\")", model).as_str()
+        ).await {
+            Ok(_) => {}
+            Err(err) => {
+                info!("Error while deleting from cache: {:?}", err);
+            }
+        }
+        match self.data_table.delete(
+            format!("(model_name != \"{}\")", model).as_str()
+        ).await {
+            Ok(_) => {}
+            Err(err) => {
+                info!("Error while deleting from data table: {:?}", err);
             }
         }
     }
