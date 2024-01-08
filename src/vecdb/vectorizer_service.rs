@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::vecdb::file_splitter::FileSplitter;
 use crate::vecdb::handler::VecDBHandlerRef;
-use crate::fetch_embedding::get_embedding;
+use crate::fetch_embedding::try_get_embedding;
 use crate::vecdb::structs::{Record, SplitResult, VecDbStatus, VecDbStatusRef};
 
 #[derive(Debug)]
@@ -132,12 +132,13 @@ async fn vectorize_thread(
                     }
                 };
 
-                let result = get_embedding(
+                let result = try_get_embedding(
                     &endpoint_embeddings_style_clone,
                     &model_name_clone,
                     &endpoint_template_clone,
                     x.window_text.clone(),
                     &api_key_clone,
+                    3,
                 ).await;
 
                 drop(_permit);

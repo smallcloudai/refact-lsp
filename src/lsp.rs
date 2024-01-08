@@ -171,7 +171,6 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // TODO: vecdb can be initialized after LSP, so retrieve_files_by_proj_folders won't start
         info!("LSP client_info {:?}", params.client_info);
         {
             let gcx_locked = self.gcx.write().await;
@@ -180,14 +179,9 @@ impl LanguageServer for Backend {
         }
 
         if let Some(folders) = params.workspace_folders {
-            let files = retrieve_files_by_proj_folders(
-                folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
-            ).await;
             match *self.gcx.read().await.vec_db.lock().await {
-                Some(ref db) => db.add_or_update_files(files, true).await,
-                None => {
-                    info!("LSP no vec_db");
-                }
+                Some(ref db) => db.init_folders(folders).await,
+                None => {},
             };
         }
 

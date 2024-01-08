@@ -7,11 +7,13 @@ use tokio::sync::Mutex as AMutex;
 use tokio::task::JoinHandle;
 use crate::global_context::{CommandLine, GlobalContext};
 use tokio::sync::RwLock as ARwLock;
+use tower_lsp::lsp_types::WorkspaceFolder;
 use tracing::error;
 use crate::background_tasks::BackgroundTasksHolder;
 
+use crate::fetch_embedding;
+use crate::vecdb::file_filter;
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
-use crate::fetch_embedding::get_embedding;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
 
@@ -37,20 +39,21 @@ pub async fn vecdb_background_reload(
 ) {
     let mut background_tasks = BackgroundTasksHolder::new(vec![]);
 
-    let mut vecdb_fetched = false;
+    let mut vecdb_launched = false;
     let mut first_loop = true;
     loop {
         if !first_loop {
-            if vecdb_fetched {
+            if vecdb_launched {
                 tokio::time::sleep(tokio::time::Duration::from_secs(VECDB_BACKGROUND_RELOAD_ON_SUCCESS)).await;
             } else {
                 tokio::time::sleep(tokio::time::Duration::from_secs(VECDB_BACKGROUND_RELOAD_ON_FAIL)).await;
             }
         }
+
         background_tasks.abort().await;
         background_tasks = BackgroundTasksHolder::new(vec![]);
 
-        vecdb_fetched = false;
+        vecdb_launched = false;
         first_loop = false;
         info!("attempting to launch vecdb");
 
@@ -66,7 +69,7 @@ pub async fn vecdb_background_reload(
 
         if !cmdline.vecdb {
             info!("VecDB launch is disabled by cmdline");
-            vecdb_fetched = true;
+            vecdb_launched = true;
             continue;
         }
 
@@ -99,12 +102,22 @@ pub async fn vecdb_background_reload(
         }
         gcx_locked.vec_db = Arc::new(AMutex::new(vecdb_mb));
         info!("VECDB is launched successfully");
-        vecdb_fetched = true;
+        vecdb_launched = true;
 
         background_tasks.extend(match *gcx_locked.vec_db.lock().await {
             Some(ref db) => db.start_background_tasks().await,
             None => vec![]
         });
+
+        {
+            if let Some(folders) = gcx_locked.lsp_backend_document_state.workspace_folders.clone().read().await.clone() {
+                let mut vec_db_lock = gcx_locked.vec_db.lock().await;
+                if let Some(ref mut db) = *vec_db_lock {
+                    db.init_folders(folders).await;
+                }
+            }
+        }
+
     }
 }
 
@@ -201,18 +214,27 @@ impl VecDb {
     pub async fn get_status(&self) -> Result<VecDbStatus, String> {
         self.retriever_service.lock().await.status().await
     }
+
+    pub async fn init_folders(&self, folders: Vec<WorkspaceFolder>) {
+        let files = file_filter::retrieve_files_by_proj_folders(
+            folders.iter().map(|x| PathBuf::from(x.uri.path())).collect()
+        ).await;
+        self.add_or_update_files(files, true).await;
+        info!("vecdb: init_folders complete");
+    }
 }
 
 
 #[async_trait]
 impl VecdbSearch for VecDb {
     async fn search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
-        let embedding_mb = get_embedding(
+        let embedding_mb = fetch_embedding::try_get_embedding(
             &self.endpoint_embeddings_style,
             &self.model_name,
             &self.endpoint_template,
             query.clone(),
             &self.cmdline.api_key,
+            3
         ).await;
         if embedding_mb.is_err() {
             return Err("Failed to get embedding".to_string());
