@@ -1,4 +1,3 @@
-use std::time::Duration;
 use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
@@ -6,8 +5,6 @@ use reqwest::header::HeaderValue;
 use reqwest_eventsource::EventSource;
 use serde::Serialize;
 use serde_json::json;
-use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use crate::call_validation;
 use crate::call_validation::SamplingParameters;
 
