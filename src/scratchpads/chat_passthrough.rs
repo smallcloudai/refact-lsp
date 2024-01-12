@@ -59,7 +59,7 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for ChatPassthrough<T> {
             Some(ref db) => embed_vecdb_results(db, &mut self.post, 6, &mut self.has_vecdb_results).await,
             None => {}
         }
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post, self.limit_bytes, &self.default_system_message)?;
+        let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post.messages, self.limit_bytes, &self.default_system_message)?;
         info!("chat passthrough {} messages -> {} messages after applying limits and possibly adding the default system message", &limited_msgs.len(), &limited_msgs.len());
         let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
         for msg in &limited_msgs {

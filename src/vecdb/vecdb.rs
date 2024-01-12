@@ -12,7 +12,8 @@ use tracing::error;
 use crate::background_tasks::BackgroundTasksHolder;
 
 use crate::fetch_embedding;
-use crate::vecdb::file_filter;
+use crate::vecdb;
+use crate::vecdb::{file_filter};
 use crate::vecdb::handler::{VecDBHandler, VecDBHandlerRef};
 use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus};
@@ -135,10 +136,15 @@ pub async fn vecdb_background_reload(
         info!("VECDB is launched successfully");
 
         background_tasks.extend(match *gcx_locked.vec_db.lock().await {
-            Some(ref db) => db.start_background_tasks().await,
+            Some(ref db) => {
+                let mut tasks = db.start_background_tasks().await;
+                tasks.push(
+                    tokio::spawn(vecdb::file_watcher_service::file_watcher_task(global_context.clone()))
+                );
+                tasks
+            },
             None => vec![]
         });
-
         {
             if let Some(folders) = gcx_locked.lsp_backend_document_state.workspace_folders.clone().read().await.clone() {
                 let mut vec_db_lock = gcx_locked.vec_db.lock().await;

@@ -24,17 +24,22 @@ pub async fn embed_vecdb_results<T>(
 fn vecdb_resp_to_json(
     resp: &Result<SearchResult, String>
 ) -> serde_json::Result<serde_json::Value> {
-    let context_files: Vec<ContextFile> = match resp {
+    let mut context_files: Vec<ContextFile> = match resp {
         Ok(search_res) => {
-            search_res.results.iter().map(
-                |x| ContextFile {
-                    file_name: x.file_path.to_str().unwrap().to_string(),
-                    file_content: x.window_text.clone(),
-                }
-            ).collect()
+            search_res.results.iter().map(|x| ContextFile {
+                file_name: x.file_path.to_str().unwrap().to_string(),
+                file_content: x.window_text.clone(),
+                line1: x.start_line as i32,
+                line2: x.end_line as i32,
+            }).collect()
         }
-        Err(_) => vec![]
+        Err(_) => vec![],
     };
+
+    context_files.dedup_by(|a, b| {
+        a.file_name == b.file_name && a.file_content == b.file_content
+    });
+
     serde_json::to_value(&context_files)
 }
 
@@ -48,9 +53,11 @@ fn vecdb_resp_to_prompt(
         return cont
     }
     let resp = resp_mb.as_ref().unwrap();
-    cont.push_str("CONTEXT:\n");
+    let mut results = resp.results.clone();
+    results.dedup_by(|a, b| a.file_path == b.file_path && a.window_text == b.window_text);
 
-    for res in resp.results.iter() {
+    cont.push_str("CONTEXT:\n");
+    for res in results.iter() {
         cont.push_str("FILENAME:\n");
         cont.push_str(res.file_path.clone().to_str().unwrap_or_else( || ""));
         cont.push_str("\nTEXT:");

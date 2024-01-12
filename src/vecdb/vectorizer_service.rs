@@ -171,7 +171,7 @@ async fn vectorize_thread(
                         );
                     }
                     Err(e) => {
-                        info!("Error retrieving embeddings for {}: {}", data_res.window_text, e);
+                        info!("Error retrieving embeddings for {}: {}", data_res.file_path.to_str().unwrap(), e);
                     }
                 }
             }
