@@ -11,7 +11,7 @@ use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
-use crate::scratchpads::chat_utils_rag::{embed_vecdb_results, HasVecdb, HasVecdbResults};
+use crate::scratchpads::chat_utils_rag::{chat_functions_middleware, HasVecdb, HasVecdbResults};
 use crate::vecdb::structs::VecdbSearch;
 
 const DEBUG: bool = true;
@@ -87,7 +87,7 @@ impl<T: Send + Sync + VecdbSearch> ScratchpadAbstract for GenericChatScratchpad<
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         match *self.vecdb_search.lock().await {
-            Some(ref db) => embed_vecdb_results(db, &mut self.post, 6, &mut self.has_vecdb_results).await,
+            Some(ref db) => chat_functions_middleware(db, &mut self.post, 6, &mut self.has_vecdb_results).await,
             None => {}
         }
 

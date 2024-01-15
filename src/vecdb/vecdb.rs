@@ -69,16 +69,14 @@ pub async fn vecdb_background_reload(
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
 
-        let mut gcx_locked = global_context.write().await;
-        let caps_mb = gcx_locked.caps.clone();
-        if caps_mb.is_none() {
-            continue;
-        }
+        let (caps_mb, cache_dir, cmdline) = {
+            let gcx_locked = global_context.read().await;
+            let caps_mb = gcx_locked.caps.clone();
+            let cache_dir = gcx_locked.cache_dir.clone();
+            (caps_mb, &cache_dir.clone(), &gcx_locked.cmdline.clone())
+        };
 
-        let cache_dir = &gcx_locked.cache_dir;
-        let cmdline = &gcx_locked.cmdline;
-
-        if !cmdline.vecdb {
+        if caps_mb.is_none() || !cmdline.vecdb {
             continue;
         }
 
@@ -103,7 +101,8 @@ pub async fn vecdb_background_reload(
             continue;
         }
 
-        match *gcx_locked.vec_db.lock().await {
+
+        match *global_context.write().await.vec_db.lock().await {
             None => {}
             Some(ref db) => {
                 if db.model_name == default_embeddings_model &&
@@ -132,24 +131,35 @@ pub async fn vecdb_background_reload(
         if vecdb_mb.is_none() {
             continue;
         }
-        gcx_locked.vec_db = Arc::new(AMutex::new(vecdb_mb));
-        info!("VECDB is launched successfully");
 
-        background_tasks.extend(match *gcx_locked.vec_db.lock().await {
-            Some(ref db) => {
-                let mut tasks = db.start_background_tasks().await;
-                tasks.push(
-                    tokio::spawn(vecdb::file_watcher_service::file_watcher_task(global_context.clone()))
-                );
-                tasks
-            },
-            None => vec![]
-        });
         {
-            if let Some(folders) = gcx_locked.lsp_backend_document_state.workspace_folders.clone().read().await.clone() {
-                let mut vec_db_lock = gcx_locked.vec_db.lock().await;
-                if let Some(ref mut db) = *vec_db_lock {
-                    db.init_folders(folders).await;
+            let mut gcx_locked = global_context.write().await;
+
+            if let Some(caps) = &mut gcx_locked.caps {
+                caps.write().unwrap().chat_rag_functions = vec![
+                    "@workspace".to_string()
+                ]
+            };
+
+            gcx_locked.vec_db = Arc::new(AMutex::new(vecdb_mb));
+            info!("VECDB is launched successfully");
+
+            background_tasks.extend(match *gcx_locked.vec_db.lock().await {
+                Some(ref db) => {
+                    let mut tasks = db.start_background_tasks().await;
+                    tasks.push(
+                        tokio::spawn(vecdb::file_watcher_service::file_watcher_task(global_context.clone()))
+                    );
+                    tasks
+                }
+                None => vec![]
+            });
+            {
+                if let Some(folders) = gcx_locked.lsp_backend_document_state.workspace_folders.clone().read().await.clone() {
+                    let mut vec_db_lock = gcx_locked.vec_db.lock().await;
+                    if let Some(ref mut db) = *vec_db_lock {
+                        db.init_folders(folders).await;
+                    }
                 }
             }
         }

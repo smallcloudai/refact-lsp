@@ -5,8 +5,20 @@ use tracing::info;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
 use crate::vecdb::structs::{SearchResult, VecdbSearch};
 
+pub async fn chat_functions_middleware<T>(
+    vecdb: &T,
+    post: &mut ChatPost,
+    limit_examples_cnt: usize,
+    has_vecdb: &mut dyn HasVecdb,
+) where T: VecdbSearch {
+    let latest_msg_cont = &post.messages.last().unwrap().content;
+    if latest_msg_cont.starts_with("@workspace") {
+        embed_vecdb_results(vecdb, post, limit_examples_cnt, has_vecdb).await;
+    }
+}
 
-pub async fn embed_vecdb_results<T>(
+
+async fn embed_vecdb_results<T>(
     vecdb: &T,
     post: &mut ChatPost,
     limit_examples_cnt: usize,
@@ -38,6 +50,14 @@ fn vecdb_resp_to_json(
 
     context_files.dedup_by(|a, b| {
         a.file_name == b.file_name && a.file_content == b.file_content
+    });
+
+    context_files.iter_mut().for_each(|file| {
+        file.file_name = file.file_name
+            .rsplit('/')
+            .next()
+            .unwrap_or(&file.file_name)
+            .to_string();
     });
 
     serde_json::to_value(&context_files)
