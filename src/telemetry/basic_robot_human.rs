@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use tracing::{info};
-use std::sync::{Arc, RwLockReadGuard};
+use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -46,12 +46,18 @@ fn basetext_to_text_leap_calculations(
 ) {
     let re = Regex::new(r"\s+").unwrap();
     let (added_characters, removed_characters) = utils::get_add_del_from_texts(&baseline_text, text);
-
-    let (added_characters, _) = utils::get_add_del_chars_from_texts(&removed_characters, &added_characters);
-
-    // let real_characters_added = re.replace_all(&added_characters, "").len() as i64 - re.replace_all(&removed_characters, "").len() as i64;
+    let (added_characters_first_line, _) = utils::get_add_del_chars_from_texts(
+        &removed_characters.lines().last().unwrap_or("").to_string(),
+        &added_characters.lines().next().unwrap_or("").to_string(),
+    );
+    // info!(added_characters_first_line);
+    let added_characters= vec![
+        added_characters_first_line,
+        added_characters.lines().skip(1).map(|x|x.to_string()).collect::<Vec<String>>().join("\n")
+    ].join("\n");
+    // info!(added_characters);
     let human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
-    info!("human_characters: +{}; robot_characters: +{}", human_characters, rec.robot_characters_acc_baseline);
+    info!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline);
     rec.human_characters += 0.max(human_characters);
     rec.robot_characters += rec.robot_characters_acc_baseline;
     rec.robot_characters_acc_baseline = 0;
@@ -59,18 +65,17 @@ fn basetext_to_text_leap_calculations(
 
 
 pub fn increase_counters_from_finished_snippet(
-    tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
+    storage_locked: &mut RwLockWriteGuard<Storage>,
     uri: &String,
     text: &String,
     snip: &SnippetTracker,
 ) {
     // info!("snip grey_text: {}", snip.grey_text);
     let now = chrono::Local::now().timestamp();
-    if let Some(rec) = tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
+    if let Some(rec) = storage_locked.tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
         if rec.used_snip_ids.contains(&snip.snippet_telemetry_id) {
             return;
         }
-
         if rec.used_snip_ids.is_empty() {
             rec.model = snip.model.clone();
         }
@@ -82,9 +87,10 @@ pub fn increase_counters_from_finished_snippet(
         rec.baseline_updated_ts = now;
         rec.baseline_text = text.clone();
     }
+    storage_locked.last_seen_file_texts.remove(text);
 }
 
-pub fn on_did_close_text_leap_calculations(
+pub fn force_update_text_leap_calculations(
     tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
     uri: &String,
     text: &String,
@@ -102,9 +108,7 @@ fn compress_robot_human(
 ) -> Vec<TeleRobotHuman> {
     let mut unique_combinations: HashMap<(String, String), Vec<TeleRobotHumanAccum>> = HashMap::new();
 
-    let tele_robot_human = storage_locked.tele_robot_human.clone();
-
-    for accum in tele_robot_human {
+    for accum in storage_locked.tele_robot_human.clone() {
         let key = (accum.file_extension.clone(), accum.model.clone());
         unique_combinations.entry(key).or_default().push(accum);
     }
@@ -128,6 +132,10 @@ fn compress_robot_human(
 pub async fn tele_robot_human_compress_to_file(
     cx: Arc<ARwLock<global_context::GlobalContext>>,
 ) {
+    let last_seen_file_texts = cx.read().await.telemetry.read().unwrap().last_seen_file_texts.clone();
+    for (k, v) in &last_seen_file_texts {
+        force_update_text_leap_calculations(&mut cx.read().await.telemetry.write().unwrap().tele_robot_human, k, v);
+    }
     let mut records = vec![];
     for rec in compress_robot_human(&cx.read().await.telemetry.read().unwrap()) {
         if rec.model.is_empty() && rec.robot_characters == 0 && rec.human_characters == 0 {
