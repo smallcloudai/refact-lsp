@@ -9,23 +9,7 @@ use reqwest::Client;
 use tracing::info;
 use tokio::io;
 use tokio::io::AsyncBufReadExt;
-
-#[derive(Debug, serde::Deserialize)]
-struct RHData {
-    id: i64,
-    tenant_name: String,
-    ts_reported: i64,
-    ip: String,
-    enduser_client_version: String,
-    completions_cnt: i64,
-    file_extension: String,
-    human_characters: i64,
-    model: String,
-    robot_characters: i64,
-    teletype: String,
-    ts_start: i64,
-    ts_end: i64,
-}
+use crate::dashboard::dashboard::{RHData, records2df};
 
 #[derive(Debug, serde::Deserialize)]
 struct RHResponse {
@@ -33,7 +17,9 @@ struct RHResponse {
     data: Vec<RHData>,
 }
 
-async fn fetch_data() -> Result<(), String> {
+async fn fetch_data(
+    api_key: &String,
+) -> Result<Vec<RHData>, String> {
     let client = Client::new();
     let payload = json!({
         "key": "sMfJgiGm3gOH7gNeJ8qJM94Y"
@@ -55,17 +41,17 @@ async fn fetch_data() -> Result<(), String> {
     let body = body_mb.unwrap();
     let mut reader = io::BufReader::new(&body[..]);
     let mut line = String::new();
-
+    let mut data = vec![];
     while reader.read_line(&mut line).await.is_ok() {
-        let response_data_mb: Result<RHResponse, _> =serde_json::from_str(&line);
+        let response_data_mb: Result<RHResponse, _> = serde_json::from_str(&line);
         if response_data_mb.is_err() {
             info!("response_data_mb.is_err");
             break;
         }
-        info!("{:#?}", response_data_mb.unwrap());
+        data.extend(response_data_mb.unwrap().data);
         line.clear();
     }
-    Ok(())
+    Ok(data)
 }
 
 pub async fn get_dashboard_records(
@@ -76,12 +62,13 @@ pub async fn get_dashboard_records(
 
     let api_key = gcx_locked.cmdline.api_key.clone();
 
-    let _ = fetch_data().await;
-    // if let Err(e) = reports {
-    //     return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error fetching reports: {}", e)));
-    // }
-    // let reports = reports.unwrap();
-    // info!("{:?}", reports);
+    let mut records = match fetch_data(&api_key).await {
+        Ok(res) => res,
+        Err(e) => {
+            return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error fetching reports: {}", e)));
+        }
+    };
+    records2df(&mut records).await;
 
     Ok(Response::builder()
         .status(StatusCode::OK)

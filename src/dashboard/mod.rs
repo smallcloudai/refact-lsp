@@ -1,1 +1,1 @@
-mod dashboard;
+pub mod dashboard;
