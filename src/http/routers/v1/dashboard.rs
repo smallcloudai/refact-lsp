@@ -6,15 +6,23 @@ use crate::custom_error::ScratchError;
 use crate::global_context::SharedGlobalContext;
 
 use reqwest::Client;
+use serde::{Serialize, Deserialize};
 use tracing::info;
 use tokio::io;
 use tokio::io::AsyncBufReadExt;
-use crate::dashboard::dashboard::{RHData, records2df};
+use crate::dashboard::dashboard::records2plots;
+use crate::dashboard::structs::RHData;
 
-#[derive(Debug, serde::Deserialize)]
+
+#[derive(Debug, Deserialize)]
 struct RHResponse {
     retcode: String,
     data: Vec<RHData>,
+}
+
+#[derive(Debug, Serialize)]
+struct DashboardPlotsResponse {
+    data: String,
 }
 
 async fn fetch_data(
@@ -54,7 +62,7 @@ async fn fetch_data(
     Ok(data)
 }
 
-pub async fn get_dashboard_records(
+pub async fn get_dashboard_plots(
     Extension(global_context): Extension<SharedGlobalContext>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
@@ -68,10 +76,21 @@ pub async fn get_dashboard_records(
             return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error fetching reports: {}", e)));
         }
     };
-    records2df(&mut records).await;
 
+    let plots = match records2plots(&mut records).await {
+        Ok(plots) => plots,
+        Err(e) => {
+            return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error plotting reports: {}", e)));
+        }
+    };
+    let body = match serde_json::to_string_pretty(&DashboardPlotsResponse{data: plots.to_string()}) {
+        Ok(res) => res,
+        Err(e) => {
+            return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error serializing plots: {}", e)));
+        }
+    };
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(json!({"success": true}).to_string()))
+        .body(Body::from(body))
         .unwrap())
 }
