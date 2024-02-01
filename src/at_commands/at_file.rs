@@ -1,17 +1,16 @@
 use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use crate::at_commands::structs::{AtCommand, AtCommandsContext, AtParam, AtParamKind};
+use crate::at_commands::structs::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_params::AtParamFilePath;
 use tokio::sync::Mutex as AMutex;
 use crate::at_commands::utils::compose_context_file_msg_from_result;
 use crate::call_validation::{ChatMessage, ContextFile};
 use crate::vecdb::vecdb::FileSearchResult;
 
-#[derive(Debug)]
 pub struct AtFile {
     pub name: String,
-    pub params: Vec<Arc<AMutex<AtParamKind>>>,
+    pub params: Vec<Arc<AMutex<dyn AtParam>>>,
 }
 
 impl AtFile {
@@ -19,7 +18,7 @@ impl AtFile {
         AtFile {
             name: "@file".to_string(),
             params: vec![
-                Arc::new(AMutex::new(AtParamKind::AtParamFilePath(AtParamFilePath::new())))
+                Arc::new(AMutex::new(AtParamFilePath::new()))
             ],
         }
     }
@@ -48,7 +47,7 @@ impl AtCommand for AtFile {
     fn name(&self) -> &String {
         &self.name
     }
-    fn params(&self) -> &Vec<Arc<AMutex<AtParamKind>>> {
+    fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>> {
         &self.params
     }
     async fn are_args_valid(&self, args: &Vec<String>, context: &AtCommandsContext) -> Vec<bool> {

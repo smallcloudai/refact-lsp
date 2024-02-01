@@ -1,17 +1,16 @@
 use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use crate::at_commands::structs::{AtCommand, AtCommandsContext, AtParam, AtParamKind};
+use crate::at_commands::structs::{AtCommand, AtCommandsContext, AtParam};
 use tokio::sync::Mutex as AMutex;
 use crate::at_commands::utils::compose_context_file_msg_from_result;
 use crate::call_validation::{ChatMessage, ContextFile};
 use crate::vecdb::structs::{Record, VecdbSearch};
 
 
-#[derive(Debug)]
 pub struct AtWorkspace {
     pub name: String,
-    pub params: Vec<Arc<AMutex<AtParamKind>>>,
+    pub params: Vec<Arc<AMutex<dyn AtParam>>>,
 }
 
 impl AtWorkspace {
@@ -57,7 +56,7 @@ impl AtCommand for AtWorkspace {
     fn name(&self) -> &String {
         &self.name
     }
-    fn params(&self) -> &Vec<Arc<AMutex<AtParamKind>>>
+    fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>>
     {
         &self.params
     }
