@@ -10,7 +10,7 @@ use crate::global_context;
 use crate::telemetry::utils;
 use crate::telemetry::telemetry_structs::{SnippetTracker, Storage, TeleRobotHumanAccum};
 use crate::telemetry::utils::compress_tele_records_to_file;
-
+use colored::Colorize;
 
 // if human characters / diff_time > 20 => ignore (don't count copy-paste and branch changes)
 const MAX_CHARS_PER_SECOND: i64 = 20;
@@ -25,7 +25,7 @@ pub fn create_robot_human_record_if_not_exists(
     if record_mb.is_some() {
         return;
     }
-    debug!("create_robot_human_rec_if_not_exists: new uri {}", uri);
+    info!("create_robot_human_rec_if_not_exists: new uri {}", uri);
     let record = TeleRobotHumanAccum::new(
         uri.clone(),
         text.clone(),
@@ -66,18 +66,21 @@ fn basetext_to_text_leap_calculations(
         &removed_characters.lines().last().unwrap_or("").to_string(),
         &added_characters.lines().next().unwrap_or("").to_string(),
     );
+    info!("{}", format!("added:\n{}", added_characters).green());
+    info!("{}", format!("removed:\n{}", removed_characters).red());
     let added_characters= vec![
         added_characters_first_line,
         added_characters.lines().skip(1).map(|x|x.to_string()).collect::<Vec<String>>().join("\n")
     ].join("\n");
+    info!("{}", format!("robot + human:\n{}\n{} of which belong to robot", added_characters, rec.robot_characters_acc_baseline).yellow());
     let mut human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
     let now = chrono::Local::now().timestamp();
     let time_diff_s = (now - rec.baseline_updated_ts).max(1);
     if human_characters.max(1) / time_diff_s > MAX_CHARS_PER_SECOND {
-        debug!("ignoring human_character: {}; probably copy-paste; time_diff_s: {}", human_characters, time_diff_s);
+        info!("ignoring human_character: {}; probably copy-paste; time_diff_s: {}", human_characters, time_diff_s);
         human_characters = 0;
     }
-    debug!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline);
+    info!("{}", format!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline).green());
     rec.human_characters += 0.max(human_characters);
     rec.robot_characters += rec.robot_characters_acc_baseline;
     rec.robot_characters_acc_baseline = 0;

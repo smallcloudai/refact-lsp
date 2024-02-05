@@ -38,3 +38,4 @@ async-trait = "0.1.73"
 similar = "2.3.0"
 axum = "0.6.20"
 uuid = { version = "1", features = ["v4"] }
+colored = "2.1.0"
