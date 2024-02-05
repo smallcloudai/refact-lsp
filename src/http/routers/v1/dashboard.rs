@@ -30,21 +30,24 @@ async fn fetch_data(
 ) -> Result<Vec<RHData>, String> {
     let client = Client::new();
     let payload = json!({
-        "key": "sMfJgiGm3gOH7gNeJ8qJM94Y"
+        "key": api_key,
     });
     let response = match client
-        .post("https://staging.smallcloud.ai/v1/rh-stats")
+        // .post("https://staging.smallcloud.ai/v1/rh-stats")
+        .post("http://localhost:8008/stats/rh-stats")
         .header("X-Token", "q7iDnGVVe4R8Y0455c")
         .json(&payload)
         .send().await {
         Ok(response) => response,
         Err(e) => return Err(format!("Error fetching reports: {}", e)),
     };
-    info!("{:?}", response.status());
-
+    info!("{:?}", &response.status());
+    if !response.status().is_success() {
+        return Err(format!("Error fetching reports: status code: {}", response.status()));
+    }
     let body_mb = response.bytes().await;
     if body_mb.is_err() {
-        return Err("Error fetching reports".to_string())
+        return Err("Error fetching reports".to_string());
     }
     let body = body_mb.unwrap();
     let mut reader = io::BufReader::new(&body[..]);
@@ -53,7 +56,6 @@ async fn fetch_data(
     while reader.read_line(&mut line).await.is_ok() {
         let response_data_mb: Result<RHResponse, _> = serde_json::from_str(&line);
         if response_data_mb.is_err() {
-            info!("response_data_mb.is_err");
             break;
         }
         data.extend(response_data_mb.unwrap().data);
@@ -69,6 +71,9 @@ pub async fn get_dashboard_plots(
     let gcx_locked = global_context.read().await;
 
     let api_key = gcx_locked.cmdline.api_key.clone();
+    // let api_key = "7995d57c-962b-4eef-9056-8dfbf062f74a".to_string();
+    let api_key ="ea772402-f00b-4b72-96ec-dd6fb23e5603".to_string();
+    // let api_key = "sMfJgiGm3gOH7gNeJ8qJM94Y".to_string();
 
     let mut records = match fetch_data(&api_key).await {
         Ok(res) => res,
