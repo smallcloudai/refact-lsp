@@ -1,7 +1,6 @@
 use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
-use serde_json::json;
 use crate::custom_error::ScratchError;
 use crate::global_context::SharedGlobalContext;
 
@@ -29,14 +28,11 @@ async fn fetch_data(
     api_key: &String,
 ) -> Result<Vec<RHData>, String> {
     let client = Client::new();
-    let payload = json!({
-        "key": api_key,
-    });
     let response = match client
-        // .post("https://staging.smallcloud.ai/v1/rh-stats")
-        .post("http://localhost:8008/stats/rh-stats")
+        // .get("https://staging.smallcloud.ai/v1/rh-stats")
+        .get("http://localhost:8008/stats/rh-stats")
         .header("X-Token", "q7iDnGVVe4R8Y0455c")
-        .json(&payload)
+        .header("Authorization", format!("Bearer {}", api_key))
         .send().await {
         Ok(response) => response,
         Err(e) => return Err(format!("Error fetching reports: {}", e)),
