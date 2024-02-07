@@ -162,7 +162,7 @@ pub async fn create_global_context(
     let cx = GlobalContext {
         cmdline: cmdline.clone(),
         http_client,
-        http_client_slowdown: Arc::new(Semaphore::new(2)),
+        http_client_slowdown: Arc::new(Semaphore::new(4)),
         cache_dir,
         caps: None,
         caps_last_attempted_ts: 0,
