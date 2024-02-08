@@ -218,7 +218,8 @@ const KNOWN_MODELS: &str = r####"
             },
             "similar_models": [
                 "wizardlm/13b",
-                "wizardlm/30b"
+                "wizardlm/30b",
+                "wizardlm/70b"
             ]
         },
         "magicoder/6.7b": {
