@@ -147,8 +147,8 @@ pub async fn sources_changed(
     }
 
     for snip in accepted_snippets {
-        basic_robot_human::increase_counters_from_finished_snippet(&mut storage_locked, uri, text, &snip);
-        basic_comp_counters::create_data_accumulator_for_finished_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
+        basic_robot_human::increase_counters_from_accepted_snippet(&mut storage_locked, uri, text, &snip);
+        basic_comp_counters::create_data_accumulator_for_accepted_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
     }
     basic_comp_counters::on_file_text_changed(&mut storage_locked.snippet_data_accumulators, uri, text);
 }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::{info};
+use tracing::{debug, info};
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,10 @@ use crate::global_context;
 use crate::telemetry::utils;
 use crate::telemetry::telemetry_structs::{SnippetTracker, Storage, TeleRobotHumanAccum};
 use crate::telemetry::utils::compress_tele_records_to_file;
+
+
+// if human characters / diff_time > 20 => ignore (don't count copy-paste and branch changes)
+const MAX_CHARS_PER_SECOND: i64 = 20;
 
 
 pub fn create_robot_human_record_if_not_exists(
@@ -55,22 +59,25 @@ fn basetext_to_text_leap_calculations(
         added_characters_first_line,
         added_characters.lines().skip(1).map(|x|x.to_string()).collect::<Vec<String>>().join("\n")
     ].join("\n");
-    // info!(added_characters);
-    let human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
-    info!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline);
+    let mut human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
+    let time_diff_s = (chrono::Utc::now().timestamp() - rec.baseline_updated_ts).max(1);
+    if human_characters.max(1) / time_diff_s > MAX_CHARS_PER_SECOND {
+        debug!("human_characters too big: {} with time_diff_s: {}", human_characters, time_diff_s);
+        human_characters = 0;
+    }
+    debug!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline);
     rec.human_characters += 0.max(human_characters);
     rec.robot_characters += rec.robot_characters_acc_baseline;
     rec.robot_characters_acc_baseline = 0;
 }
 
 
-pub fn increase_counters_from_finished_snippet(
+pub fn increase_counters_from_accepted_snippet(
     storage_locked: &mut RwLockWriteGuard<Storage>,
     uri: &String,
     text: &String,
     snip: &SnippetTracker,
 ) {
-    // info!("snip grey_text: {}", snip.grey_text);
     let now = chrono::Local::now().timestamp();
     if let Some(rec) = storage_locked.tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
         if rec.used_snip_ids.contains(&snip.snippet_telemetry_id) {

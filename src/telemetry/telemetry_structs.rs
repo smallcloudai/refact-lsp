@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::call_validation::CodeCompletionInputs;
@@ -88,7 +89,7 @@ impl TeleRobotHumanAccum {
             file_extension: utils::extract_extension_or_filename(&uri),
             model: "".to_string(),
             baseline_text,
-            baseline_updated_ts: 0,
+            baseline_updated_ts: Utc::now().timestamp(),
             robot_characters_acc_baseline: 0,
             robot_characters: 0,
             human_characters: 0,
