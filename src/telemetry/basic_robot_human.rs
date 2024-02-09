@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::debug;
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub fn create_robot_human_record_if_not_exists(
     if record_mb.is_some() {
         return;
     }
-    info!("create_robot_human_rec_if_not_exists: new uri {}", uri);
+    debug!("create_robot_human_rec_if_not_exists: new uri {}", uri);
     let record = TeleRobotHumanAccum::new(
         uri.clone(),
         text.clone(),
@@ -54,7 +54,6 @@ fn basetext_to_text_leap_calculations(
         &removed_characters.lines().last().unwrap_or("").to_string(),
         &added_characters.lines().next().unwrap_or("").to_string(),
     );
-    // info!(added_characters_first_line);
     let added_characters= vec![
         added_characters_first_line,
         added_characters.lines().skip(1).map(|x|x.to_string()).collect::<Vec<String>>().join("\n")
@@ -62,7 +61,7 @@ fn basetext_to_text_leap_calculations(
     let mut human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
     let time_diff_s = (chrono::Utc::now().timestamp() - rec.baseline_updated_ts).max(1);
     if human_characters.max(1) / time_diff_s > MAX_CHARS_PER_SECOND {
-        debug!("human_characters too big: {} with time_diff_s: {}", human_characters, time_diff_s);
+        debug!("ignoring human_character: {}; probably copy-paste; time_diff_s: {}", human_characters, time_diff_s);
         human_characters = 0;
     }
     debug!("human_characters: +{}; robot_characters: +{}", 0.max(human_characters), rec.robot_characters_acc_baseline);
@@ -121,7 +120,6 @@ fn compress_robot_human(
     }
     let mut compressed_vec= vec![];
     for (key, entries) in unique_combinations {
-        // info!("compress_robot_human: compressing {} entries for key {:?}", entries.len(), key);
         let mut record = TeleRobotHuman::new(
             key.0.clone(),
             key.1.clone()
