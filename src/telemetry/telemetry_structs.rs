@@ -78,6 +78,8 @@ pub struct TeleRobotHumanAccum {
     pub robot_characters: i64,
     pub human_characters: i64,
     pub used_snip_ids: Vec<u64>,
+    // if user changed branch / copy-pasted into the file and hasn't touched it, we won't calculate it on IDE shutdown
+    pub last_changed_ts: i64,
 }
 
 impl TeleRobotHumanAccum {
@@ -94,6 +96,7 @@ impl TeleRobotHumanAccum {
             robot_characters: 0,
             human_characters: 0,
             used_snip_ids: vec![],
+            last_changed_ts: Utc::now().timestamp(),
         }
     }
 }

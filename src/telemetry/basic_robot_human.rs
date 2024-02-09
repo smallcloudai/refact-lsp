@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{info, debug};
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,18 @@ pub fn create_robot_human_record_if_not_exists(
     tele_robot_human.push(record);
 }
 
+pub fn on_file_text_changed(
+    tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
+    uri: &String,
+    _text: &String
+) {
+    match tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
+        Some(x) => {
+            x.last_changed_ts = chrono::Local::now().timestamp();
+        },
+        None => {}
+    }
+}
 
 fn update_robot_characters_baseline(
     rec: &mut TeleRobotHumanAccum,
@@ -59,7 +71,8 @@ fn basetext_to_text_leap_calculations(
         added_characters.lines().skip(1).map(|x|x.to_string()).collect::<Vec<String>>().join("\n")
     ].join("\n");
     let mut human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
-    let time_diff_s = (chrono::Utc::now().timestamp() - rec.baseline_updated_ts).max(1);
+    let now = chrono::Local::now().timestamp();
+    let time_diff_s = (now - rec.baseline_updated_ts - (now - rec.last_changed_ts)).max(1);
     if human_characters.max(1) / time_diff_s > MAX_CHARS_PER_SECOND {
         debug!("ignoring human_character: {}; probably copy-paste; time_diff_s: {}", human_characters, time_diff_s);
         human_characters = 0;
