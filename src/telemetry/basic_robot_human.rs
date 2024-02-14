@@ -72,7 +72,7 @@ fn basetext_to_text_leap_calculations(
     ].join("\n");
     let mut human_characters = re.replace_all(&added_characters, "").len() as i64 - rec.robot_characters_acc_baseline;
     let now = chrono::Local::now().timestamp();
-    let time_diff_s = (now - rec.baseline_updated_ts - (now - rec.last_changed_ts)).max(1);
+    let time_diff_s = (now - rec.baseline_updated_ts).max(1);
     if human_characters.max(1) / time_diff_s > MAX_CHARS_PER_SECOND {
         debug!("ignoring human_character: {}; probably copy-paste; time_diff_s: {}", human_characters, time_diff_s);
         human_characters = 0;
@@ -109,7 +109,7 @@ pub fn increase_counters_from_accepted_snippet(
     storage_locked.last_seen_file_texts.remove(text);
 }
 
-pub fn force_update_text_leap_calculations(
+pub fn _force_update_text_leap_calculations(
     tele_robot_human: &mut Vec<TeleRobotHumanAccum>,
     uri: &String,
     text: &String,
@@ -150,10 +150,10 @@ fn compress_robot_human(
 pub async fn tele_robot_human_compress_to_file(
     cx: Arc<ARwLock<global_context::GlobalContext>>,
 ) {
-    let last_seen_file_texts = cx.read().await.telemetry.read().unwrap().last_seen_file_texts.clone();
-    for (k, v) in &last_seen_file_texts {
-        force_update_text_leap_calculations(&mut cx.read().await.telemetry.write().unwrap().tele_robot_human, k, v);
-    }
+    // let last_seen_file_texts = cx.read().await.telemetry.read().unwrap().last_seen_file_texts.clone();
+    // for (k, v) in &last_seen_file_texts {
+    //     force_update_text_leap_calculations(&mut cx.read().await.telemetry.write().unwrap().tele_robot_human, k, v);
+    // }
     let mut records = vec![];
     for rec in compress_robot_human(&cx.read().await.telemetry.read().unwrap()) {
         if rec.model.is_empty() && rec.robot_characters == 0 && rec.human_characters == 0 {
