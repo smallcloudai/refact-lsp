@@ -111,7 +111,7 @@ fn get_line_with_cursor(query: &String, cursor: i64) -> Result<(String, i64, i64
         }
         cursor_rel -= line_length + 1; // +1 to account for the newline character
     }
-    return Err(ScratchError::new(StatusCode::OK, "cursor is incorrect".to_string()));
+    return Err(ScratchError::new(StatusCode::EXPECTATION_FAILED, "incorrect cursor provided".to_string()));
 }
 
 async fn command_completion(
@@ -122,14 +122,14 @@ async fn command_completion(
 ) -> Result<(Vec<String>, bool, i64, i64), ScratchError> {    // returns ([possible, completions], good_as_it_is)
     let q_cmd = match query_line.command() {
         Some(x) => x,
-        None => { return Err(ScratchError::new(StatusCode::OK, "no command given".to_string()));}
+        None => { return Ok((vec![], false, -1, -1));}
     };
 
     let (_, cmd) = match context.at_commands.iter().find(|&(k, _v)| k == &q_cmd.value) {
         Some(x) => x,
         None => {
             if !q_cmd.focused {
-                return Err(ScratchError::new(StatusCode::OK, "incorrect command given".to_string()));
+                return Err(ScratchError::new(StatusCode::EXPECTATION_FAILED, "incorrect command provided".to_string()));
             }
             return Ok((command_completion_options(&q_cmd.value, &context, top_n).await, false, q_cmd.pos1, q_cmd.pos2));
         }
@@ -144,7 +144,7 @@ async fn command_completion(
             return if arg.focused {
                 Ok((param_locked.complete(&arg.value, context, top_n).await, can_execute, arg.pos1, arg.pos2))
             } else {
-                Err(ScratchError::new(StatusCode::OK, "invalid parameter".to_string()))
+                Err(ScratchError::new(StatusCode::EXPECTATION_FAILED, "invalid parameter".to_string()))
             }
         }
         if is_valid && arg.focused && param_locked.complete_if_valid() {
