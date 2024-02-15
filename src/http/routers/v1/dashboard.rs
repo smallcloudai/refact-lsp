@@ -25,12 +25,12 @@ struct DashboardPlotsResponse {
 }
 
 async fn fetch_data(
+    url: &String,
     api_key: &String,
 ) -> Result<Vec<RHData>, String> {
     let client = Client::new();
     let response = match client
-        // .get("https://staging.smallcloud.ai/v1/rh-stats")
-        .get("http://localhost:8008/stats/rh-stats")
+        .get(url)
         .header("X-Token", "q7iDnGVVe4R8Y0455c")
         .header("Authorization", format!("Bearer {}", api_key))
         .send().await {
@@ -64,14 +64,25 @@ pub async fn get_dashboard_plots(
     Extension(global_context): Extension<SharedGlobalContext>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let gcx_locked = global_context.read().await;
+    
+    let caps = match crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await {
+        Ok(caps) => caps,
+        Err(e) => {
+            return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error loading caps: {}", e)));
+        }
+    };
+    let (api_key, url) = {
+        let gcx_locked = global_context.read().await;
+        (gcx_locked.cmdline.api_key.clone(), caps.read().unwrap().telemetry_get_dest.clone())
+    };
+    if url.is_empty() {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "Error: no url provided from caps".to_string()));
+    }
 
-    let api_key = gcx_locked.cmdline.api_key.clone();
-    // let api_key = "7995d57c-962b-4eef-9056-8dfbf062f74a".to_string();
-    let api_key ="ea772402-f00b-4b72-96ec-dd6fb23e5603".to_string();
-    // let api_key = "sMfJgiGm3gOH7gNeJ8qJM94Y".to_string();
-
-    let mut records = match fetch_data(&api_key).await {
+    let mut records = match fetch_data(
+        &url,
+        &api_key
+    ).await {
         Ok(res) => res,
         Err(e) => {
             return Err(ScratchError::new(StatusCode::NO_CONTENT, format!("Error fetching reports: {}", e)));
