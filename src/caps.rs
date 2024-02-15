@@ -37,7 +37,7 @@ pub struct CodeAssistantCaps {
     #[serde(default)]
     pub telemetry_corrected_snippets_dest: String,
     #[serde(default)]
-    pub telemetry_get_dest: String,
+    pub telemetry_get_my_own_stats: String,
     #[serde(default)]
     pub code_completion_models: HashMap<String, ModelRecord>,
     pub code_completion_default_model: String,
@@ -366,7 +366,7 @@ pub async fn load_caps(
     r1.endpoint_chat_passthrough = relative_to_full_url(&caps_url, &r1.endpoint_chat_passthrough)?;
     r1.telemetry_basic_dest = relative_to_full_url(&caps_url, &r1.telemetry_basic_dest)?;
     r1.telemetry_corrected_snippets_dest = relative_to_full_url(&caps_url, &r1.telemetry_corrected_snippets_dest)?;
-    r1.telemetry_get_dest = relative_to_full_url(&caps_url, &r1.telemetry_get_dest)?;
+    r1.telemetry_get_my_own_stats = relative_to_full_url(&caps_url, &r1.telemetry_get_my_own_stats)?;
     info!("caps {} completion models", r1.code_completion_models.len());
     info!("caps default completion model: \"{}\"", r1.code_completion_default_model);
     info!("caps {} chat models", r1.code_chat_models.len());
