@@ -31,7 +31,6 @@ async fn fetch_data(
     let client = Client::new();
     let response = match client
         .get(url)
-        .header("X-Token", "q7iDnGVVe4R8Y0455c")
         .header("Authorization", format!("Bearer {}", api_key))
         .send().await {
         Ok(response) => response,
