@@ -119,6 +119,7 @@ const KNOWN_MODELS: &str = r####"
             "default_scratchpad": "FIM-PSM",
             "similar_models": [
                 "deepseek-coder/5.7b/mqa-base",
+                "deepseek-coder/6.7b/instruct-finetune",
                 "deepseek-coder/1.3b/vllm",
                 "deepseek-coder/5.7b/vllm"
             ]
@@ -281,6 +282,7 @@ const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
+                "deepseek-coder/6.7b/instruct-finetune",
                 "deepseek-coder/33b/instruct"
             ]
         }
