@@ -47,7 +47,7 @@ pub fn load_and_mix_with_users_config() -> ToolboxConfig {
             }
             let mut tmp = listof2[1].clone();
             for (vname, vtext) in variables.iter() {
-                tmp = tmp.replace(format!("${}", vname).as_str(), vtext.as_str());
+                tmp = tmp.replace(format!("%{}%", vname).as_str(), vtext.as_str());
             }
             listof2[1] = tmp;
         }
