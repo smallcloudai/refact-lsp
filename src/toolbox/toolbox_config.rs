@@ -1,9 +1,10 @@
-// use serde_json::{Value, Map};
 use serde_yaml::Value;
 use serde_yaml;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
-use tracing::error;
+
+use crate::call_validation::ChatMessage;
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolboxConfig {
@@ -15,7 +16,7 @@ pub struct ToolboxConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolboxCommand {
     pub description: String,
-    pub messages: Vec<Vec<String>>,
+    pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub selection_needed: Vec<usize>,
     #[serde(default)]
@@ -35,21 +36,13 @@ pub fn load_and_mix_with_users_config() -> ToolboxConfig {
             }
         }
     }
-    println!("{:?}", variables);
     for (_, command) in tconfig.commands.iter_mut() {
-        let debug_msg = format!("{:?}", command);
-        // println!("k={} {:?}", k, command);
-        for (i, listof2) in command.messages.iter_mut().enumerate() {
-            println!("    i={} listof2={:?}", i, listof2);
-            if listof2.len() != 2 {
-                error!("message n={} in this command must have two elements: {}", i, debug_msg);
-                continue;
-            }
-            let mut tmp = listof2[1].clone();
+        for (_i, msg) in command.messages.iter_mut().enumerate() {
+            let mut tmp = msg.content.clone();
             for (vname, vtext) in variables.iter() {
                 tmp = tmp.replace(format!("%{}%", vname).as_str(), vtext.as_str());
             }
-            listof2[1] = tmp;
+            msg.content = tmp;
         }
     }
     tconfig

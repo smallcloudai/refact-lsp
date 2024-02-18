@@ -21,6 +21,7 @@ use crate::http::routers::v1::telemetry_network::handle_v1_telemetry_network;
 use crate::http::routers::v1::lsp_like_handlers::handle_v1_lsp_initialize;
 use crate::http::routers::v1::lsp_like_handlers::handle_v1_lsp_did_change;
 use crate::http::routers::v1::toolbox::handle_v1_toolbox_config;
+use crate::http::routers::v1::toolbox::handle_v1_rewrite_assistant_says_to_at_commands;
 use crate::http::utils::telemetry_wrapper;
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status, handle_v1_vecdb_caps};
 use crate::http::routers::v1::at_commands::{handle_v1_command_completion, handle_v1_command_preview};
@@ -60,5 +61,7 @@ pub fn make_v1_router() -> Router {
         .route("/ast-query-search", telemetry_post!(handle_v1_ast_query_search))
         .route("/ast-file-symbols", telemetry_post!(handle_v1_ast_file_symbols))
 
+        // experimental
         .route("/toolbox-config", telemetry_get!(handle_v1_toolbox_config))
+        .route("/rewrite-assistant-says-to-at-commands", telemetry_post!(handle_v1_rewrite_assistant_says_to_at_commands))
 }

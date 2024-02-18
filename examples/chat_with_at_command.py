@@ -60,8 +60,11 @@ def example_single_response():
 def msg_pretty_print(msgdict, normal_color="white"):
     print(termcolor.colored(msgdict["role"], "blue"))
     if msgdict["role"] == "context_file":
-        for x in json.loads(msgdict["content"]):
-            print("%s:%i-%i" % (x["file_name"], x["line1"], x["line2"]))
+        try:
+            for x in json.loads(msgdict["content"]):
+                print("%s:%i-%i" % (x["file_name"], x["line1"], x["line2"]))
+        except json.decoder.JSONDecodeError:
+            print(msgdict["content"])
     else:
         print(termcolor.colored(msgdict["content"], normal_color))
 
