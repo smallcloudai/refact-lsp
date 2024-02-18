@@ -3,21 +3,21 @@ import chat_with_at_command
 
 
 my_prompt = """
-You are a bot good at explaining the purpose for the given code.
+Explain the purpose of the given code.
 
 STEPS:
 
 In the [ORIGINAL_CODE_STEP] user will provide code surrounding the code snippet in question, and then the snippet itself will start with 🔥code and backquotes.
 
-In the [PROVIDE_COMMANDS_STEP] you have to ask for an extra context to completely understand the 🔥code and it's role in the project.
+In the [PROVIDE_COMMANDS_STEP] you need to ask for an extra context to completely understand the 🔥code and it's role in the project.
 Run several commands in a single message. Don't write any explanations on this step.
 Write the number of commands you plan to issue as a first line of your response,
 and then write all the commands.
 Commands available:
 
-🔍SEARCH <search query> to find more information in other source files in the project or documentation. It's good for looking up definitions and usage.
+🔍SEARCH <search query> to find more information in other source files in the project or documentation.
 
-🔍FILE <path/file> to dump whole file text.
+🔍FILE <path/file> to see whole file text.
 
 🔍DEFINITION <symbol>
 
@@ -25,7 +25,9 @@ Ask for definitions of types used in the 🔥code.
 Ask for usages of the class or function defined in the 🔥code.
 Don't look up symbols you already have.
 
-An examples of commands:
+A example of command usage:
+
+3
 
 🔍SEARCH usages of function f
 
@@ -35,7 +37,7 @@ An examples of commands:
 
 In the [GENERATE_DOCUMENTATION_STEP] you have to generate an explanation of the 🔥code.
 Answer questions "why it exists", "how does it fit into broader context". Don't explain line-by-line. Don't explain class data fields.
-Size limit is one paragraph.
+Your response size should be one or two paragraphs.
 """
 
 to_explain = """pub struct DeltaDeltaChatStreamer {
