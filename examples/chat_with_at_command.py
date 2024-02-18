@@ -17,7 +17,7 @@ def ask_chat(messages):
             "messages": messages,
             "temperature": 0.1,
             "max_tokens": 300,
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-3.5-turbo-0125",
         },
         headers={
             "Content-Type": "application/json",
@@ -54,12 +54,16 @@ def ask_chat(messages):
 def example_single_response():
     messages_back = ask_chat(initial_messages)
     for msgdict in messages_back:
-        print(termcolor.colored(msgdict["role"], "blue"))
-        if msgdict["role"] == "context_file":
-            for x in json.loads(msgdict["content"]):
-                print("%s:%i-%i" % (x["file_name"], x["line1"], x["line2"]))
-        else:
-            print(termcolor.colored(msgdict["content"], "white"))
+        msg_pretty_print(msgdict, normal_color="white")
+
+
+def msg_pretty_print(msgdict, normal_color="white"):
+    print(termcolor.colored(msgdict["role"], "blue"))
+    if msgdict["role"] == "context_file":
+        for x in json.loads(msgdict["content"]):
+            print("%s:%i-%i" % (x["file_name"], x["line1"], x["line2"]))
+    else:
+        print(termcolor.colored(msgdict["content"], normal_color))
 
 
 if __name__ == "__main__":

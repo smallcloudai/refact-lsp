@@ -19,6 +19,8 @@ Commands available:
 
 🔍FILE <path/file> to dump whole file text.
 
+🔍DEFINITION <symbol>
+
 Ask for definitions of types used in the 🔥code.
 Ask for usages of the class or function defined in the 🔥code.
 Don't look up symbols you already have.
@@ -27,12 +29,13 @@ An examples of commands:
 
 🔍SEARCH usages of function f
 
-🔍SEARCH definition of Type2
+🔍DEFINITION Type1
 
 🔍FILE repo1/test_file.cpp
 
 In the [GENERATE_DOCUMENTATION_STEP] you have to generate an explanation of the 🔥code.
 Answer questions "why it exists", "how does it fit into broader context". Don't explain line-by-line. Don't explain class data fields.
+Size limit is one paragraph.
 """
 
 to_explain = """pub struct DeltaDeltaChatStreamer {
@@ -64,17 +67,17 @@ def rewrite_assistant_says_to_at_commands(ass):
             out += "@workspace " + s[8:] + "\n"
         if s.startswith("🔍FILE"):
             out += "@file " + s[6:] + "\n"
+        if s.startswith("🔍DEFINITION"):
+            out += "@ast_definition " + s[12:] + "\n"
     return out
 
 
 def dialog_turn(messages):
     for msgdict in messages:
-        print(termcolor.colored(msgdict["role"], "blue"))
-        print(termcolor.colored(msgdict["content"], "green"))
+        chat_with_at_command.msg_pretty_print(msgdict, normal_color="green")
     messages_back = chat_with_at_command.ask_chat(messages)
     for msgdict in messages_back:
-        print(termcolor.colored(msgdict["role"], "blue"))
-        print(termcolor.colored(msgdict["content"], "white"))
+        chat_with_at_command.msg_pretty_print(msgdict, normal_color="white")
 
     assistant_says = messages_back[-1]["content"]
     messages_without_last_user = messages[:-1]
