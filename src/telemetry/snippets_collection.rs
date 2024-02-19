@@ -47,7 +47,7 @@ fn snippet_register(
 ) -> u64 {
     let mut storage_locked = ss.storage_arc.write().unwrap();
     let snippet_telemetry_id = storage_locked.tele_snippet_next_id;
-    let snip = telemetry_structs::SnippetTracker {
+    let snip = SnippetTracker {
         snippet_telemetry_id,
         model: ss.post.model.clone(),
         inputs: ss.post.inputs.clone(),
@@ -57,6 +57,7 @@ fn snippet_register(
         created_ts: chrono::Local::now().timestamp(),
         accepted_ts: 0,
         finished_ts: 0,
+        counted_in: false,
     };
     storage_locked.tele_snippet_next_id += 1;
     storage_locked.tele_snippets.push(snip);
@@ -90,6 +91,7 @@ pub async fn snippet_accepted(
     if let Some(snip) = snip {
         snip.accepted_ts = chrono::Local::now().timestamp();
         snip.finished_ts = 0;
+        snip.counted_in = false;
         info!("snippet_accepted: ID{}: snippet is accepted", snippet_telemetry_id);
         return true;
     }
@@ -116,6 +118,11 @@ pub async fn sources_changed(
         if snip.finished_ts > 0 {
             continue;
         }
+        if snip.counted_in {
+            continue;
+        }
+        snip.counted_in = true;
+
         let orig_text = snip.inputs.sources.get(&snip.inputs.cursor.file);
         if !orig_text.is_some() {
             continue;
@@ -142,8 +149,9 @@ pub async fn sources_changed(
             }
         }
     }
+    // info!("accepted_snippets.len(): {}", accepted_snippets.len());
 
-    for snip in accepted_snippets {
+    for snip in accepted_snippets.iter_mut() {
         basic_robot_human::increase_counters_from_accepted_snippet(&mut storage_locked, uri, text, &snip);
         basic_comp_counters::create_data_accumulator_for_accepted_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
     }

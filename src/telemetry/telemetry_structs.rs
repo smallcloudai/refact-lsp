@@ -62,6 +62,7 @@ pub struct SnippetTracker {
     pub created_ts: i64,
     pub accepted_ts: i64,
     pub finished_ts: i64,
+    pub counted_in: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
