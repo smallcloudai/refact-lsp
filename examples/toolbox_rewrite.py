@@ -3,13 +3,6 @@ import termcolor
 import chat_with_at_command
 
 
-def toolbox_config():
-    return requests.get(
-        "http://127.0.0.1:8001/v1/toolbox-config",
-        timeout=60,
-    ).json()
-
-
 def rewrite_to_at_commands(messages):
     return requests.post(
         "http://127.0.0.1:8001/v1/rewrite-assistant-says-to-at-commands",
@@ -24,13 +17,14 @@ def rewrite_to_at_commands(messages):
     ).json()
 
 
-toolbox_why_command = toolbox_config()["commands"]["why"]
+toolbox_config = requests.get("http://127.0.0.1:8001/v1/toolbox-config", timeout=60).json()
+toolbox_why_command = toolbox_config["commands"]["why"]
 messages = toolbox_why_command["messages"][:]
 for msgdict in messages:
     chat_with_at_command.msg_pretty_print(msgdict, normal_color="green")
 
 messages.append(
-	{"role": "assistant", "content": "Here be dragons!\n1\n🔍DEFINITION MyClass\n🔍FILE hello.cpp\n🔍SEARCH Bill Clinton\n"}
+	{"role": "assistant", "content": "Here be dragons!\n3\n🔍DEFINITION MyClass\n🔍FILE hello.cpp\n🔍SEARCH Bill Clinton\n"}
 )
 
 result = rewrite_to_at_commands(messages)
