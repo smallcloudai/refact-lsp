@@ -92,9 +92,6 @@ pub fn increase_counters_from_accepted_snippet(
 ) {
     let now = chrono::Local::now().timestamp();
     if let Some(rec) = storage_locked.tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
-        if rec.used_snip_ids.contains(&snip.snippet_telemetry_id) {
-            return;
-        }
         if rec.used_snip_ids.is_empty() {
             rec.model = snip.model.clone();
         }
