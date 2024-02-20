@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::{info, debug};
+use tracing::debug;
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -150,10 +150,6 @@ fn compress_robot_human(
 pub async fn tele_robot_human_compress_to_file(
     cx: Arc<ARwLock<global_context::GlobalContext>>,
 ) {
-    // let last_seen_file_texts = cx.read().await.telemetry.read().unwrap().last_seen_file_texts.clone();
-    // for (k, v) in &last_seen_file_texts {
-    //     force_update_text_leap_calculations(&mut cx.read().await.telemetry.write().unwrap().tele_robot_human, k, v);
-    // }
     let mut records = vec![];
     for rec in compress_robot_human(&cx.read().await.telemetry.read().unwrap()) {
         if rec.model.is_empty() && rec.robot_characters == 0 && rec.human_characters == 0 {
