@@ -64,12 +64,7 @@ pub async fn get_dashboard_plots(
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     
-    let caps = match crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await {
-        Ok(caps) => caps,
-        Err(e) => {
-            return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error loading caps: {}", e)));
-        }
-    };
+    let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
     let (api_key, url) = {
         let gcx_locked = global_context.read().await;
         (gcx_locked.cmdline.api_key.clone(), caps.read().unwrap().telemetry_basic_retrieve_my_own.clone())
