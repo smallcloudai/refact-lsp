@@ -3,8 +3,8 @@
     "VariableInfo": {
       "name": "b",
       "range": {
-        "start_byte": 129,
-        "end_byte": 139,
+        "start_byte": 142,
+        "end_byte": 152,
         "start_point": {
           "row": 13,
           "column": 0
@@ -22,18 +22,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// comment",
+      "data": "// comment\r",
       "static_type": "Comment",
       "range": {
-        "start_byte": 141,
-        "end_byte": 151,
+        "start_byte": 156,
+        "end_byte": 167,
         "start_point": {
           "row": 15,
           "column": 0
         },
         "end_point": {
           "row": 15,
-          "column": 10
+          "column": 11
         }
       },
       "meta_path": null
@@ -44,8 +44,8 @@
       "data": "\"cat\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 165,
-        "end_byte": 170,
+        "start_byte": 181,
+        "end_byte": 186,
         "start_point": {
           "row": 16,
           "column": 13
@@ -62,8 +62,8 @@
     "VariableInfo": {
       "name": "a",
       "range": {
-        "start_byte": 214,
-        "end_byte": 224,
+        "start_byte": 235,
+        "end_byte": 245,
         "start_point": {
           "row": 21,
           "column": 4
@@ -83,8 +83,8 @@
     "VariableInfo": {
       "name": "i",
       "range": {
-        "start_byte": 526,
-        "end_byte": 536,
+        "start_byte": 564,
+        "end_byte": 574,
         "start_point": {
           "row": 38,
           "column": 9
@@ -104,8 +104,8 @@
     "VariableInfo": {
       "name": "i",
       "range": {
-        "start_byte": 662,
-        "end_byte": 672,
+        "start_byte": 709,
+        "end_byte": 719,
         "start_point": {
           "row": 47,
           "column": 9
@@ -126,8 +126,8 @@
       "data": "\" \"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 704,
-        "end_byte": 707,
+        "start_byte": 752,
+        "end_byte": 755,
         "start_point": {
           "row": 48,
           "column": 16
@@ -144,8 +144,8 @@
     "VariableInfo": {
       "name": "as",
       "range": {
-        "start_byte": 744,
-        "end_byte": 766,
+        "start_byte": 796,
+        "end_byte": 818,
         "start_point": {
           "row": 52,
           "column": 0
@@ -165,8 +165,8 @@
     "VariableInfo": {
       "name": "as",
       "range": {
-        "start_byte": 767,
-        "end_byte": 802,
+        "start_byte": 820,
+        "end_byte": 855,
         "start_point": {
           "row": 53,
           "column": 0
@@ -186,8 +186,8 @@
     "VariableInfo": {
       "name": "arr",
       "range": {
-        "start_byte": 821,
-        "end_byte": 852,
+        "start_byte": 877,
+        "end_byte": 908,
         "start_point": {
           "row": 56,
           "column": 4
@@ -207,8 +207,8 @@
     "VariableInfo": {
       "name": "a",
       "range": {
-        "start_byte": 857,
-        "end_byte": 878,
+        "start_byte": 914,
+        "end_byte": 935,
         "start_point": {
           "row": 57,
           "column": 4
@@ -228,8 +228,8 @@
     "FunctionCallInfo": {
       "name": "print",
       "range": {
-        "start_byte": 883,
-        "end_byte": 892,
+        "start_byte": 941,
+        "end_byte": 950,
         "start_point": {
           "row": 58,
           "column": 4
@@ -247,8 +247,8 @@
     "FunctionCallInfo": {
       "name": "print",
       "range": {
-        "start_byte": 898,
-        "end_byte": 905,
+        "start_byte": 957,
+        "end_byte": 964,
         "start_point": {
           "row": 59,
           "column": 4
