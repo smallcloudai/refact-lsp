@@ -4,8 +4,8 @@
       "data": "\"asdasd\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 48,
-        "end_byte": 56,
+        "start_byte": 46,
+        "end_byte": 54,
         "start_point": {
           "row": 2,
           "column": 31
@@ -20,18 +20,18 @@
   },
   {
     "StaticInfo": {
-      "data": "//!  - Inner line doc\r",
+      "data": "//!  - Inner line doc",
       "static_type": "Comment",
       "range": {
-        "start_byte": 144,
-        "end_byte": 166,
+        "start_byte": 136,
+        "end_byte": 157,
         "start_point": {
           "row": 8,
           "column": 0
         },
         "end_point": {
           "row": 8,
-          "column": 22
+          "column": 21
         }
       },
       "meta_path": null
@@ -39,18 +39,18 @@
   },
   {
     "StaticInfo": {
-      "data": "//!! - Still an inner line doc (but with a bang at the beginning)\r",
+      "data": "//!! - Still an inner line doc (but with a bang at the beginning)",
       "static_type": "Comment",
       "range": {
-        "start_byte": 167,
-        "end_byte": 233,
+        "start_byte": 158,
+        "end_byte": 223,
         "start_point": {
           "row": 9,
           "column": 0
         },
         "end_point": {
           "row": 9,
-          "column": 66
+          "column": 65
         }
       },
       "meta_path": null
@@ -61,8 +61,8 @@
       "data": "/*!  - Inner block doc */",
       "static_type": "Comment",
       "range": {
-        "start_byte": 236,
-        "end_byte": 261,
+        "start_byte": 225,
+        "end_byte": 250,
         "start_point": {
           "row": 11,
           "column": 0
@@ -80,8 +80,8 @@
       "data": "/*!! - Still an inner block doc (but with a bang at the beginning) */",
       "static_type": "Comment",
       "range": {
-        "start_byte": 263,
-        "end_byte": 332,
+        "start_byte": 251,
+        "end_byte": 320,
         "start_point": {
           "row": 12,
           "column": 0
@@ -96,18 +96,18 @@
   },
   {
     "StaticInfo": {
-      "data": "//   - Only a comment\r",
+      "data": "//   - Only a comment",
       "static_type": "Comment",
       "range": {
-        "start_byte": 336,
-        "end_byte": 358,
+        "start_byte": 322,
+        "end_byte": 343,
         "start_point": {
           "row": 14,
           "column": 0
         },
         "end_point": {
           "row": 14,
-          "column": 22
+          "column": 21
         }
       },
       "meta_path": null
@@ -115,18 +115,18 @@
   },
   {
     "StaticInfo": {
-      "data": "///  - Outer line doc (exactly 3 slashes)\r",
+      "data": "///  - Outer line doc (exactly 3 slashes)",
       "static_type": "Comment",
       "range": {
-        "start_byte": 359,
-        "end_byte": 401,
+        "start_byte": 344,
+        "end_byte": 385,
         "start_point": {
           "row": 15,
           "column": 0
         },
         "end_point": {
           "row": 15,
-          "column": 42
+          "column": 41
         }
       },
       "meta_path": null
@@ -134,18 +134,18 @@
   },
   {
     "StaticInfo": {
-      "data": "//// - Only a comment\r",
+      "data": "//// - Only a comment",
       "static_type": "Comment",
       "range": {
-        "start_byte": 402,
-        "end_byte": 424,
+        "start_byte": 386,
+        "end_byte": 407,
         "start_point": {
           "row": 16,
           "column": 0
         },
         "end_point": {
           "row": 16,
-          "column": 22
+          "column": 21
         }
       },
       "meta_path": null
@@ -156,8 +156,8 @@
       "data": "/*   - Only a comment */",
       "static_type": "Comment",
       "range": {
-        "start_byte": 427,
-        "end_byte": 451,
+        "start_byte": 409,
+        "end_byte": 433,
         "start_point": {
           "row": 18,
           "column": 0
@@ -175,8 +175,8 @@
       "data": "/**  - Outer block doc (exactly) 2 asterisks */",
       "static_type": "Comment",
       "range": {
-        "start_byte": 453,
-        "end_byte": 500,
+        "start_byte": 434,
+        "end_byte": 481,
         "start_point": {
           "row": 19,
           "column": 0
@@ -194,8 +194,8 @@
       "data": "/*** - Only a comment */",
       "static_type": "Comment",
       "range": {
-        "start_byte": 502,
-        "end_byte": 526,
+        "start_byte": 482,
+        "end_byte": 506,
         "start_point": {
           "row": 20,
           "column": 0
@@ -210,18 +210,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// Define a struct\r",
+      "data": "// Define a struct",
       "static_type": "Comment",
       "range": {
-        "start_byte": 530,
-        "end_byte": 549,
+        "start_byte": 508,
+        "end_byte": 526,
         "start_point": {
           "row": 22,
           "column": 0
         },
         "end_point": {
           "row": 22,
-          "column": 19
+          "column": 18
         }
       },
       "meta_path": null
@@ -229,18 +229,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// Method to calculate Euclidean distance\r",
+      "data": "// Method to calculate Euclidean distance",
       "static_type": "Comment",
       "range": {
-        "start_byte": 646,
-        "end_byte": 688,
+        "start_byte": 616,
+        "end_byte": 657,
         "start_point": {
           "row": 30,
           "column": 4
         },
         "end_point": {
           "row": 30,
-          "column": 46
+          "column": 45
         }
       },
       "meta_path": null
@@ -250,8 +250,8 @@
     "VariableInfo": {
       "name": "dx",
       "range": {
-        "start_byte": 745,
-        "end_byte": 776,
+        "start_byte": 713,
+        "end_byte": 744,
         "start_point": {
           "row": 32,
           "column": 8
@@ -271,8 +271,8 @@
     "VariableInfo": {
       "name": "dy",
       "range": {
-        "start_byte": 786,
-        "end_byte": 812,
+        "start_byte": 753,
+        "end_byte": 779,
         "start_point": {
           "row": 33,
           "column": 8
@@ -288,18 +288,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// Define an enum\r",
+      "data": "// Define an enum",
       "static_type": "Comment",
       "range": {
-        "start_byte": 900,
-        "end_byte": 918,
+        "start_byte": 860,
+        "end_byte": 877,
         "start_point": {
           "row": 40,
           "column": 0
         },
         "end_point": {
           "row": 40,
-          "column": 18
+          "column": 17
         }
       },
       "meta_path": null
@@ -307,18 +307,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// Define a trait with a single method\r",
+      "data": "// Define a trait with a single method",
       "static_type": "Comment",
       "range": {
-        "start_byte": 1013,
-        "end_byte": 1052,
+        "start_byte": 965,
+        "end_byte": 1003,
         "start_point": {
           "row": 48,
           "column": 0
         },
         "end_point": {
           "row": 48,
-          "column": 39
+          "column": 38
         }
       },
       "meta_path": null
@@ -326,18 +326,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// Implement the trait for Direction\r",
+      "data": "// Implement the trait for Direction",
       "static_type": "Comment",
       "range": {
-        "start_byte": 1095,
-        "end_byte": 1132,
+        "start_byte": 1042,
+        "end_byte": 1078,
         "start_point": {
           "row": 53,
           "column": 0
         },
         "end_point": {
           "row": 53,
-          "column": 37
+          "column": 36
         }
       },
       "meta_path": null
@@ -348,8 +348,8 @@
       "data": "\"Up ({}, {})\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 1256,
-        "end_byte": 1269,
+        "start_byte": 1199,
+        "end_byte": 1212,
         "start_point": {
           "row": 57,
           "column": 49
@@ -367,8 +367,8 @@
       "data": "\"Down ({}, {})\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 1342,
-        "end_byte": 1357,
+        "start_byte": 1284,
+        "end_byte": 1299,
         "start_point": {
           "row": 58,
           "column": 51
@@ -386,8 +386,8 @@
       "data": "\"Left ({}, {})\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 1430,
-        "end_byte": 1445,
+        "start_byte": 1371,
+        "end_byte": 1386,
         "start_point": {
           "row": 59,
           "column": 51
@@ -405,8 +405,8 @@
       "data": "\"Right ({}, {})\"",
       "static_type": "Literal",
       "range": {
-        "start_byte": 1519,
-        "end_byte": 1535,
+        "start_byte": 1459,
+        "end_byte": 1475,
         "start_point": {
           "row": 60,
           "column": 52
@@ -421,18 +421,18 @@
   },
   {
     "StaticInfo": {
-      "data": "// A function that takes a Direction and calls the print method\r",
+      "data": "// A function that takes a Direction and calls the print method",
       "static_type": "Comment",
       "range": {
-        "start_byte": 1580,
-        "end_byte": 1644,
+        "start_byte": 1515,
+        "end_byte": 1578,
         "start_point": {
           "row": 65,
           "column": 0
         },
         "end_point": {
           "row": 65,
-          "column": 64
+          "column": 63
         }
       },
       "meta_path": null
@@ -442,8 +442,8 @@
     "FunctionCallInfo": {
       "name": "print",
       "range": {
-        "start_byte": 1693,
-        "end_byte": 1710,
+        "start_byte": 1626,
+        "end_byte": 1643,
         "start_point": {
           "row": 67,
           "column": 4
@@ -461,8 +461,8 @@
     "VariableInfo": {
       "name": "up",
       "range": {
-        "start_byte": 1735,
-        "end_byte": 1801,
+        "start_byte": 1664,
+        "end_byte": 1730,
         "start_point": {
           "row": 71,
           "column": 4
@@ -482,8 +482,8 @@
     "FunctionCallInfo": {
       "name": "print_direction",
       "range": {
-        "start_byte": 1807,
-        "end_byte": 1830,
+        "start_byte": 1735,
+        "end_byte": 1758,
         "start_point": {
           "row": 72,
           "column": 4
@@ -501,8 +501,8 @@
     "VariableInfo": {
       "name": "down",
       "range": {
-        "start_byte": 1839,
-        "end_byte": 1904,
+        "start_byte": 1765,
+        "end_byte": 1830,
         "start_point": {
           "row": 74,
           "column": 4
@@ -522,8 +522,8 @@
     "FunctionCallInfo": {
       "name": "print_direction",
       "range": {
-        "start_byte": 1910,
-        "end_byte": 1933,
+        "start_byte": 1835,
+        "end_byte": 1858,
         "start_point": {
           "row": 75,
           "column": 4
@@ -541,8 +541,8 @@
     "VariableInfo": {
       "name": "left",
       "range": {
-        "start_byte": 1942,
-        "end_byte": 2001,
+        "start_byte": 1865,
+        "end_byte": 1924,
         "start_point": {
           "row": 77,
           "column": 4
@@ -560,8 +560,8 @@
     "FunctionCallInfo": {
       "name": "print_direction",
       "range": {
-        "start_byte": 2007,
-        "end_byte": 2028,
+        "start_byte": 1929,
+        "end_byte": 1950,
         "start_point": {
           "row": 78,
           "column": 4
@@ -579,8 +579,8 @@
     "VariableInfo": {
       "name": "right",
       "range": {
-        "start_byte": 2037,
-        "end_byte": 2102,
+        "start_byte": 1957,
+        "end_byte": 2022,
         "start_point": {
           "row": 80,
           "column": 4
@@ -600,8 +600,8 @@
     "FunctionCallInfo": {
       "name": "print_direction",
       "range": {
-        "start_byte": 2108,
-        "end_byte": 2130,
+        "start_byte": 2027,
+        "end_byte": 2049,
         "start_point": {
           "row": 81,
           "column": 4

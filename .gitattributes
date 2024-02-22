@@ -1,0 +1,6 @@
+* text=false
+
+*.rs            text
+*.cpp           text
+*.java          text
+*.js            text
