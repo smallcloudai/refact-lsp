@@ -81,7 +81,7 @@ pub async fn handle_v1_command_preview(
 
     let mut preview_msgs = vec![];
     for cmd in valid_commands {
-        match cmd.command.lock().await.execute(&post.query, &cmd.args, 5, &context).await {
+        match cmd.command.lock().await.execute(&post.query, &cmd.args, 5, &context, &cmd.parsed_args).await {
             Ok(msg) => {
                 preview_msgs.push(json!(msg));
             },

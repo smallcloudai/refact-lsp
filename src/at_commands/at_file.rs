@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -49,7 +50,7 @@ impl AtCommand for AtFile {
         return true;
     }
 
-    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext, parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());
@@ -59,14 +60,31 @@ impl AtCommand for AtFile {
             None => return Err("no file path".to_string()),
         };
 
-        let file_text = get_file_text_from_vecdb(context.global_context.clone(), file_path).await?;
+        let mut file_text = get_file_text_from_vecdb(context.global_context.clone(), file_path).await?;
+        let lines_cnt = file_text.lines().count() as i32;
+
+        let line1 = match parsed_args.get("file_start_line") {
+            Some(value) => value.parse::<i32>().unwrap_or(0).max(0).min(lines_cnt),
+            None => 0,
+        };
+        let line2 = match parsed_args.get("file_end_line") {
+            Some(value) => value.parse::<i32>().unwrap_or(lines_cnt).max(0).min(lines_cnt),
+            None => lines_cnt,
+        };
+
+        if line2 < line1 {
+            return Err("line2 must be greater than line1".to_string());
+        }
+
+        let lines: Vec<&str> = file_text.lines().collect();
+        file_text = lines[line1 as usize..line2 as usize].join("\n");
 
         let mut vector_of_context_file: Vec<ContextFile> = vec![];
         vector_of_context_file.push(ContextFile {
             file_name: file_path.clone(),
-            file_content: file_text.clone(),
-            line1: 0,
-            line2: file_text.lines().count() as i32,
+            file_content: file_text,
+            line1,
+            line2,
             usefullness: 100.0,
         });
         Ok(ChatMessage {

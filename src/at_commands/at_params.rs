@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
+use regex::Regex;
 use strsim::{normalized_damerau_levenshtein, jaro_winkler};
 use tokio::sync::RwLock as ARwLock;
 use url::Url;
@@ -168,6 +169,22 @@ impl AtParam for AtParamFilePathWithRow {
     }
     fn complete_if_valid(&self) -> bool {
         false
+    }
+    fn parse_args_from_arg(&self, value: &mut String) -> Option<HashMap<String, String>> {
+        let re = Regex::new(r":(\d+)(?:-(\d+))?$").unwrap();
+        if let Some(captures) = re.captures(value) {
+            let mut results = HashMap::new();
+            if let Some(start) = captures.get(1) {
+                results.insert("file_start_line".to_string(), start.as_str().to_string());
+            }
+            if let Some(end) = captures.get(2) {
+                results.insert("file_end_line".to_string(), end.as_str().to_string());
+            }
+            *value = re.replace(value, "").to_string();
+            Some(results)
+        } else {
+            None
+        }
     }
 }
 

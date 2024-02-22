@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -83,7 +84,7 @@ impl AtCommand for AtAstReference {
         return true;
     }
 
-    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext, _parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());

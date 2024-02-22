@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
@@ -63,7 +64,7 @@ impl AtCommand for AtWorkspace {
         return true;
     }
 
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext, _parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
         match *context.global_context.read().await.vec_db.lock().await {
             Some(ref db) => {
                 let mut db_query = args.join(" ");
