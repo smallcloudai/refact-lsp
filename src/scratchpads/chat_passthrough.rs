@@ -72,7 +72,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                         let vector_of_context_files: Vec<ContextFile> = res;
                         for context_file in &vector_of_context_files {
                             filtered_msgs.push(ChatMessage {
-                                role: "user".to_string(),
+                                role: "file_context".to_string(),
                                 content: format!("{}\n```\n{}```", context_file.file_name, context_file.file_content),
                             });
                         }
