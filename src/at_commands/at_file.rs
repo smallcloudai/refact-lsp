@@ -68,7 +68,7 @@ impl AtCommand for AtFile {
             None => 0,
         };
         let mut line2 = match parsed_args.get("file_end_line") {
-            Some(value) => value.parse::<i32>().map(|x|x-1).unwrap_or(lines_cnt).max(0).min(lines_cnt),
+            Some(value) => value.parse::<i32>().unwrap_or(lines_cnt).max(0).min(lines_cnt),
             None => lines_cnt,
         };
 
