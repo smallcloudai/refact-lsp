@@ -7,7 +7,7 @@ use tokio::sync::Mutex as AMutex;
 
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_params::AtParamFilePath;
-use crate::at_commands::utils::get_file_text_from_vecdb;
+use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::call_validation::{ChatMessage, ContextFile};
 
 pub struct AtFile {
@@ -60,7 +60,7 @@ impl AtCommand for AtFile {
             None => return Err("no file path".to_string()),
         };
 
-        let mut file_text = get_file_text_from_vecdb(context.global_context.clone(), file_path).await?;
+        let mut file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), file_path).await?;
         let lines_cnt = file_text.lines().count() as i32;
 
         let line1 = match parsed_args.get("file_start_line") {

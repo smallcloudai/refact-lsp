@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use tree_sitter::Point;
 use crate::ast::structs::{AstCursorSearchResult, AstQuerySearchResult};
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_params::AtParamFilePathWithRow;
-use crate::at_commands::utils::{get_file_text_from_disk, get_file_text_from_vecdb};
+use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::call_validation::{ChatMessage, ContextFile};
 use crate::files_in_workspace::DocumentInfo;
 
@@ -89,7 +90,7 @@ impl AtCommand for AtAstLookupSymbols {
         return true;
     }
 
-    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext, _parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());
@@ -107,7 +108,7 @@ impl AtCommand for AtAstLookupSymbols {
         };
         let row_idx: usize = row_idx_str.parse().map_err(|_| "row index is not a valid number")?;
 
-        let file_text = get_file_text_from_disk(context.global_context.clone(), &file_path.to_string()).await?;
+        let file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), &file_path.to_string()).await?;
         let binding = context.global_context.read().await;
         let doc_info = match DocumentInfo::from_pathbuf_and_text(
             &PathBuf::from(file_path), &file_text,
