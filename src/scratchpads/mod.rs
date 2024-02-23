@@ -58,6 +58,13 @@ pub async fn create_chat_scratchpad(
     scratchpad_patch: &serde_json::Value,
     vecdb_search: Arc<AMutex<Box<dyn vecdb_search::VecdbSearch + Send>>>,
 ) -> Result<Box<dyn ScratchpadAbstract>, String> {
+    let mut scratchpad_patch_mut = scratchpad_patch.clone();
+    {
+        let cx = global_context.read().await;
+        if cx.cmdline.default_system_message != "" {
+            scratchpad_patch_mut["default_system_message"] = serde_json::Value::String(cx.cmdline.default_system_message.clone());
+        }
+    }
     let mut result: Box<dyn ScratchpadAbstract>;
     if scratchpad_name == "CHAT-GENERIC" {
         let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context, model_name_for_tokenizer).await?;
@@ -70,7 +77,7 @@ pub async fn create_chat_scratchpad(
     } else {
         return Err(format!("This rust binary doesn't have chat scratchpad \"{}\" compiled in", scratchpad_name));
     }
-    result.apply_model_adaptation_patch(scratchpad_patch)?;
+    result.apply_model_adaptation_patch(&scratchpad_patch_mut)?;
     verify_has_send(&result);
     Ok(result)
 }
