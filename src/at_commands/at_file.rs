@@ -64,13 +64,17 @@ impl AtCommand for AtFile {
         let lines_cnt = file_text.lines().count() as i32;
 
         let line1 = match parsed_args.get("file_start_line") {
-            Some(value) => value.parse::<i32>().unwrap_or(0).max(0).min(lines_cnt),
+            Some(value) => value.parse::<i32>().map(|x|x-1).unwrap_or(0).max(0).min(lines_cnt),
             None => 0,
         };
-        let line2 = match parsed_args.get("file_end_line") {
-            Some(value) => value.parse::<i32>().unwrap_or(lines_cnt).max(0).min(lines_cnt),
+        let mut line2 = match parsed_args.get("file_end_line") {
+            Some(value) => value.parse::<i32>().map(|x|x-1).unwrap_or(lines_cnt).max(0).min(lines_cnt),
             None => lines_cnt,
         };
+
+        if parsed_args.get("file_start_line").is_some() && parsed_args.get("file_end_line").is_none() {
+            line2 = line1 + 1;
+        }
 
         if line2 < line1 {
             return Err("line2 must be greater than line1".to_string());
