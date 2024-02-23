@@ -1,5 +1,7 @@
 use std::io::Write;
 use std::sync::Arc;
+use std::net::IpAddr;
+use std::str::FromStr;
 
 use axum::{Extension, http::{StatusCode, Uri}, response::IntoResponse};
 use hyper::Server;
@@ -52,12 +54,18 @@ pub async fn start_server(
     global_context: Arc<ARwLock<GlobalContext>>,
     ask_shutdown_receiver: std::sync::mpsc::Receiver<String>,
 ) -> Option<JoinHandle<()>> {
-    let port = global_context.read().await.cmdline.http_port;
+    let (host, port) = {
+        let read_guard = global_context.read().await;
+        let host = read_guard.cmdline.http_host.clone();
+        let port = read_guard.cmdline.http_port;
+        (host, port)
+    };
     if port == 0 {
-        return None
+        return None;
     }
+    let ip = IpAddr::from_str(&host).expect("Invalid IP address");
     return Some(tokio::spawn(async move {
-        let addr = ([127, 0, 0, 1], port).into();
+        let addr = (ip, port).into();
         let builder = Server::try_bind(&addr).map_err(|e| {
             write!(std::io::stderr(), "PORT_BUSY {}\n", e).unwrap();
             std::io::stderr().flush().unwrap();

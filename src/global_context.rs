@@ -31,6 +31,8 @@ pub struct CommandLine {
     pub address_url: String,
     #[structopt(long, short="k", default_value="", help="The API key to authenticate your requests, will appear in HTTP requests this binary makes.")]
     pub api_key: String,
+    #[structopt(long, short="h", default_value="127.0.0.1", help="Binds by default to 127.0.0.1 to listen for HTTP requests, such as /v1/code-completion, /v1/chat, /v1/caps.")]
+    pub http_host: String,
     #[structopt(long, short="p", default_value="8001", help="Bind 127.0.0.1:<port> to listen for HTTP requests, such as /v1/code-completion, /v1/chat, /v1/caps.")]
     pub http_port: u16,
     #[structopt(long, default_value="", help="End-user client version, such as version of VS Code plugin.")]
@@ -39,6 +41,8 @@ pub struct CommandLine {
     pub basic_telemetry: bool,
     #[structopt(long, short="s", help="Send snippet telemetry (code snippets)")]
     pub snippet_telemetry: bool,
+    #[structopt(long, default_value="127.0.0.1", help="Binds by default to 127.0.0.1. This is compatible with having an HTTP server at the same time.")]
+    pub lsp_host: String,
     #[structopt(long, default_value="0", help="Bind 127.0.0.1:<port> and act as an LSP server. This is compatible with having an HTTP server at the same time.")]
     pub lsp_port: u16,
     #[structopt(long, default_value="0", help="Act as an LSP server, use stdin stdout for communication. This is compatible with having an HTTP server at the same time. But it's not compatible with LSP port.")]

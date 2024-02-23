@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use std::net::IpAddr;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -286,9 +288,10 @@ pub async fn spawn_lsp_task(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
     cmdline: CommandLine
 ) -> Option<JoinHandle<()>> {
+    let ip = IpAddr::from_str(&cmdline.lsp_host).expect("Invalid IP address");
     if cmdline.lsp_stdin_stdout == 0 && cmdline.lsp_port > 0 {
         let gcx_t = gcx.clone();
-        let addr: std::net::SocketAddr = ([127, 0, 0, 1], cmdline.lsp_port).into();
+        let addr: std::net::SocketAddr = (ip, cmdline.lsp_port).into();
         return Some(tokio::spawn( async move {
             let listener: TcpListener = TcpListener::bind(&addr).await.unwrap();
             info!("LSP listening on {}", listener.local_addr().unwrap());
