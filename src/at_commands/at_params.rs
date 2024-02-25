@@ -58,21 +58,37 @@ async fn get_ast_file_paths(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<
     }
 }
 
+fn put_parsed_args_back_to_arg(value: &mut String, parsed_args: &HashMap<String, String>) {
+    if let Some(start_line) = parsed_args.get("file_start_line") {
+        let end_line_mb = parsed_args.get("file_end_line");
+        *value = if end_line_mb.is_some() {
+            format!("{}:{}-{}", value, start_line, end_line_mb.unwrap())
+        } else {
+            format!("{}:{}", value, start_line)
+        };
+    }
+}
+
 #[async_trait]
 impl AtParam for AtParamFilePath {
     fn name(&self) -> &String {
         &self.name
     }
-    async fn is_value_valid(&self, value: &String, context: &AtCommandsContext) -> bool {
-        get_vecdb_file_paths(context.global_context.clone()).await.contains(&value)
+    async fn is_value_valid(&self, value: &mut String, context: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
+        let parsed_args = self.parse_args_from_arg(value);
+        let is_valid = get_vecdb_file_paths(context.global_context.clone()).await.contains(value);
+        (is_valid, parsed_args)
     }
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String> {
+        let mut value = value.clone();
+        let parsed_args_mb = self.parse_args_from_arg(&mut value);
         let index_file_paths = get_vecdb_file_paths(context.global_context.clone()).await;
 
         let mapped_paths = index_file_paths.iter().map(|f| {
             let path = PathBuf::from(f);
             (
                 f,
+                // TODO: paths are too long, so calculations for refact-lsp take ~150ms. jaro-winkler is 25ms but is not good enough
                 normalized_damerau_levenshtein(
                     if value.starts_with("/") {
                         f
@@ -84,12 +100,16 @@ impl AtParam for AtParamFilePath {
             )
         });
 
-        let sorted_paths = mapped_paths
+        let mut sorted_paths = mapped_paths
             .sorted_by(|(_, dist1), (_, dist2)| dist1.partial_cmp(dist2).unwrap())
             .rev()
             .map(|(path, _)| path.clone())
             .take(top_n)
             .collect::<Vec<String>>();
+
+        if let Some(parsed_args) = parsed_args_mb {
+            sorted_paths = sorted_paths.iter_mut().map(|x| { put_parsed_args_back_to_arg(x, &parsed_args); x.clone() }).collect::<Vec<String>>();
+        }
         sorted_paths
     }
     fn complete_if_valid(&self) -> bool {
@@ -132,29 +152,29 @@ impl AtParam for AtParamFilePathWithRow {
     fn name(&self) -> &String {
         &self.name
     }
-    async fn is_value_valid(&self, value: &String, context: &AtCommandsContext) -> bool {
+    async fn is_value_valid(&self, value: &mut String, context: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
         let mut parts = value.split(":");
         let file_path = match parts.next().ok_or("_") {
             Ok(res) => res,
             Err(_) => {
-                return false
+                return (false, None)
             }
         };
         let row_idx_str = match parts.next().ok_or("_") {
             Ok(res) => res,
             Err(_) => {
-                return false
+                return (false, None)
             }
         };
         // TODO: check if the row exists
         let row_idx: usize = match row_idx_str.parse() {
             Ok(res) => res,
             Err(_) => {
-                return false
+                return (false, None)
             }
         };
         let paths = get_ast_file_paths(context.global_context.clone()).await;
-        paths.contains(&file_path.to_string())
+        (paths.contains(&file_path.to_string()), None)
     }
 
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String> {
@@ -207,8 +227,8 @@ impl AtParam for AtParamSymbolPathQuery {
     fn name(&self) -> &String {
         &self.name
     }
-    async fn is_value_valid(&self, _: &String, _: &AtCommandsContext) -> bool {
-        return true;
+    async fn is_value_valid(&self, _: &mut String, _: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
+        (true, None)
     }
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String> {
         let ast_module_ptr = context.global_context.read().await.ast_module.clone();
@@ -267,8 +287,8 @@ impl AtParam for AtParamSymbolReferencePathQuery {
     fn name(&self) -> &String {
         &self.name
     }
-    async fn is_value_valid(&self, _: &String, _: &AtCommandsContext) -> bool {
-        return true;
+    async fn is_value_valid(&self, _: &mut String, _: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
+        (true, None)
     }
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String> {
         let ast_module_ptr = context.global_context.read().await.ast_module.clone();

@@ -31,15 +31,34 @@ impl AtCommandsContext {
 pub trait AtCommand: Send + Sync {
     fn name(&self) -> &String;
     fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>>;
-    async fn are_args_valid(&self, args: &Vec<String>, context: &AtCommandsContext) -> Vec<bool>;
-    async fn can_execute(&self, args: &Vec<String>, context: &AtCommandsContext) -> bool;
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext, parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String>;
+    async fn are_args_valid(&self, args: &mut Vec<String>, context: &AtCommandsContext) -> (Vec<bool>, Option<HashMap<String, String>>) {
+        let mut parsed_args = HashMap::new();
+        let mut results = Vec::new();
+        for (arg, param) in args.iter_mut().zip(self.params().iter()) {
+            let param = param.lock().await;
+            let (is_valid, p_parsed_args) = param.is_value_valid(arg, context).await;
+            results.push(is_valid);
+            if p_parsed_args.is_some() {
+                parsed_args.extend(p_parsed_args.unwrap())
+            }
+        }
+        let parsed_args = if parsed_args.is_empty() { None } else { Some(parsed_args) };
+        (results, parsed_args)
+    }
+    async fn can_execute(&self, args: &mut Vec<String>, context: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
+        let (are_valid, parsed_args) = self.are_args_valid(args, context).await;
+        if are_valid.iter().any(|&x| x == false) || args.len() != self.params().len() {
+            return (false, parsed_args);
+        }
+        return (true, parsed_args);
+    }
+    async fn execute(&self, query: &String, args: &mut Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String>;
 }
 
 #[async_trait]
 pub trait AtParam: Send + Sync {
     fn name(&self) -> &String;
-    async fn is_value_valid(&self, value: &String, context: &AtCommandsContext) -> bool;
+    async fn is_value_valid(&self, value: &mut String, context: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>);
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String>;
     fn complete_if_valid(&self) -> bool;
     fn parse_args_from_arg(&self, value: &mut String) -> Option<HashMap<String, String>> {None}
@@ -48,15 +67,13 @@ pub trait AtParam: Send + Sync {
 pub struct AtCommandCall {
     pub command: Arc<AMutex<Box<dyn AtCommand + Send>>>,
     pub args: Vec<String>,
-    pub parsed_args: HashMap<String, String>,
 }
 
 impl AtCommandCall {
-    pub fn new(command: Arc<AMutex<Box<dyn AtCommand + Send>>>, args: Vec<String>, parsed_args: HashMap<String, String>) -> Self {
+    pub fn new(command: Arc<AMutex<Box<dyn AtCommand + Send>>>, args: Vec<String>) -> Self {
         AtCommandCall {
             command,
             args,
-            parsed_args,
         }
     }
 }

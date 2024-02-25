@@ -104,11 +104,12 @@ pub async fn run_at_commands(
     // TODO: delete the last, not just take the last
     let mut query = post.messages.last().unwrap().content.clone(); // latest_msg_cont
     post.messages.pop();
-    let valid_commands = crate::at_commands::utils::find_valid_at_commands_in_query(&mut query, &context).await;
+
+    let mut valid_commands = crate::at_commands::utils::find_valid_at_commands_in_query(&mut query, &context).await;
 
     let mut messages_for_postprocessing = vec![];
-    for cmd in valid_commands {
-        match cmd.command.lock().await.execute(&query, &cmd.args, top_n, &context, &cmd.parsed_args).await {
+    for cmd in valid_commands.iter_mut() {
+        match cmd.command.lock().await.execute(&query, &mut cmd.args, top_n, &context).await {
             Ok(msg) => {
                 messages_for_postprocessing.push(msg);
             },

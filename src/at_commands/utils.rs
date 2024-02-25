@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex as AMutex;
@@ -15,7 +14,7 @@ pub async fn find_valid_at_commands_in_query(
     let mut valid_command_lines = vec![];
     for (idx, line) in query.lines().enumerate() {
         let line_words: Vec<&str> = line.split_whitespace().collect();
-        let mut q_cmd_args = line_words.iter().skip(1).map(|x|x.to_string()).collect::<Vec<String>>();
+        let q_cmd_args = line_words.iter().skip(1).map(|x|x.to_string()).collect::<Vec<String>>();
 
         let q_cmd = match line_words.first() {
             Some(x) => x,
@@ -27,15 +26,8 @@ pub async fn find_valid_at_commands_in_query(
             None => continue,
         };
 
-        let mut parsed_args = HashMap::new();
-        for (param, arg) in cmd.lock().await.params().iter().zip(q_cmd_args.iter_mut()) {
-            if let Some(extra) = param.lock().await.parse_args_from_arg(arg) {
-                parsed_args.extend(extra);
-            }
-        }
-
-        let can_execute = cmd.lock().await.can_execute(&q_cmd_args, context).await;
-        let q_cmd_args = match correct_arguments_if_needed(cmd.lock().await.params(), &q_cmd_args, can_execute, context).await {
+        let (can_execute, _) = cmd.lock().await.can_execute(&mut q_cmd_args.clone(), context).await;
+        let q_cmd_args = match correct_arguments_if_needed(cmd.lock().await.params(), q_cmd_args.clone(), can_execute, context).await {
             Ok(x) => x,
             Err(e) => {
                 info!("command {:?} is not executable with arguments {:?}; error: {:?}", q_cmd, q_cmd_args, e);
@@ -44,7 +36,7 @@ pub async fn find_valid_at_commands_in_query(
         };
 
         info!("command {:?} is perfectly good", q_cmd);
-        results.push(AtCommandCall::new(Arc::clone(&cmd), q_cmd_args.clone(), parsed_args));
+        results.push(AtCommandCall::new(Arc::clone(&cmd), q_cmd_args.clone()));
         valid_command_lines.push(idx);
     }
     // remove the lines that are valid commands from query
@@ -57,7 +49,7 @@ pub async fn find_valid_at_commands_in_query(
 
 pub async fn correct_arguments_if_needed(
     params: &Vec<Arc<AMutex<dyn AtParam>>>,
-    args: &Vec<String>,
+    args: Vec<String>,
     can_execute: bool,
     context: &AtCommandsContext,
 ) -> Result<Vec<String>, String> {
@@ -70,18 +62,23 @@ pub async fn correct_arguments_if_needed(
     let mut args_new = vec![];
     for (param, arg) in params.iter().zip(args.iter()) {
         let param = param.lock().await;
-        if param.is_value_valid(arg, context).await {
+
+        let (is_valid, _) = param.is_value_valid(&mut arg.clone(), context).await;
+        if is_valid {
             args_new.push(arg.clone());
             continue;
         }
+
         let completion = param.complete(arg, context, 1).await;
         let arg_completed = match completion.get(0) {
             Some(x) => x,
-            None => return Err(format!("arg '{}' is not valid and correction failed", arg)),
+            None => return Err(format!("arg '{}' is not valid and completion failed", arg)),
         };
-        if !param.is_value_valid(arg_completed, context).await {
+        let (is_valid, _) = param.is_value_valid(&mut arg_completed.clone(), context).await;
+        if !is_valid {
             return Err(format!("arg '{}' is not valid and correction failed", arg));
         }
+
         info!("arg '{}' is corrected as '{}'", arg, arg_completed);
         args_new.push(arg_completed.clone());
     }

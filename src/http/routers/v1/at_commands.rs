@@ -74,14 +74,14 @@ pub async fn handle_v1_command_preview(
     let post = serde_json::from_slice::<CommandPreviewPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     let mut query = post.query.clone();
-    let valid_commands = crate::at_commands::utils::find_valid_at_commands_in_query(&mut query, &context).await;
+    let mut valid_commands = crate::at_commands::utils::find_valid_at_commands_in_query(&mut query, &context).await;
     if valid_commands.is_empty() {
         return Err(ScratchError::new(StatusCode::OK, "no valid commands in query".to_string()));
     }
 
     let mut preview_msgs = vec![];
-    for cmd in valid_commands {
-        match cmd.command.lock().await.execute(&post.query, &cmd.args, 5, &context, &cmd.parsed_args).await {
+    for cmd in valid_commands.iter_mut() {
+        match cmd.command.lock().await.execute(&post.query, &mut cmd.args, 5, &context).await {
             Ok(msg) => {
                 preview_msgs.push(json!(msg));
             },
@@ -135,20 +135,22 @@ async fn command_completion(
         }
     };
 
-    let can_execute = cmd.lock().await.can_execute(&query_line.get_args().iter().map(|x|x.value.clone()).collect(), context).await;
+    let mut args: Vec<String> = query_line.get_args().clone().iter().map(|x|x.value.clone()).collect();
+    let (can_execute, _) = cmd.lock().await.can_execute(&mut args, context).await;
 
-    for (arg, param) in query_line.get_args().iter().zip(cmd.lock().await.params()) {
+    for (arg, param) in query_line.get_args().iter_mut().zip(cmd.lock().await.params()) {
         let param_locked = param.lock().await;
-        let is_valid = param_locked.is_value_valid(&arg.value, context).await;
+        let mut value = arg.value.clone();
+        let (is_valid, _) = param_locked.is_value_valid(&mut value, context).await;
         if !is_valid {
             return if arg.focused {
-                Ok((param_locked.complete(&arg.value, context, top_n).await, can_execute, arg.pos1, arg.pos2))
+                Ok((param_locked.complete(&value, context, top_n).await, can_execute, arg.pos1, arg.pos2))
             } else {
                 Err(ScratchError::new(StatusCode::OK, "invalid parameter".to_string()))
             }
         }
         if is_valid && arg.focused && param_locked.complete_if_valid() {
-            return Ok((param_locked.complete(&arg.value, context, top_n).await, can_execute, arg.pos1, arg.pos2));
+            return Ok((param_locked.complete(&value, context, top_n).await, can_execute, arg.pos1, arg.pos2));
         }
     }
 

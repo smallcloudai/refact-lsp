@@ -51,20 +51,11 @@ impl AtCommand for AtWorkspace {
         &self.params
     }
 
-    async fn are_args_valid(&self, args: &Vec<String>, context: &AtCommandsContext) -> Vec<bool> {
-        let mut results = Vec::new();
-        for (arg, param) in args.iter().zip(self.params.iter()) {
-            let param = param.lock().await;
-            results.push(param.is_value_valid(arg, context).await);
-        }
-        results
+    async fn can_execute(&self, _args: &mut Vec<String>, _context: &AtCommandsContext) -> (bool, Option<HashMap<String, String>>) {
+        return (true, None)
     }
 
-    async fn can_execute(&self, _args: &Vec<String>, _context: &AtCommandsContext) -> bool {
-        return true;
-    }
-
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext, _parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
+    async fn execute(&self, query: &String, args: &mut Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
         match *context.global_context.read().await.vec_db.lock().await {
             Some(ref db) => {
                 let mut db_query = args.join(" ");

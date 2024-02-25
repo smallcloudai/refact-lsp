@@ -2,8 +2,10 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use serde_json::json;
 use tokio::sync::Mutex as AMutex;
+use tracing::info;
 
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_params::AtParamFilePath;
@@ -34,24 +36,8 @@ impl AtCommand for AtFile {
     fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>> {
         &self.params
     }
-    async fn are_args_valid(&self, args: &Vec<String>, context: &AtCommandsContext) -> Vec<bool> {
-        let mut results = Vec::new();
-        for (arg, param) in args.iter().zip(self.params.iter()) {
-            let param = param.lock().await;
-            results.push(param.is_value_valid(arg, context).await);
-        }
-        results
-    }
-
-    async fn can_execute(&self, args: &Vec<String>, context: &AtCommandsContext) -> bool {
-        if self.are_args_valid(args, context).await.iter().any(|&x| x == false) || args.len() != self.params.len() {
-            return false;
-        }
-        return true;
-    }
-
-    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext, parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String> {
-        let can_execute = self.can_execute(args, context).await;
+    async fn execute(&self, _query: &String, args: &mut Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+        let (can_execute, parsed_args_mb) = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());
         }
@@ -63,6 +49,8 @@ impl AtCommand for AtFile {
         let mut file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), file_path).await?;
         let lines_cnt = file_text.lines().count() as i32;
 
+        let parsed_args = parsed_args_mb.unwrap_or(HashMap::new());
+        info!("parsed_args: {:?}", parsed_args);
         let line1 = match parsed_args.get("file_start_line") {
             Some(value) => value.parse::<i32>().map(|x|x-1).unwrap_or(0).max(0).min(lines_cnt),
             None => 0,
