@@ -108,7 +108,7 @@ pub async fn run_at_commands(
 
     let mut messages_for_postprocessing = vec![];
     for cmd in valid_commands {
-        match cmd.command.lock().await.execute(&query, &cmd.args, top_n, &context, &cmd.parsed_args).await {
+        match cmd.command.lock().await.execute(&query, &cmd.args, top_n, &context).await {
             Ok(msg) => {
                 messages_for_postprocessing.push(msg);
             },

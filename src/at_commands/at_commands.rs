@@ -31,9 +31,8 @@ impl AtCommandsContext {
 pub trait AtCommand: Send + Sync {
     fn name(&self) -> &String;
     fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>>;
-    async fn are_args_valid(&self, args: &Vec<String>, context: &AtCommandsContext) -> Vec<bool>;
-    async fn can_execute(&self, args: &Vec<String>, context: &AtCommandsContext) -> bool;
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext, parsed_args: &HashMap<String, String>) -> Result<ChatMessage, String>;
+    async fn can_execute(&self, _args: &Vec<String>, _context: &AtCommandsContext) -> bool {true}
+    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String>;
 }
 
 #[async_trait]
@@ -41,22 +40,19 @@ pub trait AtParam: Send + Sync {
     fn name(&self) -> &String;
     async fn is_value_valid(&self, value: &String, context: &AtCommandsContext) -> bool;
     async fn complete(&self, value: &String, context: &AtCommandsContext, top_n: usize) -> Vec<String>;
-    fn complete_if_valid(&self) -> bool;
-    fn parse_args_from_arg(&self, value: &mut String) -> Option<HashMap<String, String>> {None}
+    fn complete_if_valid(&self) -> bool {false}
 }
 
 pub struct AtCommandCall {
     pub command: Arc<AMutex<Box<dyn AtCommand + Send>>>,
     pub args: Vec<String>,
-    pub parsed_args: HashMap<String, String>,
 }
 
 impl AtCommandCall {
-    pub fn new(command: Arc<AMutex<Box<dyn AtCommand + Send>>>, args: Vec<String>, parsed_args: HashMap<String, String>) -> Self {
+    pub fn new(command: Arc<AMutex<Box<dyn AtCommand + Send>>>, args: Vec<String>) -> Self {
         AtCommandCall {
             command,
             args,
-            parsed_args,
         }
     }
 }

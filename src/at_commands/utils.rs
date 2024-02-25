@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex as AMutex;
@@ -27,13 +26,6 @@ pub async fn find_valid_at_commands_in_query(
             None => continue,
         };
 
-        let mut parsed_args = HashMap::new();
-        for (param, arg) in cmd.lock().await.params().iter().zip(q_cmd_args.iter_mut()) {
-            if let Some(extra) = param.lock().await.parse_args_from_arg(arg) {
-                parsed_args.extend(extra);
-            }
-        }
-
         let can_execute = cmd.lock().await.can_execute(&q_cmd_args, context).await;
         let q_cmd_args = match correct_arguments_if_needed(cmd.lock().await.params(), &q_cmd_args, can_execute, context).await {
             Ok(x) => x,
@@ -44,7 +36,7 @@ pub async fn find_valid_at_commands_in_query(
         };
 
         info!("command {:?} is perfectly good", q_cmd);
-        results.push(AtCommandCall::new(Arc::clone(&cmd), q_cmd_args.clone(), parsed_args));
+        results.push(AtCommandCall::new(Arc::clone(&cmd), q_cmd_args.clone()));
         valid_command_lines.push(idx);
     }
     // remove the lines that are valid commands from query
