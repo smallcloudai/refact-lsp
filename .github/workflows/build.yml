@@ -47,7 +47,7 @@ jobs:
           - os: macos-11
             target: x86_64-apple-darwin
             code-target: darwin-x64
-          - os: macos-m1
+          - os: macos-11
             target: aarch64-apple-darwin
             code-target: darwin-arm64
 
@@ -59,13 +59,6 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      - name: Cleanup
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: |
-          rm -rf ./* || true
-          rm -rf ./.??* || true
-          rm -rf ~/.cargo/registry || true
-
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
@@ -125,7 +118,6 @@ jobs:
       - name: Build and test artifact
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
-          cargo test --release || exit 1
           cargo build --release --target-dir dist/ --target aarch64-apple-darwin || exit 1
           mv ./dist/aarch64-apple-darwin/release/refact-lsp ./dist/release/refact-lsp
       
