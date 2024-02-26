@@ -10,25 +10,23 @@ use std::time::SystemTime;
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
 use arrow::compute::concat_batches;
-use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray, UInt64Array};
+use arrow_array::{FixedSizeListArray, RecordBatch, RecordBatchIterator, StringArray, UInt64Array};
 use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
 use arrow_array::types::{Float32Type, UInt64Type};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use axum::handler::Handler;
 use futures_util::TryStreamExt;
 use itertools::Itertools;
-use lance::dataset::{WriteMode, WriteParams};
-use lance_index::vector::ivf::IvfBuildParams;
-use lance_linalg::distance::MetricType;
+use lancedb::connection::ConnectBuilder;
+use lancedb::index::MetricType;
+use lancedb::table::{AddDataMode, AddDataOptions, Table};
+use lancedb::TableRef;
 use rusqlite::{OpenFlags, params, Result};
 use tempfile::{tempdir, TempDir};
 use tokio::fs;
 use tokio::sync::Mutex as AMutex;
 use tokio_rusqlite::Connection;
-use tracing::error;
 use tracing::info;
-use vectordb::database::Database;
-use vectordb::index::vector::IvfPQIndexBuilder;
-use vectordb::table::Table;
 
 use crate::vecdb::structs::{Record, SplitResult};
 
@@ -41,7 +39,7 @@ impl Debug for VecDBHandler {
 pub struct VecDBHandler {
     cache_database: Arc<AMutex<Connection>>,
     _data_database_temp_dir: TempDir,
-    data_table: Table,
+    data_table: TableRef,
     schema: SchemaRef,
     data_table_hashes: HashSet<String>,
     embedding_size: i32,
@@ -70,7 +68,6 @@ impl VecDBHandler {
                           model_name.replace("/", "_"),
                           embedding_size
             )).to_str() {
-
             Some(dir) => dir.to_string(),
             None => {
                 return Err(format!("{:?}", "Cache directory is not a valid path"));
@@ -99,7 +96,7 @@ impl VecDBHandler {
             Ok(db) => Arc::new(AMutex::new(db)),
             Err(err) => return Err(format!("{:?}", err))
         };
-        let temp_database = match Database::connect(data_database_temp_dir_str).await {
+        let temp_database = match ConnectBuilder::new(data_database_temp_dir_str).execute().await {
             Ok(db) => db,
             Err(err) => return Err(format!("{:?}", err))
         };
@@ -141,9 +138,7 @@ impl VecDBHandler {
             Ok(_) => {}
             Err(err) => return Err(format!("{:?}", err))
         }
-
-        let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-        let data_table = match temp_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await {
+        let data_table = match temp_database.create_empty_table("data", schema.clone()).execute().await {
             Ok(table) => table,
             Err(err) => return Err(format!("{:?}", err))
         };
@@ -157,20 +152,6 @@ impl VecDBHandler {
             embedding_size,
             indexed_file_paths: Arc::new(AMutex::new(vec![])),
         })
-    }
-
-    async fn checkout(&mut self) {
-        match self.data_table.checkout_latest().await {
-            Ok(table) => { self.data_table = table }
-            Err(err) => error!("Error while checking out the data table: {:?}", err)
-        }
-        match self.cache_database.lock().await.call(|connection| {
-            connection.cache_flush()?;
-            Ok({})
-        }).await {
-            Ok(_) => {}
-            Err(err) => error!("Error while flushing cache: {:?}", err)
-        }
     }
 
     async fn get_records_from_cache(&mut self, hashes: Vec<String>) -> Result<(Vec<Record>, Vec<String>), String> {
@@ -352,7 +333,7 @@ impl VecDBHandler {
     }
 
     pub async fn size(&self) -> Result<usize, String> {
-        match self.data_table.count_rows().await {
+        match self.data_table.count_rows(None).await {
             Ok(size) => Ok(size),
             Err(err) => Err(format!("{:?}", err))
         }
@@ -371,9 +352,9 @@ impl VecDBHandler {
 
     pub async fn select_all_file_paths(&self) -> Vec<PathBuf> {
         let mut file_paths: HashSet<PathBuf> = HashSet::new();
-        let records: Vec<RecordBatch> = self.data_table
+        let records: Vec<RecordBatch> = self.data_table.query()
             .filter(format!("file_path in (select file_path from data)"))
-            .execute()
+            .execute_stream()
             .await.unwrap()
             .try_collect::<Vec<_>>()
             .await.unwrap();
@@ -511,10 +492,10 @@ impl VecDBHandler {
         }
 
         let data_res = self.data_table.add(
-            data_batches_iter, Option::from(WriteParams {
-                mode: WriteMode::Append,
+            Box::new(data_batches_iter), AddDataOptions {
+                mode: AddDataMode::Append,
                 ..Default::default()
-            }),
+            },
         );
         self.data_table_hashes.extend(window_text_hashes);
         match data_res.await {
@@ -549,22 +530,20 @@ impl VecDBHandler {
         }
     }
 
-    pub async fn create_index(&mut self) -> vectordb::error::Result<()> {
+    pub async fn create_index(&mut self) -> lancedb::error::Result<()> {
         let size = self.size().await.unwrap_or(0);
         if size == 0 {
             return Ok(());
         }
-        self.data_table.create_index(
-            IvfPQIndexBuilder::default()
-                .column("vector".to_owned())
-                .index_name("index".to_owned())
-                .metric_type(MetricType::Cosine)
-                .ivf_params(IvfBuildParams {
-                    num_partitions: min(size, 512),
-                    ..IvfBuildParams::default()
-                })
-                .replace(true)
-        ).await
+        self.data_table.create_index(&["vector"])
+            .ivf_pq()
+            .metric_type(MetricType::Cosine)
+            .name("index")
+            .num_partitions(min(size as u32, 512))
+            .build()
+            .await
+            .unwrap();
+        Ok(())
     }
 
     pub fn contains(&self, hash: &str) -> bool {
@@ -575,7 +554,7 @@ impl VecDBHandler {
         record_batch: RecordBatch,
         include_embedding: bool,
         embedding_to_compare: Option<&Vec<f32>>,
-    ) -> vectordb::error::Result<Vec<Record>> {
+    ) -> lancedb::error::Result<Vec<Record>> {
         (0..record_batch.num_rows()).map(|idx| {
             let gathered_vec = as_primitive_array::<Float32Type>(
                 &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
@@ -641,15 +620,16 @@ impl VecDBHandler {
     pub async fn search(
         &mut self,
         embedding: Vec<f32>,
-        top_n: usize
-    ) -> vectordb::error::Result<Vec<Record>> {
+        top_n: usize,
+    ) -> lancedb::error::Result<Vec<Record>> {
         let query = self
             .data_table
             .clone()
-            .search(Some(Float32Array::from(embedding.clone())))
+            .search(&embedding.clone())
             .limit(top_n)
             .use_index(true)
-            .execute()
+            // .execute()
+            .execute_stream()
             .await?
             .try_collect::<Vec<_>>()
             .await?;
@@ -690,7 +670,6 @@ impl VecDBHandler {
         self.data_table.delete(&*q).await.expect("could not delete old records");
 
         self.delete_old_records_from_cache().await.expect("could not delete old records");
-        self.checkout().await;
         Ok(())
     }
 }
