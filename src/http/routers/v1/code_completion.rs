@@ -101,7 +101,6 @@ pub async fn handle_v1_code_completion(
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Prompt: {}", e))
     )?;
     // info!("prompt {:?}\n{}", t1.elapsed(), prompt);
-    global_context.write().await.debug_handler_data.lock().await.last_completion_prompt = Some(prompt.clone());
     info!("prompt {:?}", t1.elapsed());
     if !code_completion_post.stream {
         crate::restream::scratchpad_interaction_not_stream(global_context.clone(), scratchpad, "completion".to_string(), &prompt, model_name, client1, api_key, &code_completion_post.parameters).await
