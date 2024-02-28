@@ -73,6 +73,7 @@ pub async fn correct_arguments_if_needed(
         if !param.is_value_valid(arg_completed, context).await {
             return Err(format!("arg '{}' is not valid even after force completion", arg_completed));
         }
+        info!("arg '{}' is corrected as '{}'", arg, arg_completed);
         args_new.push(arg_completed.clone());
     }
     Ok(args_new)
