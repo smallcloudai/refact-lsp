@@ -24,7 +24,7 @@ pub struct ModelRecord {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ModelsOnly {
+pub struct KnownModels {
     pub code_completion_models: HashMap<String, ModelRecord>,
     pub code_chat_models: HashMap<String, ModelRecord>,
 }
@@ -41,8 +41,6 @@ pub struct CodeAssistantCaps {
     pub telemetry_basic_dest: String,
     #[serde(default)]
     pub telemetry_basic_retrieve_my_own: String,
-    #[serde(default)]
-    pub known_models_url: String,
     #[serde(default)]
     pub telemetry_corrected_snippets_dest: String,
     #[serde(default)]
@@ -72,9 +70,8 @@ pub async fn load_caps(
 ) -> Result<Arc<StdRwLock<CodeAssistantCaps>>, String> {
     let (mut caps, caps_url) = fetch_caps(cmdline, global_context.clone()).await?;
 
-    caps.known_models_url = relative_to_full_url(&caps_url, &caps.known_models_url)?;
-    let models_only = load_known_models(global_context.clone(), &caps.known_models_url).await?;
-    complete_caps_with_models_only(&mut caps, &models_only);
+    let known_models = load_known_models().await?;
+    complete_caps_with_models_only(&mut caps, &known_models);
 
     caps.endpoint_template = relative_to_full_url(&caps_url, &caps.endpoint_template)?;
     caps.endpoint_chat_passthrough = relative_to_full_url(&caps_url, &caps.endpoint_chat_passthrough)?;
@@ -108,17 +105,17 @@ fn relative_to_full_url(
 
 fn complete_caps_with_models_only(
     caps: &mut CodeAssistantCaps,
-    models_only: &ModelsOnly,
+    known_models: &KnownModels,
 ) {
-    // inherit models from models_only, only if not already present in caps
-    for k in models_only.code_completion_models.keys() {
-        if !models_only.code_completion_models.contains_key(k) {
-            caps.code_completion_models.insert(k.to_string(), models_only.code_completion_models[k].clone());
+    // inherit models from known_models, only if not already present in caps
+    for k in known_models.code_completion_models.keys() {
+        if !known_models.code_completion_models.contains_key(k) {
+            caps.code_completion_models.insert(k.to_string(), known_models.code_completion_models[k].clone());
         }
     }
-    for k in models_only.code_chat_models.keys() {
+    for k in known_models.code_chat_models.keys() {
         if !caps.code_chat_models.contains_key(k) {
-            caps.code_chat_models.insert(k.to_string(), models_only.code_chat_models[k].clone());
+            caps.code_chat_models.insert(k.to_string(), known_models.code_chat_models[k].clone());
         }
     }
     // clone to "similar_models"
@@ -246,28 +243,11 @@ async fn fetch_caps(
     Ok((caps, caps_url))
 }
 
-async fn load_known_models(global_context: Arc<ARwLock<GlobalContext>>, known_models_url: &String) -> Result<ModelsOnly, String>  {
-    async fn fetch_known_models_from_url(global_context: Arc<ARwLock<GlobalContext>>, known_models_url: &String) -> Result<ModelsOnly, String> {
-        if known_models_url.is_empty() {
-            return Err("known_models_url is empty".to_string());
-        }
-        let cx = global_context.read().await;
-        let req = cx.http_client.get(known_models_url)
-            .header(AUTHORIZATION, format!("Bearer {}", cx.cmdline.api_key));
-        let res = req.send().await.map_err(|e| format!("failed to get response: {}", e))?;
-        let res = res.error_for_status().map_err(|e| format!("failed to read response: {}", e))?;
-        let text = res.text().await.map_err(|e| format!("failed to read response: {}", e))?;
-        let models_only = serde_json::from_str(&text).map_err(|e| format!("failed to parse models: {}", e));
-        info!("loaded known models from URL: {}", known_models_url);
-        models_only
-    }
-    fetch_known_models_from_url(global_context, known_models_url).await.or_else(|e| {
-        error!("failed to fetch known models from URL: {}; trying to read from disk", e);
-        serde_json::from_str(&KNOWN_MODELS).map_err(|e| {
-            let up_to_line = KNOWN_MODELS.lines().take(e.line()).collect::<Vec<&str>>().join("\n");
-            error!("{}\nfailed to parse KNOWN_MODELS: {}", up_to_line, e);
-            format!("failed to parse KNOWN_MODELS: {}", e)
-        })
+async fn load_known_models() -> Result<KnownModels, String>  {
+    serde_json::from_str(&KNOWN_MODELS).map_err(|e| {
+        let up_to_line = KNOWN_MODELS.lines().take(e.line()).collect::<Vec<&str>>().join("\n");
+        error!("{}\nfailed to parse KNOWN_MODELS: {}", up_to_line, e);
+        format!("failed to parse KNOWN_MODELS: {}", e)
     })
 }
 
@@ -276,6 +256,10 @@ const HF_DEFAULT_CAPS: &str = r#"
     "cloud_name": "Hugging Face",
     "endpoint_template": "https://api-inference.huggingface.co/models/$MODEL",
     "endpoint_style": "hf",
+    "default_embeddings_model": "BAAI/bge-small-en-v1.5",
+    "endpoint_embeddings_template": "https://api-inference.huggingface.co/models/$MODEL",
+    "endpoint_embeddings_style": "hf",
+    "size_embeddings": 384,
     "tokenizer_path_template": "https://huggingface.co/$MODEL/resolve/main/tokenizer.json",
     "tokenizer_rewrite_path": {
         "meta-llama/Llama-2-70b-chat-hf": "TheBloke/Llama-2-70B-fp16"
