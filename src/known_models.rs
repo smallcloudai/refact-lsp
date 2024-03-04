@@ -98,28 +98,8 @@ pub const KNOWN_MODELS: &str = r####"
             "similar_models": [
             ]
         },
-        "gpt-3.5-turbo-0125": {
-            "n_ctx": 16384,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {
-                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
-                }
-            },
-            "similar_models": [
-            ]
-        },
         "gpt-4": {
             "n_ctx": 4096,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {
-                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
-                }
-            },
-            "similar_models": [
-            ]
-        },
-        "gpt-4-0125-preview": {
-            "n_ctx": 127000,
             "supports_scratchpads": {
                 "PASSTHROUGH": {
                     "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
