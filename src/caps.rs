@@ -9,6 +9,7 @@ use std::sync::RwLock as StdRwLock;
 use tokio::sync::RwLock;
 use url::Url;
 use crate::global_context::GlobalContext;
+use crate::http::routers::info::build;
 use crate::known_models::KNOWN_MODELS;
 
 const CAPS_FILENAME: &str = "coding_assistant_caps.json";
@@ -100,6 +101,8 @@ pub async fn load_caps(
         let api_key = cmdline.api_key.clone();
         let http_client = global_context.read().await.http_client.clone();
         let mut headers = reqwest::header::HeaderMap::new();
+        let client_version_header = reqwest::header::HeaderName::from_static("client_version");
+        headers.insert(client_version_header, reqwest::header::HeaderValue::from_str(build::PKG_VERSION).unwrap());
         if !api_key.is_empty() {
             headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str()).unwrap());
         }
@@ -136,6 +139,9 @@ pub async fn load_caps(
     Ok(Arc::new(StdRwLock::new(r1)))
 }
 
+pub fn strip_model_from_finetune(model: &String) -> String {
+    model.split(":").next().unwrap().to_string()
+}
 
 fn relative_to_full_url(
     caps_url: &String,
@@ -186,7 +192,7 @@ fn _inherit_r1_from_r0(
     r1.code_chat_models = r1.code_chat_models.clone().into_iter().filter(|(k, _)| r1.running_models.contains(&k)).collect();
 
     for k in r1.running_models.iter() {
-        if !r1.code_completion_models.contains_key(k) && !r1.code_chat_models.contains_key(k) {
+        if !r1.code_completion_models.contains_key(&strip_model_from_finetune(k)) && !r1.code_chat_models.contains_key(&strip_model_from_finetune(k)) {
             info!("indicated as running, unknown model {}", k);
         }
     }
@@ -207,7 +213,7 @@ pub fn which_model_to_use<'a>(
     if user_wants_model != "" {
         take_this_one = user_wants_model;
     }
-    if let Some(model_rec) = models.get(take_this_one) {
+    if let Some(model_rec) = models.get(&strip_model_from_finetune(&take_this_one.to_string())) {
         return Ok((take_this_one.to_string(), model_rec));
     } else {
         return Err(format!(
