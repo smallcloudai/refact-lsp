@@ -136,6 +136,9 @@ pub async fn load_caps(
     info!("caps default completion model: \"{}\"", r1.code_completion_default_model);
     info!("caps {} chat models", r1.code_chat_models.len());
     info!("caps default chat model: \"{}\"", r1.code_chat_default_model);
+    // info!("running models: {:?}", r1.running_models);
+    // info!("code_chat_models models: {:?}", r1.code_chat_models);
+    // info!("code completion models: {:?}", r1.code_completion_models);
     Ok(Arc::new(StdRwLock::new(r1)))
 }
 
@@ -162,37 +165,24 @@ fn _inherit_r1_from_r0(
     r1: &mut CodeAssistantCaps,
     r0: &ModelsOnly,
 ) {
-    // inherit models from r0, only if not already present in r1
-    for k in r0.code_completion_models.keys() {
-        if !r1.code_completion_models.contains_key(k) {
-            r1.code_completion_models.insert(k.to_string(), r0.code_completion_models[k].clone());
+    for k in r1.running_models.iter() {
+        let k_stripped = strip_model_from_finetune(k);
+
+        for (rec_name, rec) in r0.code_completion_models.iter() {
+            if rec_name == &k_stripped || rec.similar_models.contains(&k_stripped) {
+                r1.code_completion_models.insert(k.to_string(), rec.clone());
+            }
+        }
+
+        for (rec_name, rec) in r0.code_chat_models.iter() {
+            if rec_name == &k_stripped || rec.similar_models.contains(&k_stripped) {
+                r1.code_chat_models.insert(k.to_string(), rec.clone());
+            }
         }
     }
-    for k in r0.code_chat_models.keys() {
-        if !r1.code_chat_models.contains_key(k) {
-            r1.code_chat_models.insert(k.to_string(), r0.code_chat_models[k].clone());
-        }
-    }
-    // clone to "similar_models"
-    let ccmodel_keys_copy = r1.code_completion_models.keys().cloned().collect::<Vec<String>>();
-    for k in ccmodel_keys_copy {
-        let model_rec = r1.code_completion_models[&k].clone();
-        for similar_model in model_rec.similar_models.iter() {
-            r1.code_completion_models.insert(similar_model.to_string(), model_rec.clone());
-        }
-    }
-    let chatmodel_keys_copy = r1.code_chat_models.keys().cloned().collect::<Vec<String>>();
-    for k in chatmodel_keys_copy {
-        let model_rec = r1.code_chat_models[&k].clone();
-        for similar_model in model_rec.similar_models.iter() {
-            r1.code_chat_models.insert(similar_model.to_string(), model_rec.clone());
-        }
-    }
-    r1.code_completion_models = r1.code_completion_models.clone().into_iter().filter(|(k, _)| r1.running_models.contains(&k)).collect();
-    r1.code_chat_models = r1.code_chat_models.clone().into_iter().filter(|(k, _)| r1.running_models.contains(&k)).collect();
 
     for k in r1.running_models.iter() {
-        if !r1.code_completion_models.contains_key(&strip_model_from_finetune(k)) && !r1.code_chat_models.contains_key(&strip_model_from_finetune(k)) {
+        if !r1.code_completion_models.contains_key(k) && !r1.code_chat_models.contains_key(k) {
             info!("indicated as running, unknown model {}", k);
         }
     }
