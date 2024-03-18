@@ -119,10 +119,12 @@ pub async fn load_caps(
             buffer = response.text().await.map_err(|e| format!("failed to read response: {}", e))?;
             if status == 200 {
                 break;
+            } else {
+                error!("Error getting caps from {}: {}", caps_url, buffer);
             }
         }
         if status != 200 {
-            return Err(format!("server responded with: {}", buffer));
+            return Err("All attempts to get caps failed".to_string());
         }
     }
     info!("reading caps from {}", caps_url);
