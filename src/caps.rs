@@ -96,7 +96,10 @@ pub async fn load_caps(
             caps_urls.push(cmdline.address_url.clone());
         }
     }
-    let mut caps_url: String = caps_urls[0].clone();
+    let mut caps_url: String = match caps_urls.get(0) {
+        Some(u) => u.clone(),
+        None => return Err("caps_url is none".to_string())
+    };
     if is_local_file {
         let mut file = File::open(caps_url.clone()).map_err(|_| format!("failed to open file '{}'", caps_url))?;
         file.read_to_string(&mut buffer).map_err(|_| format!("failed to read file '{}'", caps_url))?;
@@ -107,8 +110,6 @@ pub async fn load_caps(
             let api_key = cmdline.api_key.clone();
             let http_client = global_context.read().await.http_client.clone();
             let mut headers = reqwest::header::HeaderMap::new();
-            let client_version_header = reqwest::header::HeaderName::from_static("client_version");
-            headers.insert(client_version_header, reqwest::header::HeaderValue::from_str(build::PKG_VERSION).unwrap());
             if !api_key.is_empty() {
                 headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str()).unwrap());
             }
