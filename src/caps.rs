@@ -12,7 +12,8 @@ use crate::global_context::GlobalContext;
 use crate::http::routers::info::build;
 use crate::known_models::KNOWN_MODELS;
 
-const CAPS_FILENAME: &str = "coding_assistant_caps.json";
+const CAPS_FILENAME: &str = "refact-caps";
+const CAPS_FILENAME_FALLBACK: &str = "coding_assistant_caps.json";
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -75,40 +76,50 @@ pub async fn load_caps(
     let mut buffer = String::new();
     let mut is_local_file = false;
     let mut is_remote_address = false;
-    let caps_url: String;
+    let mut caps_urls: Vec<String> = Vec::new();
     if cmdline.address_url == "Refact" {
         is_remote_address = true;
-        caps_url = "https://inference.smallcloud.ai/coding_assistant_caps.json".to_string();
+        caps_urls.push("https://inference.smallcloud.ai/coding_assistant_caps.json".to_string());
     } else if cmdline.address_url == "HF" {
         buffer = HF_DEFAULT_CAPS.to_string();
-        caps_url = "<compiled-in-caps-hf>".to_string();
+        caps_urls.push("<compiled-in-caps-hf>".to_string());
     } else {
         if cmdline.address_url.starts_with("http") {
             is_remote_address = true;
             let base_url = Url::parse(&cmdline.address_url.clone()).map_err(|_| "failed to parse address url (1)".to_string())?;
             let joined_url = base_url.join(&CAPS_FILENAME).map_err(|_| "failed to parse address url (2)".to_string())?;
-            caps_url = joined_url.to_string();
+            let joined_url_fallback = base_url.join(&CAPS_FILENAME_FALLBACK).map_err(|_| "failed to parse address url (2)".to_string())?;
+            caps_urls.push(joined_url.to_string());
+            caps_urls.push(joined_url_fallback.to_string());
         } else {
             is_local_file = true;
-            caps_url = cmdline.address_url.clone();
+            caps_urls.push(cmdline.address_url.clone());
         }
     }
+    let mut caps_url: String = caps_urls[0].clone();
     if is_local_file {
         let mut file = File::open(caps_url.clone()).map_err(|_| format!("failed to open file '{}'", caps_url))?;
         file.read_to_string(&mut buffer).map_err(|_| format!("failed to read file '{}'", caps_url))?;
     }
     if is_remote_address {
-        let api_key = cmdline.api_key.clone();
-        let http_client = global_context.read().await.http_client.clone();
-        let mut headers = reqwest::header::HeaderMap::new();
-        let client_version_header = reqwest::header::HeaderName::from_static("client_version");
-        headers.insert(client_version_header, reqwest::header::HeaderValue::from_str(build::PKG_VERSION).unwrap());
-        if !api_key.is_empty() {
-            headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str()).unwrap());
+        let mut status: u16 = 0;
+        for url in caps_urls.iter() {
+            let api_key = cmdline.api_key.clone();
+            let http_client = global_context.read().await.http_client.clone();
+            let mut headers = reqwest::header::HeaderMap::new();
+            let client_version_header = reqwest::header::HeaderName::from_static("client_version");
+            headers.insert(client_version_header, reqwest::header::HeaderValue::from_str(build::PKG_VERSION).unwrap());
+            if !api_key.is_empty() {
+                headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str()).unwrap());
+            }
+            caps_url = url.clone();
+            let response = http_client.get(caps_url.clone()).headers(headers).send().await.map_err(|e| format!("{}", e))?;
+            status = response.status().as_u16();
+            buffer = response.text().await.map_err(|e| format!("failed to read response: {}", e))?;
+            if status == 200 {
+                break;
+            }
         }
-        let response = http_client.get(caps_url.clone()).headers(headers).send().await.map_err(|e| format!("{}", e))?;
-        let status = response.status().as_u16();
-        buffer = response.text().await.map_err(|e| format!("failed to read response: {}", e))?;
         if status != 200 {
             return Err(format!("server responded with: {}", buffer));
         }
