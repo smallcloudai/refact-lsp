@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "rt-mu
 reqwest-eventsource = "0.4.0"
 url = "2.4.1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9.31"
 tower = { version = "0.4", features = ["full"] }
 tower-lsp = "0.20"
@@ -83,3 +83,4 @@ strsim = "0.8.0"
 typetag = "0.2"
 dyn_partial_eq = "=0.1.2"
 rayon = "1.8.0"
+linked-hash-map = { version = "0.5.6", features = ["serde_impl"] }
