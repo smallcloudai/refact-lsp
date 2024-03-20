@@ -57,6 +57,8 @@ pub struct CodeAssistantCaps {
     pub code_chat_models: HashMap<String, ModelRecord>,
     pub code_chat_default_model: String,
     #[serde(default)]
+    pub code_chat_default_system_prompt: String,
+    #[serde(default)]
     pub default_embeddings_model: String,
     #[serde(default)]
     pub endpoint_embeddings_template: String,
@@ -67,6 +69,8 @@ pub struct CodeAssistantCaps {
     pub running_models: Vec<String>,
     #[serde(default)]
     pub caps_version: i64,  // need to reload if it increases on server, that happens when server configuration changes
+    #[serde(default)]
+    pub customization: String,
 }
 
 pub async fn load_caps(
