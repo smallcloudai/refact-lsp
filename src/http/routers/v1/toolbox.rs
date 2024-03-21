@@ -30,7 +30,7 @@ pub async fn handle_v1_customization(
         Some(customization_web)
     };
 
-    let tconfig = match crate::toolbox::toolbox_config::load_customization_high_level(
+    let mut tconfig = match crate::toolbox::toolbox_config::load_customization_high_level(
         cache_dir,
         customization_web_mb,
     ) {
@@ -45,6 +45,7 @@ pub async fn handle_v1_customization(
                 .unwrap());
         }
     };
+    tconfig.default_system_prompt = caps.read().unwrap().code_chat_default_system_prompt.clone();
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(serde_json::to_string_pretty(&tconfig).unwrap()))
