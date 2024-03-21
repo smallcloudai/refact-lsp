@@ -66,32 +66,44 @@ fn _replace_variables_in_system_prompts(config: &mut ToolboxConfig, variables: &
     }
 }
 
-fn _load_and_mix_with_users_config(user_yaml: &str) -> Result<ToolboxConfig, String> {
-    let default_unstructured: serde_yaml::Value = serde_yaml::from_str(crate::toolbox::toolbox_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML)
-        .map_err(|e| format!("Error parsing default YAML: {}", e))?;
-    let user_unstructured: serde_yaml::Value = serde_yaml::from_str(user_yaml)
-        .map_err(|e| format!("Error parsing customization.yaml: {}", e))?;
+fn update_yaml_a_with_b(a: &mut Value, b: &Value) {
+    match (a, b) {
+        (&mut Value::Mapping(ref mut a), &Value::Mapping(ref b)) => {
+            for (k, v) in b {
+                update_yaml_a_with_b(a.entry(k.clone()).or_insert(Value::Null), v);
+            }
+        }
+        (a, b) => *a = b.clone(),
+    }
+}
+
+fn _load_and_mix_with_users_config(
+    user_yaml: &str,
+    customization_web_mb: Option<String>,
+) -> Result<ToolboxConfig, String> {
+    let mut default_unstructured: serde_yaml::Value = serde_yaml::from_str(crate::toolbox::toolbox_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML).map_err(|e| format!("Error parsing default YAML: {}", e))?;
+    let user_unstructured: serde_yaml::Value = serde_yaml::from_str(user_yaml).map_err(|e| format!("Error parsing customization.yaml: {}", e))?;
 
     let mut variables: HashMap<String, String> = HashMap::new();
     _extract_mapping_values(&default_unstructured.as_mapping(), &mut variables);
     _extract_mapping_values(&user_unstructured.as_mapping(), &mut variables);
 
-    let mut work_config: ToolboxConfig = serde_yaml::from_str(crate::toolbox::toolbox_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML)
-        .map_err(|e| format!("Error parsing default ToolboxConfig: {}", e))?;
-    let mut user_config: ToolboxConfig = serde_yaml::from_str(user_yaml)
-        .map_err(|e| format!("Error parsing user ToolboxConfig: {}", e))?;
+    if let Some(customization_web) = customization_web_mb {
+        let customization_web_yaml: Value = serde_yaml::from_str(&customization_web).map_err(|e| format!("Error parsing customization_web: {}", e))?;
+        _extract_mapping_values(&customization_web_yaml.as_mapping(), &mut variables);
+        update_yaml_a_with_b(&mut default_unstructured, &customization_web_yaml);
+    }
 
-    _replace_variables_in_messages(&mut work_config, &variables);
-    _replace_variables_in_messages(&mut user_config, &variables);
-    _replace_variables_in_system_prompts(&mut work_config, &variables);
-    _replace_variables_in_system_prompts(&mut user_config, &variables);
-
-    work_config.toolbox_commands.extend(user_config.toolbox_commands.iter().map(|(k, v)| (k.clone(), v.clone())));
-    work_config.system_prompts.extend(user_config.system_prompts.iter().map(|(k, v)| (k.clone(), v.clone())));
-    Ok(work_config)
+    update_yaml_a_with_b(&mut default_unstructured, &user_unstructured);
+    let mut config: ToolboxConfig = serde_yaml::from_value(default_unstructured).map_err(|e| format!("Error parsing default ToolboxConfig: {}", e))?;
+    _replace_variables_in_system_prompts(&mut config, &variables);
+    Ok(config)
 }
 
-pub fn load_customization_high_level(cache_dir: std::path::PathBuf) -> Result<ToolboxConfig, String> {
+pub fn load_customization_high_level(
+    cache_dir: std::path::PathBuf,
+    customization_web_mb: Option<String>,
+) -> Result<ToolboxConfig, String> {
     let user_config_path = cache_dir.join("customization.yaml");
 
     if !user_config_path.exists() {
@@ -111,7 +123,7 @@ pub fn load_customization_high_level(cache_dir: std::path::PathBuf) -> Result<To
     }
 
     let user_config_text = std::fs::read_to_string(&user_config_path).map_err(|e| format!("Failed to read file: {}", e))?;
-    _load_and_mix_with_users_config(&user_config_text).map_err(|e| e.to_string())
+    _load_and_mix_with_users_config(&user_config_text, customization_web_mb).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -120,6 +132,6 @@ mod tests {
 
     #[test]
     fn is_compiled_in_toolbox_valid_toml() {
-        let _config = _load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML);
+        let _config = _load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML, None);
     }
 }
