@@ -1,15 +1,15 @@
 use serde_yaml::Value;
 use serde_yaml;
 use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
 use crate::call_validation::ChatMessage;
 use std::io::Write;
+use linked_hash_map::LinkedHashMap;
 
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReadToolboxConfig {
-    pub system_prompts: HashMap<String, ReadSystemPrompt>,
-    pub toolbox_commands: HashMap<String, ReadToolboxCommand>,
+    pub system_prompts: LinkedHashMap<String, ReadSystemPrompt>,
+    pub toolbox_commands: LinkedHashMap<String, ReadToolboxCommand>,
 }
 
 impl ReadToolboxConfig {
@@ -22,7 +22,7 @@ impl ReadToolboxConfig {
                     text: prompt.text,
                 })
                 .collect(),
-            default_system_prompt: "".to_string(),
+            _default_system_prompt_id: "".to_string(),
             toolbox_commands: self.toolbox_commands.into_iter()
                 .map(|(id, command)| ToolboxCommand {
                     id,
@@ -59,7 +59,7 @@ pub struct ReadToolboxCommand {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolboxConfig {
     pub system_prompts: Vec<SystemPrompt>,
-    pub default_system_prompt: String,
+    pub _default_system_prompt_id: String,
     pub toolbox_commands: Vec<ToolboxCommand>,
 }
 
@@ -110,7 +110,7 @@ pub struct ToolboxCommand {
     pub insert_at_cursor: bool,
 }
 
-fn _extract_mapping_values(mapping: &Option<&serde_yaml::Mapping>, variables: &mut HashMap<String, String>)
+fn extract_mapping_values(mapping: &Option<&serde_yaml::Mapping>, variables: &mut LinkedHashMap<String, String>)
 {
     if let Some(mapping) = mapping {
         for (k, v) in mapping.iter() {
@@ -121,7 +121,7 @@ fn _extract_mapping_values(mapping: &Option<&serde_yaml::Mapping>, variables: &m
     }
 }
 
-fn _replace_variables_in_messages(config: &mut ReadToolboxConfig, variables: &HashMap<String, String>)
+fn _replace_variables_in_messages(config: &mut ReadToolboxConfig, variables: &LinkedHashMap<String, String>)
 {
     for (_, command) in config.toolbox_commands.iter_mut() {
         for (_i, msg) in command.messages.iter_mut().enumerate() {
@@ -134,7 +134,7 @@ fn _replace_variables_in_messages(config: &mut ReadToolboxConfig, variables: &Ha
     }
 }
 
-fn _replace_variables_in_system_prompts(config: &mut ReadToolboxConfig, variables: &HashMap<String, String>)
+fn replace_variables_in_system_prompts(config: &mut ReadToolboxConfig, variables: &LinkedHashMap<String, String>)
 {
     for (_, prompt) in config.system_prompts.iter_mut() {
         let mut tmp = prompt.text.clone();
@@ -145,19 +145,19 @@ fn _replace_variables_in_system_prompts(config: &mut ReadToolboxConfig, variable
     }
 }
 
-fn parse_and_process_yaml(yaml_str: &str, variables: &mut HashMap<String, String>) -> Result<ToolboxConfig, String> {
+fn parse_and_process_yaml(yaml_str: &str, variables: &mut LinkedHashMap<String, String>) -> Result<ToolboxConfig, String> {
     let unstructured: Value = serde_yaml::from_str(yaml_str).map_err(|e| format!("Error parsing YAML: {}", e))?;
-    _extract_mapping_values(&unstructured.as_mapping(), variables);
-    let mut read_config: ReadToolboxConfig = serde_yaml::from_value(unstructured).map_err(|e| format!("Error parsing ToolboxConfig: {}", e))?;
-    _replace_variables_in_system_prompts(&mut read_config, variables);
+    extract_mapping_values(&unstructured.as_mapping(), variables);
+    let mut read_config: ReadToolboxConfig = serde_yaml::from_str(yaml_str).map_err(|e| format!("Error parsing ToolboxConfig: {}", e))?;
+    replace_variables_in_system_prompts(&mut read_config, variables);
     Ok(read_config.into_toolbox_config())
 }
 
-fn _load_and_mix_with_users_config(
+fn load_and_mix_with_users_config(
     user_yaml: &str,
     customization_web_mb: Option<String>,
 ) -> Result<ToolboxConfig, String> {
-    let mut variables: HashMap<String, String> = HashMap::new();
+    let mut variables: LinkedHashMap<String, String> = LinkedHashMap::new();
     let default_yaml = crate::toolbox::toolbox_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML;
 
     let mut config = parse_and_process_yaml(default_yaml, &mut variables)?;
@@ -196,7 +196,7 @@ pub fn load_customization_high_level(
     }
 
     let user_config_text = std::fs::read_to_string(&user_config_path).map_err(|e| format!("Failed to read file: {}", e))?;
-    _load_and_mix_with_users_config(&user_config_text, customization_web_mb).map_err(|e| e.to_string())
+    load_and_mix_with_users_config(&user_config_text, customization_web_mb).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn is_compiled_in_toolbox_valid_toml() {
-        let config = _load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML, None);
+        let config = load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML, None);
         assert!(config.is_ok());
     }
 }
