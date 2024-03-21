@@ -45,7 +45,7 @@ pub async fn handle_v1_customization(
                 .unwrap());
         }
     };
-    tconfig._default_system_prompt_id = caps.read().unwrap().code_chat_default_system_prompt.clone();
+    tconfig.default_system_prompt_id = caps.read().unwrap().code_chat_default_system_prompt.clone();
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(serde_json::to_string_pretty(&tconfig).unwrap()))

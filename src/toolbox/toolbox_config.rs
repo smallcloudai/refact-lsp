@@ -24,7 +24,7 @@ impl ReadToolboxConfig {
                     text: prompt.text,
                 })
                 .collect(),
-            _default_system_prompt_id: "".to_string(),
+            default_system_prompt_id: "".to_string(),
             toolbox_commands: self.toolbox_commands.into_iter()
                 .map(|(id, command)| ToolboxCommand {
                     id,
@@ -61,7 +61,7 @@ pub struct ReadToolboxCommand {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolboxConfig {
     pub system_prompts: Vec<SystemPrompt>,
-    pub _default_system_prompt_id: String,
+    pub default_system_prompt_id: String,
     pub toolbox_commands: Vec<ToolboxCommand>,
 }
 
