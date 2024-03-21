@@ -8,7 +8,9 @@ use linked_hash_map::LinkedHashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReadToolboxConfig {
+    #[serde(default)]
     pub system_prompts: LinkedHashMap<String, ReadSystemPrompt>,
+    #[serde(default)]
     pub toolbox_commands: LinkedHashMap<String, ReadToolboxCommand>,
 }
 
