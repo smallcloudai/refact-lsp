@@ -132,6 +132,7 @@ mod tests {
 
     #[test]
     fn is_compiled_in_toolbox_valid_toml() {
-        let _config = _load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML, None);
+        let config = _load_and_mix_with_users_config(crate::toolbox::toolbox_compiled_in::COMPILED_IN_INITIAL_USER_YAML, None);
+        assert!(config.is_ok());
     }
 }
