@@ -126,11 +126,11 @@ impl DocumentsState {
             fs_watcher: None,
         }
     }
-    
+
     pub fn init_watcher(&mut self, gcx: Arc<ARwLock<GlobalContext>>) {
         let watcher = RecommendedWatcher::new(
             move |res| {
-                let rt  = Runtime::new().unwrap();
+                let rt = Runtime::new().unwrap();
                 rt.block_on(async {
                     if let Ok(event) = res {
                         file_watcher_thread(event, gcx.clone()).await;
@@ -141,7 +141,7 @@ impl DocumentsState {
         ).unwrap();
         self.fs_watcher = Some(watcher);
     }
-    
+
     pub fn finish(&mut self) {
         self.fs_watcher = None;
     }
@@ -206,39 +206,44 @@ async fn _ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>>
         // SVN repository
         _run_command("svn", &["list", "-R"], path).await
     } else {
-        Some(glob_folder(path).await)
+        None
     }
+}
+
+async fn _ls_files_under_version_control_recursive(path: PathBuf) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = vec![];
+    let mut candidates: Vec<PathBuf> = vec![path];
+    while !candidates.is_empty() {
+        let local_path = candidates.pop().unwrap();
+        if local_path.is_file() && is_valid_file(&local_path) {
+            paths.push(local_path);
+            continue;
+        }
+        if local_path.is_dir() {
+            let maybe_files = _ls_files_under_version_control(&local_path).await;
+            if let Some(files) = maybe_files {
+                paths.extend(files);
+            } else {
+                let local_paths: Vec<PathBuf> = WalkDir::new(local_path.clone()).max_depth(1)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path().to_path_buf())
+                    .filter(|e| e != &local_path)
+                    .collect();
+                candidates.extend(local_paths);
+            }
+        }
+    }
+    paths
 }
 
 pub async fn _retrieve_files_by_proj_folders(proj_folders: Vec<PathBuf>) -> Vec<DocumentInfo> {
     let mut all_files: Vec<DocumentInfo> = Vec::new();
     for proj_folder in proj_folders {
-        let maybe_files = _ls_files_under_version_control(&proj_folder).await;
-        if let Some(files) = maybe_files {
-            all_files.extend(files.iter().filter_map(|x| DocumentInfo::from_pathbuf(x).ok()).collect::<Vec<_>>());
-        } else {
-            let files: Vec<DocumentInfo> = WalkDir::new(proj_folder)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| !e.path().is_dir())
-                .filter(|e| is_valid_file(&e.path().to_path_buf()))
-                .filter_map(|e| DocumentInfo::from_pathbuf(&e.path().to_path_buf()).ok())
-                .collect::<Vec<DocumentInfo>>();
-            all_files.extend(files);
-        }
+        let files = _ls_files_under_version_control_recursive(proj_folder.clone()).await;
+        all_files.extend(files.iter().filter_map(|x| DocumentInfo::from_pathbuf(x).ok()).collect::<Vec<_>>());
     }
     all_files
-}
-
-pub(crate) async fn glob_folder(path: &PathBuf) -> Vec<PathBuf> {
-    let mut docs = Vec::new();
-    let mut files = glob::glob(path.join("**").to_str().unwrap()).unwrap();
-    while let Some(file_res) = files.next() {
-        if let Ok(file) = file_res {
-            docs.push(file);
-        }
-    }
-    docs
 }
 
 async fn enqueue_files(
@@ -315,7 +320,6 @@ pub async fn on_did_open(
     let last_30_chars: String = crate::nicer_logs::last_n_chars(&path_str, 30);
     info!("opened {}", last_30_chars);
 }
-
 
 pub async fn on_did_change(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
