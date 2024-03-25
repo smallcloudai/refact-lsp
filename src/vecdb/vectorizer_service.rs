@@ -11,7 +11,7 @@ use tracing::info;
 
 use crate::ast::file_splitter::AstBasedFileSplitter;
 use crate::fetch_embedding::try_get_embedding;
-use crate::files_in_workspace::DocumentInfo;
+use crate::files_in_workspace::Document;
 use crate::vecdb::handler::VecDBHandler;
 use crate::vecdb::structs::{Record, SplitResult, VecdbConstants, VecDbStatus};
 

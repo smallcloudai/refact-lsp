@@ -106,9 +106,12 @@ impl AstIndex {
         Ok((declarations, usages))
     }
 
-    pub fn add_or_update_declarations_and_usages(&mut self, doc: &DocumentInfo,
-                                                 declarations: HashMap<String, SymbolDeclarationStruct>,
-                                                 usages: Vec<Box<dyn UsageSymbolInfo>>) -> Result<(), String> {
+    pub fn add_or_update_declarations_and_usages(
+        &mut self, 
+        doc: &DocumentInfo,
+        declarations: HashMap<String, SymbolDeclarationStruct>,
+        usages: Vec<Box<dyn UsageSymbolInfo>>) -> Result<(), String> 
+    {
         let path = doc.get_path();
         // Remove old data from all search indexes
         match self.remove(&doc) {
@@ -147,9 +150,8 @@ impl AstIndex {
         self.add_or_update_declarations_and_usages(doc, declarations, usages)
     }
 
-    pub fn remove(&mut self, doc: &DocumentInfo) -> Result<(), String> {
-        let path = doc.get_path();
-        if let Some(meta_names) = self.declarations_search_index.remove(&path) {
+    pub fn remove(&mut self, path: &PathBuf) -> Result<(), String> {
+        if let Some(meta_names) = self.declarations_search_index.remove(path) {
             let mut stream = meta_names.stream();
             while let Some(name_vec) = stream.next() {
                 let name = match String::from_utf8(name_vec.to_vec()) {
@@ -161,7 +163,7 @@ impl AstIndex {
                 self.declarations.remove(&name);
             }
         }
-        if let Some(meta_names) = self.usages_search_index.remove(&path) {
+        if let Some(meta_names) = self.usages_search_index.remove(path) {
             let mut stream = meta_names.stream();
             while let Some(name_vec) = stream.next() {
                 let name = match String::from_utf8(name_vec.to_vec()) {

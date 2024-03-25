@@ -15,7 +15,7 @@ use crate::ast::ast_index_service::{AstEvent, AstIndexService};
 use crate::ast::comments_wrapper::get_language_id_by_filename;
 use crate::ast::structs::{AstCursorSearchResult, AstQuerySearchResult, CursorUsagesResult, FileReferencesResult, SymbolsSearchResultStruct, UsageSearchResultStruct};
 use crate::ast::treesitter::parsers::get_parser_by_filename;
-use crate::files_in_workspace::DocumentInfo;
+use crate::files_in_workspace::{Document, DocumentInfo};
 use rayon::prelude::*;
 use crate::files_in_jsonl::files_in_jsonl;
 
@@ -51,11 +51,11 @@ impl AstModule {
         return self.ast_index_service.lock().await.ast_start_background_tasks().await;
     }
 
-    pub async fn ast_indexer_enqueue_files(&self, documents: &Vec<DocumentInfo>, force: bool) {
+    pub async fn ast_indexer_enqueue_files(&self, documents: &Vec<Arc<ARwLock<Document>>>, force: bool) {
         self.ast_index_service.lock().await.ast_indexer_enqueue_files(AstEvent::add_docs(documents.clone()), force).await;
     }
 
-    pub async fn ast_add_file_no_queue(&self, document: &DocumentInfo) -> Result<(), String> {
+    pub async fn ast_add_file_no_queue(&self, document: &Arc<ARwLock<Document>>) -> Result<(), String> {
         self.ast_index.lock().await.add_or_update(&document)
     }
     
@@ -63,9 +63,9 @@ impl AstModule {
         self.ast_index_service.lock().await.ast_indexer_enqueue_files(AstEvent::reset(), false).await;
     }
 
-    pub async fn remove_file(&self, doc: &DocumentInfo) {
+    pub async fn remove_file(&self, path: &PathBuf) {
         // TODO: will not work if the same file is in the indexer queue
-        let _ = self.ast_index.lock().await.remove(doc);
+        let _ = self.ast_index.lock().await.remove(path);
     }
 
     pub async fn clear_index(&self) {
