@@ -11,8 +11,8 @@ use tracing::info;
 use rayon::prelude::*;
 use crate::ast::ast_index::AstIndex;
 use crate::ast::treesitter::structs::{SymbolDeclarationStruct, UsageSymbolInfo};
-use crate::files_in_workspace::{DocumentInfo, on_workspaces_init};
-use crate::global_context;
+use crate::files_in_workspace::Document;
+
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum EventType {
@@ -20,14 +20,22 @@ pub enum EventType {
     Reset,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Hash)]
 pub struct AstEvent {
-    pub docs: Vec<DocumentInfo>,
+    pub docs: Vec<Arc<ARwLock<Document>>>,
     pub typ: EventType,
 }
 
+impl PartialEq for AstEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.docs.len() == other.docs.len() && self.typ == other.typ
+    }
+}
+
+impl Eq for AstEvent {}
+
 impl AstEvent {
-    pub fn add_docs(docs: Vec<DocumentInfo>) -> Self {
+    pub fn add_docs(docs: Vec<Arc<ARwLock<Document>>>) -> Self {
         AstEvent { docs, typ: EventType::Add }
     }
 
