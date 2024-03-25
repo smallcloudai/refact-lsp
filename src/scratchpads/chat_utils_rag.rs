@@ -1,9 +1,9 @@
 use std::sync::Arc;
-// use std::cell::RefCell;
 use std::sync::RwLock;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use tracing::{info, warn};
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
@@ -16,7 +16,7 @@ use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::ast::structs::FileASTMarkup;
-use crate::files_in_workspace::DocumentInfo;
+use crate::files_in_workspace::{Document, read_file_from_disk};
 
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
 const SMALL_GAP_LINES: usize = 10;  // lines
@@ -49,10 +49,10 @@ pub async fn postprocess_rag_stage1(
     let mut files: HashMap<String, Arc<File>> = HashMap::new();
     let ast_module = global_context.read().await.ast_module.clone();
     for file_name in files_set {
-        let file_info = DocumentInfo::from_pathbuf(&std::path::PathBuf::from(file_name.clone())).unwrap();
+        let doc = Document::new(&PathBuf::from(file_name.clone()), None);
         let mut f: Option<Arc<File>> = None;
         if let Some(astmod) = &ast_module {
-            match astmod.read().await.file_markup(&file_info).await {
+            match astmod.read().await.file_markup(&doc).await {
                 Ok(markup) => {
                     f = Some(Arc::new(File { markup, file_name: file_name.clone() }));
                 },
@@ -64,8 +64,8 @@ pub async fn postprocess_rag_stage1(
         if f.is_none() {
             f = Some(Arc::new(File {
                 markup: FileASTMarkup {
-                    file_url: file_info.uri.clone(),
-                    file_content: file_info.read_file().await.unwrap_or_default(),
+                    file_path: doc.path.clone(),
+                    file_content: read_file_from_disk(&doc.path).await.unwrap_or_default().to_string(),
                     symbols_sorted_by_path_len: Vec::new(),
                 },
                 file_name: file_name.clone(),

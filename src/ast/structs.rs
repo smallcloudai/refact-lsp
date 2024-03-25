@@ -42,7 +42,7 @@ pub struct FileReferencesResult {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileASTMarkup {
-    pub file_url: Url,
+    pub file_path: PathBuf,
     pub file_content: String,
     pub symbols_sorted_by_path_len: Vec<SymbolInformation>,
 }

@@ -22,7 +22,7 @@ pub struct ParserError {
 }
 
 pub trait AstLanguageParser: Send {
-    fn parse(&mut self, code: &str, path: &Url) -> Vec<AstSymbolInstanceArc>;
+    fn parse(&mut self, code: &str, path: &PathBuf) -> Vec<AstSymbolInstanceArc>;
 }
 
 fn internal_error<E: Display>(err: E) -> ParserError {
