@@ -4,6 +4,7 @@ use std::iter::zip;
 use std::ops::Div;
 use std::sync::Arc;
 use std::time::SystemTime;
+use axum::routing::on;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 use tokio::task::JoinHandle;
@@ -22,7 +23,7 @@ pub enum EventType {
 
 #[derive(Debug, Clone, Hash)]
 pub struct AstEvent {
-    pub docs: Vec<Arc<ARwLock<Document>>>,
+    pub docs: Vec<Document>,
     pub typ: EventType,
 }
 
@@ -35,7 +36,7 @@ impl PartialEq for AstEvent {
 impl Eq for AstEvent {}
 
 impl AstEvent {
-    pub fn add_docs(docs: Vec<Arc<ARwLock<Document>>>) -> Self {
+    pub fn add_docs(docs: Vec<Document>) -> Self {
         AstEvent { docs, typ: EventType::Add }
     }
 
@@ -99,6 +100,34 @@ async fn ast_indexer_thread(
     queue: Arc<AMutex<VecDeque<AstEvent>>>,
     ast_index: Arc<AMutex<AstIndex>>,
 ) {
+    async fn on_add(ast_index: Arc<AMutex<AstIndex>>, event: AstEvent) {
+        let list_of_path = event.docs;
+        let ast_index = ast_index.clone();
+        
+        let mut declarations_and_usages = Vec::new();
+        for document in &list_of_path {
+            let result = AstIndex::get_declarations_and_usages(document.clone()).await;
+            declarations_and_usages.push(result);
+        }
+
+        let mut ast_index = ast_index.lock().await;
+        for (doc, res) in list_of_path.into_iter().zip(declarations_and_usages.into_iter()) {
+            match res {
+                Ok((declaration, usages)) => {
+                    match ast_index.add_or_update_declarations_and_usages(&doc, declaration, usages).await {
+                        Ok(_) => {}
+                        Err(e) => { info!("Error adding/updating records in AST index: {}", e); }
+                    }
+                }
+                Err(e) => { info!("Error adding/updating records in AST index: {}", e); }
+            }
+        }
+    }
+    async fn on_reset(ast_index: Arc<AMutex<AstIndex>>) {
+        ast_index.lock().await.clear_index().await;
+        info!("Reset AST Index");
+    }
+    
     loop {
         let events = {
             let mut queue_locked = queue.lock().await;
@@ -113,32 +142,9 @@ async fn ast_indexer_thread(
         }
 
         for event in events {
-            let list_of_path = event.docs;
             match event.typ {
-                EventType::Add => {
-                    let ast_index = ast_index.clone();
-                    let declarations_and_usages: Vec<Result<(HashMap<String, SymbolDeclarationStruct>, Vec<Box<dyn UsageSymbolInfo>>), String>>
-                        = list_of_path.par_iter().map(move |document| {
-                        AstIndex::get_declarations_and_usages(&document)
-                    }).collect();
-
-                    let mut ast_index = ast_index.lock().await;
-                    zip(list_of_path, declarations_and_usages).for_each(|(doc, res)| {
-                        match res {
-                            Ok((declaration, usages)) => {
-                                match ast_index.add_or_update_declarations_and_usages(&doc, declaration, usages) {
-                                    Ok(_) => {}
-                                    Err(e) => { info!("Error adding/updating records in AST index: {}", e); }
-                                }
-                            }
-                            Err(e) => { info!("Error adding/updating records in AST index: {}", e); }
-                        }
-                    })
-                }
-                EventType::Reset => {
-                    ast_index.lock().await.clear_index().await;
-                    info!("Reset AST Index");
-                }
+                EventType::Add => on_add(ast_index.clone(), event).await,
+                EventType::Reset => on_reset(ast_index.clone()).await 
             }
         }
     }

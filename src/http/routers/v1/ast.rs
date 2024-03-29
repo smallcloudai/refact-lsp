@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
+use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use tree_sitter::Point;
 
 use crate::custom_error::ScratchError;
-use crate::files_in_workspace::DocumentInfo;
+use crate::files_in_workspace::Document;
 use crate::global_context::SharedGlobalContext;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -50,18 +51,14 @@ pub async fn handle_v1_ast_declarations_cursor_search(
     let cx_locked = global_context.read().await;
     let search_res = match *cx_locked.ast_module.lock().await {
         Some(ref mut ast) => {
-            let doc = match DocumentInfo::from_pathbuf_and_text(
-                &PathBuf::from(post.filename.clone()), &post.text
-            ) {
-                Ok(uri) => uri,
-                Err(err) => return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("{}: {}", err, post.filename))),
-            };
-            let code = match doc.read_file().await {
-                Ok(s) => s,
-                Err(e) => { return Err(ScratchError::new(StatusCode::BAD_REQUEST, e.to_string())); }
+            let mut doc = Document::new(&PathBuf::from(post.filename), None);
+            doc.update_text_from_disk().await;
+            let text = match doc.get_text_or_read_from_disk().await {
+                Ok(text) => text,
+                Err(e) => return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("Document has no text: {e}"))) 
             };
             ast.search_declarations_by_cursor(
-                &doc, code.as_str(), Point::new(post.row, post.column), post.top_n, false
+                &doc, &text, Point::new(post.row, post.column), post.top_n, false
             ).await
         }
         None => {
@@ -136,18 +133,13 @@ pub async fn handle_v1_ast_references_cursor_search(
     let cx_locked = global_context.read().await;
     let search_res = match *cx_locked.ast_module.lock().await {
         Some(ref mut ast) => {
-            let doc = match DocumentInfo::from_pathbuf_and_text(
-                &PathBuf::from(post.filename.clone()), &post.text
-            ) {
-                Ok(uri) => uri,
-                Err(err) => return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("{}: {}", err, post.filename))),
-            };
-            let code = match doc.read_file().await {
-                Ok(s) => s,
-                Err(e) => { return Err(ScratchError::new(StatusCode::BAD_REQUEST, e.to_string())); }
-            };
+            let mut doc = Document::new(&PathBuf::from(post.filename), None);
+            doc.text = Some(Rope::from(post.text.clone()));
+            if doc.text.is_none() {
+                return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Document has no text".to_string()));
+            }
             ast.search_references_by_cursor(
-                &doc, code.as_str(), Point::new(post.row, post.column), post.top_n, true
+                &doc.clone(), &doc.text.unwrap_or_default().to_string(), Point::new(post.row, post.column), post.top_n, true
             ).await
         }
         None => {
@@ -218,10 +210,7 @@ pub async fn handle_v1_ast_file_symbols(
     let post = serde_json::from_slice::<AstReferencesPost>(&body_bytes).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let doc = match DocumentInfo::from_pathbuf(&PathBuf::from(&post.filename)).ok() {
-        Some(doc) => doc,
-        None => return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("Filename could not be parsed: {}", post.filename))),
-    };
+    let doc = Document::new(&PathBuf::from(post.filename), None);
 
     let cx_locked = global_context.read().await;
     let search_res = match *cx_locked.ast_module.lock().await {
@@ -258,14 +247,13 @@ pub async fn handle_v1_ast_index_file(
     let post = serde_json::from_slice::<AstIndexFilePost>(&body_bytes).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-
-    let doc = match DocumentInfo::from_pathbuf_and_text(
-        &PathBuf::from(post.filename.clone()), &post.text
-    ) {
-        Ok(uri) => uri,
-        Err(err) => return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("{}: {}", err, post.filename))),
-    };
-
+    
+    let mut doc = Document::new(&PathBuf::from(post.filename), None);
+    doc.text = Some(Rope::from(post.text));
+    if doc.text.is_none() {
+        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Document has no text".to_string()));
+    }
+    
     let cx_locked = global_context.read().await;
     let add_res = match *cx_locked.ast_module.lock().await {
         Some(ref ast) => {

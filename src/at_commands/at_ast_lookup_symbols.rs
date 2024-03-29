@@ -13,7 +13,6 @@ use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_file::{AtParamFilePath, RangeKind, colon_lines_range_from_arg};
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::call_validation::{ChatMessage, ContextFile};
-use crate::files_in_workspace::DocumentInfo;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -109,19 +108,15 @@ impl AtCommand for AtAstLookupSymbols {
 
         let file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), &file_path.to_string()).await?;
         let binding = context.global_context.read().await;
-        let doc_info = match DocumentInfo::from_pathbuf_and_text(
-            &PathBuf::from(&file_path), &file_text,
-        ) {
-            Ok(doc) => doc,
-            Err(err) => {
-                return Err(format!("{err}: {file_path}"));
-            }
+        
+        let doc = match context.global_context.read().await.documents_state.document_map.get(&PathBuf::from(file_path)) {
+            Some(d) => d.clone(),
+            None => return Err("no document found".to_string()),
         };
+        doc.write().await.update_text_from_disk().await;
         let x = match *binding.ast_module.lock().await {
             Some(ref mut ast) => {
-                match ast.search_references_by_cursor(
-                    &doc_info, &file_text, Point { row: row_idx, column: 0 }, 5, true
-                ).await {
+                match ast.search_references_by_cursor(&doc.read().await.clone(), &file_text, Point { row: row_idx, column: 0 }, 5, true).await {
                     Ok(res) => Ok(results2message(&res).await),
                     Err(err) => Err(err)
                 }

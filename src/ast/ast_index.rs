@@ -1,6 +1,8 @@
 use std::cmp::max;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock as ARwLock;
 
 use fst::{Set, set, Streamer};
 use rayon::current_num_threads;
@@ -15,7 +17,7 @@ use crate::ast::structs::SymbolsSearchResultStruct;
 use crate::ast::treesitter::language_id::LanguageId;
 use crate::ast::treesitter::parsers::get_parser_by_filename;
 use crate::ast::treesitter::structs::{SymbolDeclarationStruct, UsageSymbolInfo};
-use crate::files_in_workspace::DocumentInfo;
+use crate::files_in_workspace::{Document, read_file_from_disk};
 
 #[derive(Debug)]
 pub struct AstIndex {
@@ -26,17 +28,17 @@ pub struct AstIndex {
 }
 
 
-fn make_a_query(
+async fn make_a_query(
     nodes_indexes: &HashMap<PathBuf, Set<Vec<u8>>>,
     query_str: &str,
-    exception_doc: Option<DocumentInfo>,
+    exception_doc: Option<&Document>,
 ) -> Vec<String> {
     let matcher = Substring::new(query_str, true);
     let mut stream_builder = set::OpBuilder::new();
 
-    for (doc, set) in nodes_indexes {
+    for (doc_path, set) in nodes_indexes {
         if let Some(ref exception) = exception_doc {
-            if *doc == exception.get_path() {
+            if *doc_path == exception.path {
                 continue;
             }
         }
@@ -63,17 +65,16 @@ impl AstIndex {
         }
     }
 
-    pub fn get_declarations_and_usages(doc: &DocumentInfo)
-                                       -> Result<(HashMap<String, SymbolDeclarationStruct>, Vec<Box<dyn UsageSymbolInfo>>), String> {
-        let path = doc.get_path();
-        let mut parser = match get_parser_by_filename(&doc.get_path()) {
+    pub async fn get_declarations_and_usages(doc: Document) -> Result<(HashMap<String, SymbolDeclarationStruct>, Vec<Box<dyn UsageSymbolInfo>>), String> {
+        let path = doc.path;
+        let mut parser = match get_parser_by_filename(&path) {
             Ok(parser) => parser,
             Err(err) => {
                 return Err(err.message);
             }
         };
-        let text = match doc.read_file_blocked() {
-            Ok(s) => s,
+        let text = match read_file_from_disk(&path).await {
+            Ok(s) => s.to_string(),
             Err(e) => return Err(e.to_string())
         };
 
@@ -106,15 +107,15 @@ impl AstIndex {
         Ok((declarations, usages))
     }
 
-    pub fn add_or_update_declarations_and_usages(
+    pub async fn add_or_update_declarations_and_usages(
         &mut self, 
-        doc: &DocumentInfo,
+        doc: &Document,
         declarations: HashMap<String, SymbolDeclarationStruct>,
         usages: Vec<Box<dyn UsageSymbolInfo>>) -> Result<(), String> 
     {
-        let path = doc.get_path();
+        let path = doc.path.clone();
         // Remove old data from all search indexes
-        match self.remove(&doc) {
+        match self.remove(&path) {
             Ok(()) => (),
             Err(e) => return Err(format!("Error removing {}: {}", path.display(), e)),
         }
@@ -145,9 +146,9 @@ impl AstIndex {
         Ok(())
     }
 
-    pub fn add_or_update(&mut self, doc: &DocumentInfo) -> Result<(), String> {
-        let (declarations, usages) = AstIndex::get_declarations_and_usages(doc)?;
-        self.add_or_update_declarations_and_usages(doc, declarations, usages)
+    pub async fn add_or_update(&mut self, doc: &Document) -> Result<(), String> {
+        let (declarations, usages) = AstIndex::get_declarations_and_usages(doc.clone()).await?;
+        self.add_or_update_declarations_and_usages(doc, declarations, usages).await
     }
 
     pub fn remove(&mut self, path: &PathBuf) -> Result<(), String> {
@@ -185,18 +186,18 @@ impl AstIndex {
         self.usages_search_index.clear();
     }
 
-    pub fn search_declarations(
+    pub async fn search_declarations(
         &self,
         query: &str,
         top_n: usize,
-        exception_doc: Option<DocumentInfo>,
+        exception_doc: Option<&Document>,
         language: Option<LanguageId>
     ) -> Result<Vec<SymbolsSearchResultStruct>, String> {
         let query_str = query.to_string();
         let found_keys = make_a_query(
             &self.declarations_search_index, query_str.as_str(),
             exception_doc,
-        );
+        ).await;
 
         let mut filtered_search_results = found_keys
             .par_chunks(current_num_threads())
@@ -232,7 +233,7 @@ impl AstIndex {
             };
             search_results.push(SymbolsSearchResultStruct {
                 symbol_declaration: key.clone(),
-                content: content,
+                content,
                 sim_to_query: dist,
             });
         }
@@ -243,11 +244,11 @@ impl AstIndex {
         &self,
         query: &str,
         top_n: usize,
-        exception_doc: Option<DocumentInfo>,
+        exception_doc: Option<&Document>,
         language: Option<LanguageId>
     ) -> Result<Vec<SymbolsSearchResultStruct>, String> {
         let query_str = query.to_string();
-        let found_keys = make_a_query(&self.usages_search_index, query_str.as_str(), exception_doc);
+        let found_keys = make_a_query(&self.usages_search_index, query_str.as_str(), exception_doc).await;
 
         let filtered_found_keys = found_keys
             .par_iter()
@@ -297,8 +298,8 @@ impl AstIndex {
         Ok(search_results)
     }
 
-    pub fn get_symbols_by_file_path(&self, doc: &DocumentInfo) -> Result<Vec<SymbolDeclarationStruct>, String> {
-        let path = doc.get_path();
+    pub fn get_symbols_by_file_path(&self, doc: &Document) -> Result<Vec<SymbolDeclarationStruct>, String> {
+        let path = doc.path.clone();
         let mut result: Vec<SymbolDeclarationStruct> = vec![];
         if let Some(meta_names) = self.declarations_search_index.get(&path) {
             let mut stream = meta_names.stream();

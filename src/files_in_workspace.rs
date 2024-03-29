@@ -3,7 +3,6 @@ use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak, Mutex};
 use std::time::Instant;
-use itertools::Itertools;
 use crate::global_context::GlobalContext;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
@@ -14,6 +13,7 @@ use tokio::sync::{RwLock as ARwLock, Mutex as AMutex, RwLock};
 use tracing::info;
 use walkdir::WalkDir;
 use which::which;
+use crate::files_in_jsonl::files_in_jsonl_w_path;
 
 use crate::telemetry;
 use crate::vecdb::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS};
@@ -25,6 +25,7 @@ pub struct Document {
     #[allow(dead_code)]
     pub language_id: String,
     pub text: Option<Rope>,
+    pub in_jsonl: bool,
 }
 
 fn read_file_from_disk_block(path: &PathBuf) -> Result<Rope, String> {
@@ -33,7 +34,7 @@ fn read_file_from_disk_block(path: &PathBuf) -> Result<Rope, String> {
         .map_err(|e| format!("Failed to read file from disk: {}", e))
 }
 
-async fn read_file_from_disk(path: &PathBuf) -> Result<Rope, String> {
+pub async fn read_file_from_disk(path: &PathBuf) -> Result<Rope, String> {
     tokio::fs::read_to_string(path).await
         .map(|x|Rope::from_str(&x))
         .map_err(|e| format!("Failed to read file from disk: {}", e))
@@ -42,12 +43,18 @@ async fn read_file_from_disk(path: &PathBuf) -> Result<Rope, String> {
 impl Document {
     pub fn new(path: &PathBuf, language_id: Option<String>) -> Self {
         let language_id = language_id.unwrap_or("unknown".to_string());
-        Self { path: path.clone(), language_id, text: None }
+        Self { path: path.clone(), language_id, text: None, in_jsonl: false }
     }
     pub async fn update_text_from_disk(&mut self) {
         if let Ok(res) = read_file_from_disk(&self.path).await {
             self.text = Some(res);
         }
+    }
+    pub async fn get_text_or_read_from_disk(&mut self) -> Result<String, String> {
+        if let Some(text) = self.text.clone() {
+            return Ok(text.to_string());
+        }
+        read_file_from_disk(&self.path).await.map(|x|x.to_string())
     }
     pub fn update_text(&mut self, text: &String) {
         self.text = Some(Rope::from_str(text));
@@ -66,19 +73,33 @@ pub struct DocumentsState {
     pub fs_watcher: Arc<ARwLock<RecommendedWatcher>>,
 }
 
-async fn add_paths_to_document_map_if_not_present(global_context: Arc<ARwLock<GlobalContext>>, paths: &Vec<PathBuf>) {
+pub fn create_document_map_from_documents(documents: &Vec<Document>) -> HashMap<PathBuf, Arc<ARwLock<Document>>> {
+    let mut doc_map = HashMap::new();
+    for doc in documents {
+        doc_map.insert(doc.path.clone(), Arc::new(ARwLock::new(doc.clone())));
+    }
+    doc_map
+}
+
+async fn add_paths_to_document_map_if_not_present(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    paths: &Vec<PathBuf>,
+    read_text: bool,
+) {
     let mut cx = global_context.write().await;
     let doc_map = &mut cx.documents_state.document_map;
     for path in paths {
         if !doc_map.contains_key(path) {
             let mut doc_new = Document::new(path, None);
-            doc_new.update_text_from_disk().await;
+            if read_text {
+                doc_new.update_text_from_disk().await;
+            }
             doc_map.insert(path.clone(), Arc::new(ARwLock::new(doc_new)));
         }
     }
 }
 
-async fn update_or_set_document_map(global_context: Arc<ARwLock<GlobalContext>>, document: Document) {
+async fn overwrite_or_create_document(global_context: Arc<ARwLock<GlobalContext>>, document: Document) {
     let mut cx = global_context.write().await;
     let doc_map = &mut cx.documents_state.document_map;
     if let Some(existing_doc) = doc_map.get_mut(&document.path) {
@@ -88,19 +109,33 @@ async fn update_or_set_document_map(global_context: Arc<ARwLock<GlobalContext>>,
     }
 }
 
-
 impl DocumentsState {
-    pub fn empty(workspace_dirs: Vec<PathBuf>) -> Self {
+    pub async fn new(
+        files_jsonl_path: &String, 
+        workspace_dirs: Vec<PathBuf>
+    ) -> Self {
+        async fn docs_from_jsonl(files_jsonl_path: &String) -> Vec<Document> {
+            let mut docs = Vec::new();
+            for path in files_in_jsonl_w_path(files_jsonl_path).await {
+                let mut doc = Document::new(&path, None);
+                doc.in_jsonl = true;
+                docs.push(doc);
+            }
+            docs
+        }
         let watcher = RecommendedWatcher::new(|_|{}, Default::default()).unwrap();
+        let docs = docs_from_jsonl(files_jsonl_path).await;
+        let document_map = create_document_map_from_documents(&docs);
         Self {
             workspace_folders: Arc::new(Mutex::new(workspace_dirs)),
             workspace_files: Arc::new(Mutex::new(Vec::new())),
-            document_map: HashMap::new(),
+            document_map,
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
             cache_correction: Arc::new(HashMap::<String, String>::new()),
             cache_fuzzy: Arc::new(Vec::<String>::new()),
             fs_watcher: Arc::new(ARwLock::new(watcher)),
         }
+        
     }
 
     pub fn init_watcher(&mut self, gcx: Arc<ARwLock<GlobalContext>>) {
@@ -236,12 +271,15 @@ async fn enqueue_docs(
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };
-    if let Some(ref mut db) = *vec_db_module.lock().await {
-        db.vectorizer_enqueue_files(docs, false).await;
+
+    match *vec_db_module.lock().await {
+        Some(ref mut db) => db.vectorizer_enqueue_files(docs, false).await,
+        None => {}
     }
-    if let Some(ref mut ast) = *ast_module.lock().await {
-        ast.ast_indexer_enqueue_files(docs, true).await;
-    }
+    match *ast_module.lock().await {
+        Some(ref mut ast) => ast.ast_indexer_enqueue_files(docs, true).await,
+        None => {}
+    };
 }
 
 pub async fn enqueue_all_files_from_workspace_folders(
@@ -253,7 +291,7 @@ pub async fn enqueue_all_files_from_workspace_folders(
     let paths = retrieve_files_by_proj_folders(folders).await;
     info!("enqueue_all_files_from_workspace_folders found {} files => workspace_files", paths.len());
     
-    add_paths_to_document_map_if_not_present(gcx.clone(), &paths).await;
+    add_paths_to_document_map_if_not_present(gcx.clone(), &paths, true).await;
     let docs = gcx.read().await.documents_state.document_map.iter().map(|(_, v)|v.clone()).collect();
     
     enqueue_docs(gcx.clone(), &docs).await;
@@ -274,7 +312,7 @@ pub async fn on_did_open(
     let mut doc = Document::new(path, Some(language_id.clone()));
     doc.update_text(text);
     info!("on_did_open {}", crate::nicer_logs::last_n_chars(&path.display().to_string(), 30));
-    update_or_set_document_map(gcx.clone(), doc).await;
+    overwrite_or_create_document(gcx.clone(), doc).await;
     *gcx.write().await.documents_state.cache_dirty.lock().await = true;
 }
 
@@ -294,7 +332,7 @@ pub async fn on_did_change(
             info!("WARNING: file {} reported changed, but this binary has no record of this file.", crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30));
             let mut doc = Document::new(path, None);
             doc.update_text(text);
-            update_or_set_document_map(gcx.clone(), doc).await;
+            overwrite_or_create_document(gcx.clone(), doc).await;
             mark_dirty = true;
             gcx.read().await.documents_state.document_map.get(path).map(|x|x.clone())
         }
@@ -312,12 +350,15 @@ pub async fn on_did_change(
             (cx.vec_db.clone(), cx.ast_module.clone())
         };
 
-        if let Some(ref mut db) = *vec_db_module.lock().await {
-            db.vectorizer_enqueue_files(&vec![doc], false).await;
+        match *vec_db_module.lock().await {
+            Some(ref mut db) => db.vectorizer_enqueue_files(&vec![doc.clone()], false).await,
+            None => {}
         }
-        if let Some(ref mut ast) = *ast_module.lock().await {
-            ast.ast_indexer_enqueue_files(&vec![doc], false).await;
-        }
+
+        match *ast_module.lock().await {
+            Some(ref mut ast) => ast.ast_indexer_enqueue_files(&vec![doc.clone()], false).await,
+            None => {}
+        };
     }
     
     telemetry::snippets_collection::sources_changed(
@@ -339,13 +380,16 @@ pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };
-    
-    if let Some(ref mut db) = *vec_db_module.lock().await {
-        db.remove_file(path).await;
+
+    match *vec_db_module.lock().await {
+        Some(ref mut db) => db.remove_file(path).await,
+        None => {}
     }
-    if let Some(ref mut ast) = *ast_module.lock().await {
-        ast.remove_file(path).await;
-    }
+
+    match *ast_module.lock().await {
+        Some(ref mut ast) => ast.remove_file(path).await,
+        None => {}
+    };
 }
 
 pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
@@ -355,20 +399,22 @@ pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
         let _ = documents_state.fs_watcher.write().await.watch(&path.clone(), RecursiveMode::Recursive);
     }
     let paths = retrieve_files_by_proj_folders(vec![path.clone()]).await;
-    add_paths_to_document_map_if_not_present(gcx.clone(), &paths).await;
-    let docs = gcx.read().await.documents_state.document_map.iter().map(|(_, v)|v.clone()).collect();
+    add_paths_to_document_map_if_not_present(gcx.clone(), &paths, false).await;
+    let docs = gcx.read().await.documents_state.document_map.iter().map(|(_, v)| v.clone()).collect();
 
     let (mut vec_db_module, mut ast_module) = {
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };
 
-    if let Some(ref mut db) = *vec_db_module.lock().await {
-        db.vectorizer_enqueue_files(&docs, false).await;
+    match *vec_db_module.lock().await {
+        Some(ref mut db) => db.vectorizer_enqueue_files(&docs, false).await,
+        None => {}
     }
-    if let Some(ref mut ast) = *ast_module.lock().await {
-        ast.ast_indexer_enqueue_files(&docs, false).await;
-    }
+    match *ast_module.lock().await {
+        Some(ref mut ast) => ast.ast_indexer_enqueue_files(&docs, true).await,
+        None => {}
+    };
 }
 
 pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
@@ -405,7 +451,7 @@ pub async fn file_watcher_thread(event: Event, gcx: Weak<RwLock<GlobalContext>>)
         info!("EventKind::Create/Modify {:?}", event.paths);
         if let Some(gcx) = gcx.upgrade() {
             for doc in &docs {
-                update_or_set_document_map(gcx.clone(), doc.clone()).await;
+                overwrite_or_create_document(gcx.clone(), doc.clone()).await;
             }
             info!("=> enqueue {} of them", docs.len());
             if event.kind == EventKind::Create(CreateKind::File) {

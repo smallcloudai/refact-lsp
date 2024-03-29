@@ -9,7 +9,7 @@ use crate::ast::structs::FileReferencesResult;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_file::AtParamFilePath;
 use crate::call_validation::{ChatMessage, ContextFile};
-use crate::files_in_workspace::DocumentInfo;
+
 
 fn results2message(result: &FileReferencesResult) -> ChatMessage {
     let simplified_symbols: Vec<ContextFile> = result.symbols.iter().map(|x| {
@@ -67,18 +67,19 @@ impl AtCommand for AtAstFileSymbols {
             return Err("incorrect arguments".to_string());
         }
         let file_path = match args.get(0) {
-            Some(x) => x,
+            Some(x) => PathBuf::from(x),
             None => return Err("no file path".to_string()),
         };
 
         let binding = context.global_context.read().await;
         let x = match *binding.ast_module.lock().await {
             Some(ref ast) => {
-                let doc = match DocumentInfo::from_pathbuf(&PathBuf::from(file_path)).ok() {
-                    Some(doc) => doc,
-                    None => return Err("file not found".to_string())
+                let doc = match context.global_context.read().await.documents_state.document_map.get(&file_path).cloned() {
+                    Some(doc) => doc.clone(),
+                    None => return Err(format!("file not found: {}", file_path.display()))
                 };
-                match ast.get_file_symbols(&doc).await {
+                let doc_content = doc.read().await.clone();
+                match ast.get_file_symbols(&doc_content).await {
                     Ok(res) => Ok(results2message(&res)),
                     Err(err) => Err(err)
                 }
