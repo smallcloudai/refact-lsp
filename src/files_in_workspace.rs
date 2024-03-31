@@ -8,7 +8,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
 use ropey::Rope;
 use tokio::runtime::Runtime;
-use tokio::sync::{RwLock as ARwLock, Mutex as AMutex, RwLock};
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 
 use tracing::info;
 use walkdir::WalkDir;
@@ -130,7 +130,7 @@ impl DocumentsState {
             workspace_folders: Arc::new(Mutex::new(workspace_dirs)),
             workspace_files: Arc::new(Mutex::new(Vec::new())),
             document_map,
-            cache_dirty: Arc::new(AMutex::<bool>::new(false)),
+            cache_dirty: Arc::new(AMutex::<bool>::new(true)),
             cache_correction: Arc::new(HashMap::<String, String>::new()),
             cache_fuzzy: Arc::new(Vec::<String>::new()),
             fs_watcher: Arc::new(ARwLock::new(watcher)),
@@ -432,8 +432,8 @@ pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     enqueue_all_files_from_workspace_folders(gcx.clone()).await;
 }
 
-pub async fn file_watcher_thread(event: Event, gcx: Weak<RwLock<GlobalContext>>) {
-    async fn on_create_modify(gcx: Weak<RwLock<GlobalContext>>, event: Event) {
+pub async fn file_watcher_thread(event: Event, gcx: Weak<ARwLock<GlobalContext>>) {
+    async fn on_create_modify(gcx: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut docs = vec![];
         for path in &event.paths {
             if is_this_inside_blacklisted_dir(path) {
@@ -470,7 +470,7 @@ pub async fn file_watcher_thread(event: Event, gcx: Weak<RwLock<GlobalContext>>)
         }
     }
     
-    async fn on_remove(gcx: Weak<RwLock<GlobalContext>>, event: Event) {
+    async fn on_remove(gcx: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut never_mind = true;
         for p in &event.paths {
             never_mind &= is_this_inside_blacklisted_dir(&p);
