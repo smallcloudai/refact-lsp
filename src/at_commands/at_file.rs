@@ -166,9 +166,7 @@ fn chunks_into_context_file(
     vector_of_context_file
 }
 
-async fn files_cache_rebuild_as_needed(
-    global_context: Arc<ARwLock<GlobalContext>>
-) -> (Arc<HashMap<String, String>>, Arc<Vec<String>>) {
+async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, String>>, Arc<Vec<String>>) {
     let cache_dirty_arc: Arc<AMutex<bool>>;
     let mut cache_correction_arc: Arc<HashMap<String, String>>;
     let mut cache_fuzzy_arc: Arc<Vec<String>>;

@@ -109,14 +109,14 @@ impl AtCommand for AtAstLookupSymbols {
         let file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), &file_path.to_string()).await?;
         let binding = context.global_context.read().await;
         
-        let doc = match context.global_context.read().await.documents_state.document_map.get(&PathBuf::from(file_path)) {
-            Some(d) => d.clone(),
+        let mut doc = match context.global_context.read().await.documents_state.document_map.get(&PathBuf::from(file_path)) {
+            Some(d) => d.read().await.clone(),
             None => return Err("no document found".to_string()),
         };
-        doc.write().await.update_text_from_disk().await;
+        doc.update_text_from_disk().await;
         let x = match *binding.ast_module.lock().await {
             Some(ref mut ast) => {
-                match ast.search_references_by_cursor(&doc.read().await.clone(), &file_text, Point { row: row_idx, column: 0 }, 5, true).await {
+                match ast.search_references_by_cursor(&doc, &file_text, Point { row: row_idx, column: 0 }, 5, true).await {
                     Ok(res) => Ok(results2message(&res).await),
                     Err(err) => Err(err)
                 }

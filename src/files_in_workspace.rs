@@ -28,12 +28,6 @@ pub struct Document {
     pub in_jsonl: bool,
 }
 
-fn read_file_from_disk_block(path: &PathBuf) -> Result<Rope, String> {
-    std::fs::read_to_string(path)
-        .map(|x|Rope::from_str(&x))
-        .map_err(|e| format!("Failed to read file from disk: {}", e))
-}
-
 pub async fn read_file_from_disk(path: &PathBuf) -> Result<Rope, String> {
     tokio::fs::read_to_string(path).await
         .map(|x|Rope::from_str(&x))

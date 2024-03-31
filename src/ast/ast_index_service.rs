@@ -4,7 +4,6 @@ use std::iter::zip;
 use std::ops::Div;
 use std::sync::Arc;
 use std::time::SystemTime;
-use axum::routing::on;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 use tokio::task::JoinHandle;
@@ -21,19 +20,11 @@ pub enum EventType {
     Reset,
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AstEvent {
     pub docs: Vec<Document>,
     pub typ: EventType,
 }
-
-impl PartialEq for AstEvent {
-    fn eq(&self, other: &Self) -> bool {
-        self.docs.len() == other.docs.len() && self.typ == other.typ
-    }
-}
-
-impl Eq for AstEvent {}
 
 impl AstEvent {
     pub fn add_docs(docs: Vec<Document>) -> Self {

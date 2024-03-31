@@ -10,15 +10,13 @@ use serde_json::Value;
 use tokio::fs::File;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
-use tokio::sync::{RwLock as ARwLock, RwLock};
+use tokio::sync::RwLock as ARwLock;
 use crate::files_in_workspace::Document;
 
 use crate::global_context::GlobalContext;
 
 
-pub async fn enqueue_all_docs_from_jsonl(
-    gcx: Arc<ARwLock<GlobalContext>>,
-) {
+pub async fn enqueue_all_docs_from_jsonl(gcx: Arc<ARwLock<GlobalContext>>) {
     let docs = docs_in_jsonl(gcx.clone()).await;
     let (ast_module, vecdb_module) = {
         let cx_locked = gcx.read().await;
@@ -61,7 +59,7 @@ pub async fn parse_jsonl(jsonl_path: &String) -> Result<Vec<PathBuf>, String> {
     Ok(paths)
 }
 
-pub async fn docs_in_jsonl(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<Arc<RwLock<Document>>> {
+pub async fn docs_in_jsonl(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<Arc<ARwLock<Document>>> {
     let mut docs = vec![];
     for doc in global_context.read().await.documents_state.document_map.values() {
         if doc.read().await.in_jsonl {
