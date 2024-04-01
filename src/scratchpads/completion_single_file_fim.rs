@@ -125,7 +125,7 @@ impl ScratchpadAbstract for SingleFileFIM {
             let chat_message_maybe = match &self.ast_module {
                 Some(ast) => {
                     let doc = Document::new(&file_path, None);
-                    match ast.read().await.retrieve_cursor_symbols_by_declarations(
+                    match ast.write().await.retrieve_cursor_symbols_by_declarations(
                         &doc, &source, Point { row: pos.line as usize, column: pos.character as usize },
                         5, 5
                     ).await {

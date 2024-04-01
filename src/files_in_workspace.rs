@@ -294,8 +294,8 @@ pub async fn enqueue_all_files_from_workspace_folders(
     info!("enqueue_all_files_from_workspace_folders found {} files => workspace_files", paths.len());
 
     add_paths_to_document_map_if_not_present(gcx.clone(), &paths, true).await;
-    let docs = gcx.read().await.documents_state.document_map.iter().map(|(_, v)|v.clone()).collect();
-    let mut documents = vec![];
+    let docs = gcx.read().await.documents_state.document_map.iter().map(|(_, v)|v.clone()).collect::<Vec<_>>();
+    let mut documents: Vec<Document> = vec![];
     for d in docs {
         documents.push(d.read().await.clone());
     }
@@ -318,7 +318,7 @@ pub async fn enqueue_all_files_from_workspace_folders(
         None => {}
     };
 
-    docs.len() as i32
+    documents.len() as i32
 }
 
 pub async fn on_workspaces_init(gcx: Arc<ARwLock<GlobalContext>>) -> i32 {
@@ -398,7 +398,7 @@ pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     gcx.write().await.documents_state.document_map.remove(path);
     *gcx.write().await.documents_state.cache_dirty.lock().await = true;
 
-    let (mut vec_db_module, mut ast_module) = {
+    let (vec_db_module, ast_module) = {
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };
@@ -409,10 +409,9 @@ pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     }
 
     match &ast_module {
-        Some(ast) => ast.read().await.remove_file(path).await,
+        Some(ast) => ast.write().await.remove_file(path).await,
         None => {}
-    };
-}
+    };}
 
 pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     {
@@ -434,11 +433,11 @@ pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     };
 
     match *vec_db_module.lock().await {
-        Some(ref mut db) => db.vectorizer_enqueue_files(&documents, false).await,
+        Some(ref mut db) => db.vectorizer_enqueue_files(&docs, false).await,
         None => {}
     }
     match &ast_module {
-        Some(ast) => ast.read().await.ast_indexer_enqueue_files(&documents, false).await,
+        Some(ast) => ast.read().await.ast_indexer_enqueue_files(&docs, false).await,
         None => {}
     };
 }

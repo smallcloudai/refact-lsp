@@ -71,11 +71,11 @@ impl AstModule {
 
     pub async fn remove_file(&mut self, path: &PathBuf) {
         // TODO: will not work if the same file is in the indexer queue
-        let _ = self.ast_index.write().await.remove(path);
+        let _ = self.ast_index.write().await.remove(&Document::new(path, None));
     }
 
     pub async fn clear_index(&mut self) {
-        self.ast_index.write().await.clear_index().await;
+        self.ast_index.write().await.clear_index();
     }
 
     pub async fn search_by_name(
@@ -108,7 +108,7 @@ impl AstModule {
         request_symbol_type: RequestSymbolType,
     ) -> Result<AstQuerySearchResult, String> {
         let t0 = std::time::Instant::now();
-        match self.ast_index.read().await.search_by_content(query.as_str(), request_symbol_type, None, None) {
+        match self.ast_index.read().await.search_by_content(query.as_str(), request_symbol_type, None, None).await {
             Ok(results) => {
                 for r in results.iter() {
                     let last_30_chars = crate::nicer_logs::last_n_chars(&r.symbol_declaration.name, 30);

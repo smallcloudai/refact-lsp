@@ -121,7 +121,7 @@ impl AtCommand for AtAstLookupSymbols {
         let ast = context.global_context.read().await.ast_module.clone();
         let x = match &ast {
             Some(ast) => {
-                match ast.read().await.retrieve_cursor_symbols_by_declarations(
+                match ast.write().await.retrieve_cursor_symbols_by_declarations(
                     &doc, &file_text, Point { row: row_idx, column: 0 }, 5,  5
                 ).await {
                     Ok(res) => Ok(results2message(&res).await),

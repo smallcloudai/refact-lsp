@@ -585,7 +585,7 @@ impl AstIndex {
     }
 
     #[allow(unused)]
-    pub fn get_file_paths(&self) -> Vec<Url> {
+    pub fn get_file_paths(&self) -> Vec<PathBuf> {
         self.symbols_search_index.iter().map(|(path, _)| path.clone()).collect()
     }
 
