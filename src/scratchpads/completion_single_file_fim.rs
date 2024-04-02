@@ -12,8 +12,9 @@ use tracing::{info, error};
 use tree_sitter::Point;
 
 use crate::ast::ast_module::AstModule;
+use crate::at_commands::at_ast_lookup_symbols::results2message;
 // use crate::ast::comments_wrapper::{get_language_id_by_filename, wrap_comments};
-use crate::call_validation::{CodeCompletionPost, SamplingParameters};
+use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::files_in_workspace::Document;
@@ -71,12 +72,34 @@ impl SingleFileFIM {
     }
 }
 
+fn add_context_to_prompt(prompt: &String, postprocessed_messages: &Vec<ContextFile>) -> String {
+    let mut context_files = vec![];
+    for m in postprocessed_messages {
+        let s = format!(
+            "{}{}{}{}",
+            "<file_sep>",
+            m.file_name,
+            "\n",
+            m.file_content
+        );
+        context_files.push(s);
+    }
+    if !context_files.is_empty() {
+        context_files.insert(0, "<repo_name>default_repo".to_string());
+        context_files.push("<file_sep>".to_string())
+    }
+    format!(
+        "{}{}",
+        context_files.join(""),
+        prompt,
+    )
+}
 
 #[async_trait]
 impl ScratchpadAbstract for SingleFileFIM {
     fn apply_model_adaptation_patch(
         &mut self,
-        patch: &serde_json::Value,
+        patch: &Value,
     ) -> Result<(), String> {
         // That will work for some models (starcoder) without patching
         self.fim_prefix = patch.get("fim_prefix").and_then(|x| x.as_str()).unwrap_or("<fim_prefix>").to_string();
@@ -84,6 +107,9 @@ impl ScratchpadAbstract for SingleFileFIM {
         self.fim_middle = patch.get("fim_middle").and_then(|x| x.as_str()).unwrap_or("<fim_middle>").to_string();
         self.t.eot = patch.get("eot").and_then(|x| x.as_str()).unwrap_or("<|endoftext|>").to_string();
         self.t.eos = patch.get("eos").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        info!("patch: {}", patch);
+        self.t.supports_context = patch.get("supports_context").and_then(|x| x.as_bool()).unwrap_or(false);
+        self.t.n_ctx = patch.get("n_ctx").and_then(|x| x.as_i64()).map(|x|x as i32).unwrap_or(0);        
         self.t.assert_one_token(&self.fim_prefix.as_str())?;
         self.t.assert_one_token(&self.fim_suffix.as_str())?;
         self.t.assert_one_token(&self.fim_middle.as_str())?;
@@ -120,37 +146,6 @@ impl ScratchpadAbstract for SingleFileFIM {
         let mut before_iter = text.lines_at(pos.line as usize).reversed();
         let mut after_iter = text.lines_at(pos.line as usize + 1);
         let mut tokens_used = 0;
-        let ast_messages: Vec<crate::call_validation::ChatMessage> = if true /*self.post.use_ast*/ {
-            let chat_message_maybe = match &self.ast_module {
-                Some(ast) => {
-                    let doc = Document::new(&file_path, None);
-                    match ast.write().await.retrieve_cursor_symbols_by_declarations(
-                        &doc, &source, Point { row: pos.line as usize, column: pos.character as usize },
-                        5, 5
-                    ).await {
-                        Ok(res) => Ok(crate::at_commands::at_ast_lookup_symbols::results2message(&res).await),
-                        Err(err) => Err(err)
-                    }
-                }
-                None => { Err("ast not initialized".to_string()) }
-            };
-            match chat_message_maybe {
-                Ok(context_message) => { vec![context_message] }
-                Err(err) => { error!("can't fetch ast results: {}", err); vec![] }
-            }
-        } else {
-            vec![]
-        };
-        info!("ast_messages {:?}", ast_messages);
-        let context_ctx_this_message = 1024;  // FIXME: calculate better, subtract from limit
-        let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
-            self.global_context.clone(),
-            ast_messages,
-            self.t.tokenizer.clone(),
-            context_ctx_this_message,
-        ).await;
-        self.context_used = json!(postprocessed_messages);
-        let extra_context = String::new();
 
         let mut before_line = before_iter.next();
 
@@ -195,15 +190,15 @@ impl ScratchpadAbstract for SingleFileFIM {
             before_line = before_iter.next();
             after_line = after_iter.next();
         }
+        let before = before.into_iter().rev().collect::<Vec<_>>().join("");
         info!("single file FIM prompt {} tokens used < limit {}", tokens_used, limit);
-        let prompt: String;
+        let mut prompt: String;
         if self.order == "PSM" {
             prompt = format!(
-                "{}{}{}{}{}{}{}{}{}",
+                "{}{}{}{}{}{}{}{}",
                 self.t.eos,
                 self.fim_prefix,
-                extra_context,
-                before.into_iter().rev().collect::<Vec<_>>().join(""),
+                before,
                 cursor_line1,
                 self.fim_suffix,
                 cursor_line2,
@@ -212,20 +207,55 @@ impl ScratchpadAbstract for SingleFileFIM {
             );
         } else if self.order == "SPM" {
             prompt = format!(
-                "{}{}{}{}{}{}{}{}{}",
+                "{}{}{}{}{}{}{}{}",
                 self.t.eos,
                 self.fim_suffix,
-                extra_context,
                 cursor_line2,
                 after,
                 self.fim_prefix,
-                before.into_iter().rev().collect::<Vec<_>>().join(""),
+                before,
                 cursor_line1,
                 self.fim_middle,
             );
         } else {
             return Err(format!("order \"{}\" not recognized", self.order));
         }
+        let prompt_tokens_before_context = self.t.count_tokens(prompt.as_str())?;
+        
+        if self.t.supports_context && self.post.use_ast {
+            let ast_messages= match &self.ast_module {
+                Some(ast) => {
+                    let doc = Document::new(&file_path, None);
+                    match ast.write().await.retrieve_cursor_symbols_by_declarations(
+                        &doc, &source, Point { row: pos.line as usize, column: pos.character as usize },
+                        5, 5
+                    ).await {
+                        Ok(res) => vec![results2message(&res).await],
+                        Err(err) => {
+                            error!("can't fetch ast results: {}", err);
+                            vec![]
+                        }
+                    }
+                }
+                None => {
+                    error!("ast not initialized");
+                    vec![]
+                }
+            };
+            
+            let context_ctx_this_message = (self.t.n_ctx - prompt_tokens_before_context).min(1024);
+            info!("tokens for context available: {}", context_ctx_this_message);
+            let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
+                self.global_context.clone(),
+                ast_messages,
+                self.t.tokenizer.clone(),
+                context_ctx_this_message as usize,
+            ).await;
+
+            prompt = add_context_to_prompt(&prompt, &postprocessed_messages);
+            self.context_used = json!(postprocessed_messages);
+        }
+        
         if DEBUG {
             info!("cursor position\n{:?}", self.post.inputs.cursor);
             info!("prompt\n{}", prompt);
