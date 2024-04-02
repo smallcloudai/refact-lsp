@@ -124,7 +124,7 @@ impl AtCommand for AtAstLookupSymbols {
                 match ast.write().await.retrieve_cursor_symbols_by_declarations(
                     &doc, &file_text, Point { row: row_idx, column: 0 }, 5,  5
                 ).await {
-                    Ok(res) => Ok(results2message(&res).await),
+                    Ok((res, _)) => Ok(results2message(&res).await),
                     Err(err) => Err(err)
                 }
             }

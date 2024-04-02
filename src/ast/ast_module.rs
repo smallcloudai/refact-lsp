@@ -16,6 +16,7 @@ use crate::ast::treesitter::structs::SymbolType;
 use crate::files_in_jsonl::docs_in_jsonl;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
+use crate::nicer_logs::last_n_chars;
 
 pub struct AstModule {
     ast_index_service: Arc<AMutex<AstIndexService>>,
@@ -173,7 +174,7 @@ impl AstModule {
         cursor: Point,
         top_n_near_cursor: usize,
         top_n_usage_for_each_decl: usize,
-    ) -> Result<AstCursorSearchResult, String> {
+    ) -> Result<(AstCursorSearchResult, Vec<String>), String> {
         let t0 = std::time::Instant::now();
         let (cursor_usages, declarations, usages) = self.ast_index.read().await.retrieve_cursor_symbols_by_declarations(
             doc,
@@ -182,12 +183,16 @@ impl AstModule {
             top_n_near_cursor,
             top_n_usage_for_each_decl
         ).await;
+        for r in cursor_usages.iter() {
+            let last_30_chars = last_n_chars(&r.name, 30);
+            info!("found {last_30_chars}");
+        }
         for r in declarations.iter() {
-            let last_30_chars = crate::nicer_logs::last_n_chars(&r.name, 30);
+            let last_30_chars = last_n_chars(&r.name, 30);
             info!("found {last_30_chars}");
         }
         for r in usages.iter() {
-            let last_30_chars = crate::nicer_logs::last_n_chars(&r.name, 30);
+            let last_30_chars = last_n_chars(&r.name, 30);
             info!("found {last_30_chars}");
         }
         let language = get_language_id_by_filename(&doc.path);
@@ -212,38 +217,39 @@ impl AstModule {
         info!("ast retrieve_cursor_symbols_by_declarations time {:.3}s, \
             found {} declarations, {} declaration usages, {} by name",
             t0.elapsed().as_secs_f32(), declarations.len(), usages.len(), matched_by_name_symbols.len());
-        Ok(
-            AstCursorSearchResult {
-                query_text: "".to_string(),
-                file_path: doc.path.clone(),
-                cursor,
-                cursor_symbols: cursor_usages
-                    .iter()
-                    .map(|x| SymbolsSearchResultStruct {
-                        symbol_declaration: x.clone(),
-                        content: x.get_content_blocked().unwrap_or_default(),
-                        sim_to_query: -1.0,
-                    })
-                    .collect::<Vec<SymbolsSearchResultStruct>>(),
-                declaration_symbols: declarations
-                    .iter()
-                    .map(|x| SymbolsSearchResultStruct {
-                        symbol_declaration: x.clone(),
-                        content: x.get_content_blocked().unwrap_or_default(),
-                        sim_to_query: -1.0,
-                    })
-                    .collect::<Vec<SymbolsSearchResultStruct>>(),
-                declaration_usage_symbols: usages
-                    .iter()
-                    .map(|x| SymbolsSearchResultStruct {
-                        symbol_declaration: x.clone(),
-                        content: x.get_content_blocked().unwrap_or_default(),
-                        sim_to_query: -1.0,
-                    })
-                    .collect::<Vec<SymbolsSearchResultStruct>>(),
-                matched_by_name_symbols: matched_by_name_symbols
-            }
-        )
+        
+        let was_looking_for = cursor_usages.iter().chain(declarations.iter()).chain(usages.iter()).map(|x|last_n_chars(&x.name, 30)).collect::<Vec<_>>();
+        let search_result = AstCursorSearchResult {
+            query_text: "".to_string(),
+            file_path: doc.path.clone(),
+            cursor,
+            cursor_symbols: cursor_usages
+                .iter()
+                .map(|x| SymbolsSearchResultStruct {
+                    symbol_declaration: x.clone(),
+                    content: x.get_content_blocked().unwrap_or_default(),
+                    sim_to_query: -1.0,
+                })
+                .collect::<Vec<SymbolsSearchResultStruct>>(),
+            declaration_symbols: declarations
+                .iter()
+                .map(|x| SymbolsSearchResultStruct {
+                    symbol_declaration: x.clone(),
+                    content: x.get_content_blocked().unwrap_or_default(),
+                    sim_to_query: -1.0,
+                })
+                .collect::<Vec<SymbolsSearchResultStruct>>(),
+            declaration_usage_symbols: usages
+                .iter()
+                .map(|x| SymbolsSearchResultStruct {
+                    symbol_declaration: x.clone(),
+                    content: x.get_content_blocked().unwrap_or_default(),
+                    sim_to_query: -1.0,
+                })
+                .collect::<Vec<SymbolsSearchResultStruct>>(),
+            matched_by_name_symbols: matched_by_name_symbols
+        };
+        Ok((search_result, was_looking_for))
     }
 
     pub async fn file_markup(

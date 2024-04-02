@@ -20,6 +20,9 @@ use crate::files_in_workspace::{Document, read_file_from_disk};
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
 
 
+const DEBUG: bool = false;
+
+
 #[derive(Debug)]
 pub struct File {
     pub markup: FileASTMarkup,
@@ -36,6 +39,24 @@ pub struct FileLine {
     pub take: bool,
 }
 
+pub fn context_to_fim_debug_page(postprocessed_messages: &Vec<ContextFile>, was_looking_for: &Vec<String>) -> Value {
+    let attached_files: Vec<_> = postprocessed_messages.iter().map(|x| {
+        json!({
+            "file_name": x.file_name.clone(),
+            "file_content": x.file_content.clone(),
+            "line1": x.line1.clone(),
+            "line2": x.line2.clone(),
+        })
+    }).collect();
+    
+    let mut res = json!({
+        "was_looking_for": was_looking_for.clone(),
+    });
+    if let Some(obj) = res.as_object_mut() {
+        obj.insert("attached_files".to_string(), json!(attached_files));
+    }
+    res
+}
 
 pub async fn postprocess_rag_stage1(
     global_context: Arc<ARwLock<GlobalContext>>,
@@ -94,7 +115,9 @@ pub async fn postprocess_rag_stage1(
     }
     let colorize_if_more_useful = |linevec: &mut Vec<Arc<FileLine>>, line1: usize, line2: usize, color: &String, useful: f32|
     {
-        info!("    colorize_if_more_useful {}..{} <= color {:?} useful {}", line1, line2, color, useful);
+        if DEBUG {
+            info!("    colorize_if_more_useful {}..{} <= color {:?} useful {}", line1, line2, color, useful);
+        }
         for i in line1 .. line2 {
             if i >= linevec.len() {
                 warn!("    {} has faulty range {}..{}", color, line1, line2);
@@ -182,7 +205,9 @@ pub async fn postprocess_rag_stage1(
                 }
             }
         }
-        info!("        {}..{} ({} affected) <= subsymbol {:?} downgrade {}", changes_cnt, line1_base0, line2_base0, subsymbol, downgrade_coef);
+        if DEBUG {
+            info!("        {}..{} ({} affected) <= subsymbol {:?} downgrade {}", changes_cnt, line1_base0, line2_base0, subsymbol, downgrade_coef);
+        }
     };
     for linevec in lines_in_files.values_mut() {
         if linevec.len() == 0 {
@@ -191,7 +216,9 @@ pub async fn postprocess_rag_stage1(
         let fref = linevec[0].fref.clone();
         info!("degrading body of symbols in {}", fref.file_name);
         for s in fref.markup.symbols_sorted_by_path_len.iter() {
-            info!("    {} {:?} {}-{}", s.symbol_path, s.symbol_type, s.full_range.start_point.row, s.full_range.end_point.row);
+            if DEBUG {
+                info!("    {} {:?} {}-{}", s.symbol_path, s.symbol_type, s.full_range.start_point.row, s.full_range.end_point.row);
+            }
             if s.definition_range.end_byte != 0 {
                 // decl  void f() {
                 // def      int x = 5;
@@ -279,15 +306,17 @@ pub async fn postprocess_at_results2(
         }
     }
     info!("{} lines in {} files  =>  tokens {} < {} tokens limit  =>  {} lines", lines_by_useful.len(), lines_in_files.len(), tokens_count, tokens_limit, lines_take_cnt);
-    for linevec in lines_in_files.values() {
-        for lineref in linevec.iter() {
-            info!("{} {}:{:04} {:>7.3} {}",
+    if DEBUG {
+        for linevec in lines_in_files.values() {
+            for lineref in linevec.iter() {
+                info!("{} {}:{:04} {:>7.3} {}",
                 if lineref.take { "take" } else { "dont" },
                 crate::nicer_logs::last_n_chars(&lineref.fref.file_name, 30),
                 lineref.line_n,
                 lineref.useful,
                 crate::nicer_logs::first_n_chars(&lineref.line_content, 20)
             );
+            }
         }
     }
 
@@ -319,7 +348,9 @@ pub async fn postprocess_at_results2(
         if last_line > prev_line + 1 {
             out.push_str("...\n");
         }
-        info!("file {:?}\n{}", fname, out);
+        if DEBUG {
+            info!("file {:?}\n{}", fname, out);
+        }
         merged.push(ContextFile {
             file_name: fname,
             file_content: out,

@@ -13,13 +13,13 @@ use tree_sitter::Point;
 
 use crate::ast::ast_module::AstModule;
 use crate::at_commands::at_ast_lookup_symbols::results2message;
-// use crate::ast::comments_wrapper::{get_language_id_by_filename, wrap_comments};
 use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::files_in_workspace::Document;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_utils_rag::context_to_fim_debug_page;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
 
@@ -109,7 +109,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         self.t.eos = patch.get("eos").and_then(|x| x.as_str()).unwrap_or("").to_string();
         info!("patch: {}", patch);
         self.t.supports_context = patch.get("supports_context").and_then(|x| x.as_bool()).unwrap_or(false);
-        self.t.n_ctx = patch.get("n_ctx").and_then(|x| x.as_i64()).map(|x|x as i32).unwrap_or(0);        
+        self.t.n_ctx = patch.get("n_ctx").and_then(|x| x.as_i64()).map(|x|x as i32).unwrap_or(0);
         self.t.assert_one_token(&self.fim_prefix.as_str())?;
         self.t.assert_one_token(&self.fim_suffix.as_str())?;
         self.t.assert_one_token(&self.fim_middle.as_str())?;
@@ -221,25 +221,25 @@ impl ScratchpadAbstract for SingleFileFIM {
             return Err(format!("order \"{}\" not recognized", self.order));
         }
         let prompt_tokens_before_context = self.t.count_tokens(prompt.as_str())?;
-        
+
         if self.t.supports_context && self.post.use_ast {
-            let ast_messages= match &self.ast_module {
+            let (ast_messages, was_looking_for) = match &self.ast_module {
                 Some(ast) => {
                     let doc = Document::new(&file_path, None);
                     match ast.write().await.retrieve_cursor_symbols_by_declarations(
                         &doc, &source, Point { row: pos.line as usize, column: pos.character as usize },
                         5, 5
                     ).await {
-                        Ok(res) => vec![results2message(&res).await],
+                        Ok((res, was_looking_for)) => (vec![results2message(&res).await], was_looking_for),
                         Err(err) => {
                             error!("can't fetch ast results: {}", err);
-                            vec![]
+                            (vec![], vec![])
                         }
                     }
                 }
                 None => {
                     error!("ast not initialized");
-                    vec![]
+                    (vec![], vec![])
                 }
             };
             
@@ -253,9 +253,9 @@ impl ScratchpadAbstract for SingleFileFIM {
             ).await;
 
             prompt = add_context_to_prompt(&prompt, &postprocessed_messages);
-            self.context_used = json!(postprocessed_messages);
+            self.context_used = context_to_fim_debug_page(&postprocessed_messages, &was_looking_for);
         }
-        
+
         if DEBUG {
             info!("cursor position\n{:?}", self.post.inputs.cursor);
             info!("prompt\n{}", prompt);
@@ -268,7 +268,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         &mut self,
         choices: Vec<String>,
         stopped: Vec<bool>
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<Value, String> {
         let json_choices = choices.iter().enumerate().map(|(i, x)| {
             let (mut cc, mut finished) = cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
             finished |= stopped[i];
@@ -282,7 +282,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                 self.data4cache.completion0_text = cc.clone();
                 self.data4cache.completion0_finish_reason = finish_reason.clone();
             }
-            serde_json::json!({
+            json!({
                 "index": i,
                 "code_completion": cc,
                 "finish_reason": finish_reason.clone(),
@@ -293,7 +293,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         }
 
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache);
-        return Ok(serde_json::json!(
+        return Ok(json!(
             {
                 "choices": json_choices,
                 "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
@@ -308,7 +308,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         delta: String,
         stop_toks: bool,
         stop_length: bool,
-    ) -> Result<(serde_json::Value, bool), String> {
+    ) -> Result<(Value, bool), String> {
         let mut finished;
         let json_choices;
         // info!("XXXXX delta: {:?}", delta);
@@ -324,14 +324,14 @@ impl ScratchpadAbstract for SingleFileFIM {
                 self.data4cache.completion0_finish_reason = if finished { "stop".to_string() } else { "".to_string() };
             }
             self.data4cache.completion0_text.push_str(&s);
-            json_choices = serde_json::json!([{
+            json_choices = json!([{
                 "index": 0,
                 "code_completion": s,
                 "finish_reason": if finished { serde_json::Value::String("stop".to_string()) } else { serde_json::Value::Null },
             }]);
         } else {
             assert!(stop_length);
-            json_choices = serde_json::json!([{
+            json_choices = json!([{
                 "index": 0,
                 "code_completion": "",
                 "finish_reason": "length"
@@ -340,7 +340,7 @@ impl ScratchpadAbstract for SingleFileFIM {
             finished = true;
         }
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache);
-        let ans = serde_json::json!({
+        let ans = json!({
             "choices": json_choices,
             "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
         });
