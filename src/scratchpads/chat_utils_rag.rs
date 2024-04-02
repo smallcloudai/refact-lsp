@@ -211,19 +211,21 @@ pub async fn postprocess_rag_stage1(
     }
 
     // 6. A-la mathematical morphology, removes one-line holes
-    for linevec in lines_in_files.values_mut() {
-        let mut useful_copy = linevec.iter().map(|x| x.useful).collect::<Vec<f32>>();
-        for i in 1 .. linevec.len() - 1 {
-            let l = linevec[i-1].useful;
-            let m = linevec[i  ].useful;
-            let r = linevec[i+1].useful;
-            let both_l_and_r_support = l.min(r);
-            useful_copy[i] = m.max(both_l_and_r_support);
-        }
-        for i in 0 .. linevec.len() {
-            let lineref_mut: *mut FileLine = Arc::as_ptr(linevec.get(i).unwrap()) as *mut FileLine;
-            unsafe {
-                (*lineref_mut).useful = useful_copy[i];
+    if close_small_gaps {
+        for linevec in lines_in_files.values_mut() {
+            let mut useful_copy = linevec.iter().map(|x| x.useful).collect::<Vec<f32>>();
+            for i in 1 .. linevec.len() - 1 {
+                let l = linevec[i-1].useful;
+                let m = linevec[i  ].useful;
+                let r = linevec[i+1].useful;
+                let both_l_and_r_support = l.min(r);
+                useful_copy[i] = m.max(both_l_and_r_support);
+            }
+            for i in 0 .. linevec.len() {
+                let lineref_mut: *mut FileLine = Arc::as_ptr(linevec.get(i).unwrap()) as *mut FileLine;
+                unsafe {
+                    (*lineref_mut).useful = useful_copy[i];
+                }
             }
         }
     }
