@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstance, AstSymbolInstanceArc, FunctionDeclaration};
+use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstanceArc, FunctionDeclaration};
 use crate::ast::treesitter::structs::SymbolType;
 
 pub struct FilePathIterator {
@@ -141,7 +141,7 @@ fn find_decl_by_name_for_single_path(
         let search_q = (
             name.to_string(),
             current_parent_guid.clone(),
-            guid_by_symbols.to_file_path().unwrap_or_default().to_str().unwrap_or_default().to_string()
+            file_path.to_str().unwrap_or_default().to_string()
         );
         if let Some(s) = extra_search_index
             .get(&search_q)

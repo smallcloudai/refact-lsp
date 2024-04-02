@@ -19,7 +19,7 @@ use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstanceArc, SymbolI
 use crate::ast::treesitter::language_id::LanguageId;
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::structs::SymbolType;
-use crate::ast::usages_declarations_merger::{FilePathIterator, find_decl_by_caller_guid};
+use crate::ast::usages_declarations_merger::{FilePathIterator, find_decl_by_name, find_decl_by_caller_guid};
 use crate::files_in_workspace::{Document, read_file_from_disk, read_file_from_disk_block};
 
 
@@ -712,7 +712,7 @@ impl AstIndex {
                 let x_ref = x.read().expect("the data might be broken");
                 ((x_ref.name().to_string(),
                   x_ref.parent_guid().clone().unwrap_or_default(),
-                  x_ref.file_url().to_file_path().unwrap_or_default().to_str().unwrap().to_string()),
+                  x_ref.file_path().to_str().unwrap_or_default().to_string()),
                  x.clone())
             })
             .collect();

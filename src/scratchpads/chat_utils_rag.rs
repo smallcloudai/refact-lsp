@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 
-use crate::ast::ast_module::AstModule;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 
@@ -19,7 +18,6 @@ use crate::ast::structs::FileASTMarkup;
 use crate::files_in_workspace::{Document, read_file_from_disk};
 
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
-const SMALL_GAP_LINES: usize = 10;  // lines
 
 
 #[derive(Debug)]

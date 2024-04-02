@@ -1,5 +1,4 @@
 use md5;
-use ropey::Rope;
 use tracing::info;
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 

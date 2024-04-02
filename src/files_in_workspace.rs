@@ -269,7 +269,7 @@ async fn enqueue_docs(
     for d in docs {
         documents.push(d.read().await.clone())
     }
-    let (mut vec_db_module, mut ast_module) = {
+    let (vec_db_module, ast_module) = {
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };
@@ -300,7 +300,7 @@ pub async fn enqueue_all_files_from_workspace_folders(
         documents.push(d.read().await.clone());
     }
 
-    let (mut vec_db_module, mut ast_module) = {
+    let (vec_db_module, ast_module) = {
         let cx = gcx.write().await;
         *cx.documents_state.cache_dirty.lock().await = true;
         let workspace_files = &mut cx.documents_state.workspace_files.lock().unwrap();
@@ -427,7 +427,7 @@ pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
         docs.push(d.read().await.clone());
     }
 
-    let (mut vec_db_module, mut ast_module) = {
+    let (vec_db_module, ast_module) = {
         let cx = gcx.write().await;
         (cx.vec_db.clone(), cx.ast_module.clone())
     };

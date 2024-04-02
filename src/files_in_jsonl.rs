@@ -104,7 +104,7 @@ async fn add_or_set_in_jsonl(
     paths: Vec<PathBuf>,
 ) {
     let mut cx = gcx.write().await;
-    let mut docs_map = &mut cx.documents_state.document_map;
+    let docs_map = &mut cx.documents_state.document_map;
     for p in paths {
         if let Some(doc) = docs_map.get_mut(&p) {
             doc.write().await.in_jsonl = true;
