@@ -1,7 +1,7 @@
 # Stage 1: Builder Stage
 FROM rust:1.76-alpine AS builder
 
-RUN apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++
+RUN apk add --no-cache git clang lld musl-dev nodejs npm openssl-dev pkgconfig g++ protobuf-dev
 
 WORKDIR /usr/src/refact-lsp
 
