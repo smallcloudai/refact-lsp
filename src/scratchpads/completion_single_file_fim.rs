@@ -5,22 +5,24 @@ use std::vec;
 
 use async_trait::async_trait;
 use ropey::Rope;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex as AMutex;
-use tracing::info;
+use tokio::sync::RwLock as ARwLock;
+use tracing::{info, error};
 use tree_sitter::Point;
 
 use crate::ast::ast_module::AstModule;
 use crate::ast::comments_wrapper::{get_language_id_by_filename, wrap_comments};
-use crate::call_validation::CodeCompletionPost;
-use crate::call_validation::SamplingParameters;
+use crate::call_validation::{CodeCompletionPost, SamplingParameters};
+use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::files_in_workspace::DocumentInfo;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
+
 
 const DEBUG: bool = false;
 
@@ -32,9 +34,11 @@ pub struct SingleFileFIM {
     pub fim_prefix: String,
     pub fim_suffix: String,
     pub fim_middle: String,
+    pub context_used: serde_json::Value,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
     pub ast_module: Arc<AMutex<Option<AstModule>>>,
+    pub global_context: Arc<ARwLock<GlobalContext>>,
 }
 
 impl SingleFileFIM {
@@ -45,12 +49,17 @@ impl SingleFileFIM {
         cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
         tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
         ast_module: Arc<AMutex<Option<AstModule>>>,
+        global_context: Arc<ARwLock<GlobalContext>>,
     ) -> Self {
         let data4cache = completion_cache::CompletionSaveToCache::new(cache_arc, &post);
         let data4snippet = snippets_collection::SaveSnippet::new(tele_storage, &post);
         SingleFileFIM { t: HasTokenizerAndEot::new(tokenizer), post, order, fim_prefix: String::new(),
-            fim_suffix: String::new(), fim_middle: String::new(), data4cache, data4snippet,
-            ast_module
+            fim_suffix: String::new(), fim_middle: String::new(),
+            context_used: json!([]),
+            data4cache,
+            data4snippet,
+            ast_module,
+            global_context,
         }
     }
 
@@ -113,25 +122,40 @@ impl ScratchpadAbstract for SingleFileFIM {
         let mut after_iter = text.lines_at(pos.line as usize + 1);
         let mut extra_context = String::new();
         let mut tokens_used = 0;
-        if self.post.use_ast {
-            let (ast_context, ast_tokens) = match *self.ast_module.lock().await {
+        let ast_messages: Vec<crate::call_validation::ChatMessage> = if self.post.use_ast {
+            let chat_message_maybe = match *self.ast_module.lock().await {
                 Some(ref mut ast) => {
-                    ast_search(
-                        ast,
-                        &file_path,
-                        &source,
-                        Point { row: pos.line as usize, column: pos.character as usize },
-                        self.t.clone(),
-                        (limit as f32 * 0.5) as usize,
-                    ).await
+                    let doc_info = match DocumentInfo::from_pathbuf(&file_path) {
+                        Ok(doc) => doc,
+                        Err(err) => {
+                            error!("can't get doc info for {}: {}", file_path.display(), err);
+                            return Err(err.to_string());
+                        }
+                    };
+                    match ast.search_references_by_cursor(
+                        &doc_info, &source, Point { row: pos.line as usize, column: pos.character as usize }, 5, true
+                    ).await {
+                        Ok(res) => Ok(crate::at_commands::at_ast_lookup_symbols::results2message(&res).await),
+                        Err(err) => Err(err)
+                    }
                 }
-                None => (String::new(), 0)
+                None => { Err("ast not initialized".to_string()) }
             };
-            if ast_tokens > 0 {
-                extra_context.push_str(ast_context.as_str());
-                tokens_used += ast_tokens;
+            match chat_message_maybe {
+                Ok(context_message) => { vec![context_message] }
+                Err(err) => { error!("can't fetch ast results: {}", err); vec![] }
             }
-        }
+        } else {
+            vec![]
+        };
+        let context_ctx_this_message = 1024;  // FIXME: calculate better, subtract from limit
+        let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results(
+            self.global_context.clone(),
+            ast_messages,
+            self.t.tokenizer.clone(),
+            context_ctx_this_message,
+        ).await;
+        self.context_used = json!(postprocessed_messages);
 
         let mut before_line = before_iter.next();
 
@@ -249,6 +273,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                 "choices": json_choices,
                 "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
                 "model": self.post.model.clone(),
+                "context": self.context_used,
             }
         ));
     }
@@ -302,94 +327,97 @@ impl ScratchpadAbstract for SingleFileFIM {
     }
 }
 
-async fn ast_search(
-    ast_module: &mut AstModule,
-    file_path: &PathBuf,
-    code: &str,
-    cursor: Point,
-    tokenizer: HasTokenizerAndEot,
-    max_context_size: usize
-) -> (String, i32){
-    let doc = match DocumentInfo::from_pathbuf(file_path).ok() {
-        Some(doc) => doc,
-        None => return ("".to_string(), 0)
-    };
-    let lang = get_language_id_by_filename(&doc.get_path()).unwrap_or_default();
-    let declarations_str = wrap_comments("Useful declarations:\n ", &lang);
-    let references_str = wrap_comments("Useful references:\n ", &lang);
+// async fn ast_search(
+//     ast_module: &mut AstModule,
+//     file_path: &PathBuf,
+//     code: &str,
+//     cursor: Point,
+//     // tokenizer: HasTokenizerAndEot,
+//     max_context_size: usize
+// ) -> (String, i32)
+// {
+//     let doc = match DocumentInfo::from_pathbuf(file_path).ok() {
+//         Some(doc) => doc,
+//         None => return ("".to_string(), 0)
+//     };
+//     let lang = get_language_id_by_filename(&doc.get_path()).unwrap_or_default();
+//     let declarations_str = wrap_comments("Useful declarations:\n ", &lang);
+//     let references_str = wrap_comments("Useful references:\n ", &lang);
 
-    let search_result = ast_module.search_declarations_by_cursor(
-        &doc, code, cursor, 5, true
-    ).await;
-    let mut extra_context: Vec<String> = vec!();
-    let mut tokens_used = tokenizer.count_tokens(&declarations_str).expect(
-        "Tokenization has failed"
-    );
+//     let search_result = ast_module.search_declarations_by_cursor(
+//         &doc, code, cursor, 5, true
+//     ).await;
+//     let mut extra_context: Vec<String> = vec!();
 
-    match search_result {
-        Ok(res) => {
-            if res.search_results.len() > 0 {
-                extra_context.push(declarations_str.to_string());
-            }
-            for res in res.search_results {
-                let code: String = format!(
-                    "symbol path: {}\ncode: \n{}\n\n",
-                    res.symbol_declaration.meta_path,
-                    res.symbol_declaration.get_content().await.unwrap_or(" ".to_string())
-                );
-                let text = wrap_comments(&code, &lang);
-                let tokens = tokenizer.count_tokens(&text).expect(
-                    "Tokenization has failed"
-                );
-                if (tokens_used + tokens) > (max_context_size / 2) as i32 {
-                    break
-                } else {
-                    extra_context.push(text);
-                    tokens_used += tokens;
-                }
-            }
-        }
-        Err(err) => {
-            info!("Error while calling `search_declarations_by_cursor` {:?}", err);
-        }
-    }
 
-    let search_result = ast_module.search_references_by_cursor(
-        &doc, code, cursor, 5, true
-    ).await;
-    let mut tokens_used = tokenizer.count_tokens(&references_str).expect(
-        "Tokenization has failed"
-    );
-    match search_result {
-        Ok(res) => {
-            if res.search_results.len() > 0 {
-                extra_context.push(references_str.to_string());
-            }
-            for res in res.search_results {
-                let code: String = format!(
-                    "symbol path: {}\ncode: {}\n\n",
-                    res.symbol_declaration.meta_path,
-                    res.symbol_declaration.get_content().await.unwrap_or("".to_string())
-                );
-                let text = wrap_comments(&code, &lang);
-                let tokens = tokenizer.count_tokens(&text).expect(
-                    "Tokenization has failed"
-                );
-                if (tokens_used + tokens) > (max_context_size / 2) as i32 {
-                    break
-                } else {
-                    extra_context.push(text);
-                    tokens_used += tokens;
-                }
-            }
-        }
-        Err(err) => {
-            info!("Error while calling `search_declarations_by_cursor` {:?}", err);
-        }
-    }
+    // let mut tokens_used = tokenizer.count_tokens(&declarations_str).expect(
+    //     "Tokenization has failed"
+    // );
 
-    (extra_context.join(""), tokens_used)
-}
+    // match search_result {
+    //     Ok(res) => {
+    //         if res.search_results.len() > 0 {
+    //             extra_context.push(declarations_str.to_string());
+    //         }
+    //         for res in res.search_results {
+    //             let code: String = format!(
+    //                 "symbol path: {}\ncode: \n{}\n\n",
+    //                 res.symbol_declaration.meta_path,
+    //                 res.symbol_declaration.get_content().await.unwrap_or(" ".to_string())
+    //             );
+    //             let text = wrap_comments(&code, &lang);
+    //             let tokens = tokenizer.count_tokens(&text).expect(
+    //                 "Tokenization has failed"
+    //             );
+    //             if (tokens_used + tokens) > (max_context_size / 2) as i32 {
+    //                 break
+    //             } else {
+    //                 extra_context.push(text);
+    //                 tokens_used += tokens;
+    //             }
+    //         }
+    //     }
+    //     Err(err) => {
+    //         info!("Error while calling `search_declarations_by_cursor` {:?}", err);
+    //     }
+    // }
+
+    // let search_result = ast_module.search_references_by_cursor(
+    //     &doc, code, cursor, 5, true
+    // ).await;
+    // let mut tokens_used = tokenizer.count_tokens(&references_str).expect(
+    //     "Tokenization has failed"
+    // );
+    // match search_result {
+    //     Ok(res) => {
+    //         if res.search_results.len() > 0 {
+    //             extra_context.push(references_str.to_string());
+    //         }
+    //         for res in res.search_results {
+    //             let code: String = format!(
+    //                 "symbol path: {}\ncode: {}\n\n",
+    //                 res.symbol_declaration.meta_path,
+    //                 res.symbol_declaration.get_content().await.unwrap_or("".to_string())
+    //             );
+    //             let text = wrap_comments(&code, &lang);
+    //             let tokens = tokenizer.count_tokens(&text).expect(
+    //                 "Tokenization has failed"
+    //             );
+    //             if (tokens_used + tokens) > (max_context_size / 2) as i32 {
+    //                 break
+    //             } else {
+    //                 extra_context.push(text);
+    //                 tokens_used += tokens;
+    //             }
+    //         }
+    //     }
+    //     Err(err) => {
+    //         info!("Error while calling `search_declarations_by_cursor` {:?}", err);
+    //     }
+    // }
+
+//     (extra_context.join(""), tokens_used)
+// }
 
 fn cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
     let mut cut_at = vec![];

@@ -14,7 +14,7 @@ pub async fn find_valid_at_commands_in_query(
     let mut valid_command_lines = vec![];
     for (idx, line) in query.lines().enumerate() {
         let line_words: Vec<&str> = line.split_whitespace().collect();
-        let mut q_cmd_args = line_words.iter().skip(1).map(|x|x.to_string()).collect::<Vec<String>>();
+        let q_cmd_args = line_words.iter().skip(1).map(|x|x.to_string()).collect::<Vec<String>>();
 
         let q_cmd = match line_words.first() {
             Some(x) => x,
@@ -52,6 +52,9 @@ pub async fn correct_arguments_if_needed(
     can_execute: bool,
     context: &AtCommandsContext,
 ) -> Result<Vec<String>, String> {
+    // TODO: this function is a bad idea
+    // if a parameter is correctable, it's already valid!
+    // we only need to look up symbol once, not two or three times (is_valid, complete, is_valid again)
     if can_execute {
         return Ok(args.clone());
     }
@@ -68,10 +71,10 @@ pub async fn correct_arguments_if_needed(
         let completion = param.complete(arg, context, 1).await;
         let arg_completed = match completion.get(0) {
             Some(x) => x,
-            None => return Err(format!("arg '{}' correction failed: Probably file list is empty", arg)),
+            None => return Err(format!("arg '{}' correction failed", arg)),
         };
         if !param.is_value_valid(arg_completed, context).await {
-            return Err(format!("arg '{}' is not valid even after force completion", arg));
+            return Err(format!("arg '{}' is not valid even after a typo correction attempt", arg_completed));
         }
         info!("arg '{}' is corrected as '{}'", arg, arg_completed);
         args_new.push(arg_completed.clone());
@@ -80,11 +83,18 @@ pub async fn correct_arguments_if_needed(
 }
 
 pub fn split_file_into_chunks_from_line_inside(
-    cursor_line: i32, file_text: &String, chunk_size_lines: usize
+    cursor_line: usize,
+    file_lines: &mut Vec<String>,
+    chunk_size_lines: usize
 ) -> (
-    Vec<((i32, i32), String)>,
-    Vec<((i32, i32), String)>
+    Vec<((usize, usize), String)>,
+    Vec<((usize, usize), String)>
 ) {
+    if cursor_line == file_lines.len() {  // otherwise the last block doesn't get added
+        file_lines.push("".to_string());
+    }
+
+    // Line number start from 1 in ContextFile
     let cursor_line = cursor_line + 1;
     let (
         mut result_above, mut result_below, mut buffer_above, mut buffer_below
@@ -92,30 +102,30 @@ pub fn split_file_into_chunks_from_line_inside(
         Vec::new(), Vec::new(), Vec::new(), Vec::new()
     );
 
-    for (idx, line) in file_text.lines().enumerate() {
-        let idx = (idx + 2) as i32;
+    for (idx, line) in file_lines.iter().enumerate() {
+        let idx = idx + 2;
         if idx <= cursor_line {
-            buffer_above.push(line);
+            buffer_above.push(line.clone());
             if buffer_above.len() >= chunk_size_lines {
-                result_above.push(((idx - buffer_above.len() as i32, idx - 1), buffer_above.join("\n")));
+                result_above.push(((idx - buffer_above.len(), idx - 1), buffer_above.join("\n").to_string()));
                 buffer_above.clear();
             }
         } else if idx > cursor_line {
             if !buffer_above.is_empty() {
-                result_above.push(((idx - 1 - buffer_above.len() as i32, idx - 2), buffer_above.join("\n")));
+                result_above.push(((idx - 1 - buffer_above.len(), idx - 2), buffer_above.join("\n")));
                 buffer_above.clear();
             }
 
-            buffer_below.push(line);
+            buffer_below.push(line.clone());
             if buffer_below.len() >= chunk_size_lines {
-                result_below.push(((idx - buffer_below.len() as i32, idx - 1), buffer_below.join("\n")));
+                result_below.push(((idx - buffer_below.len(), idx - 1), buffer_below.join("\n")));
                 buffer_below.clear();
             }
         }
     }
 
     if !buffer_below.is_empty() {
-        result_below.push(((file_text.lines().count() as i32 - buffer_below.len() as i32 + 1, file_text.lines().count() as i32), buffer_below.join("\n")));
+        result_below.push(((file_lines.len() - buffer_below.len() + 1, file_lines.len()), buffer_below.join("\n")));
     }
 
     (result_above, result_below)

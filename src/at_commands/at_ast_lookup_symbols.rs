@@ -10,8 +10,7 @@ use tree_sitter::Point;
 
 use crate::ast::structs::AstCursorSearchResult;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
-use crate::at_commands::at_file::colon_lines_range_from_arg;
-use crate::at_commands::at_params::AtParamFilePath;
+use crate::at_commands::at_file::{AtParamFilePath, RangeKind, colon_lines_range_from_arg};
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::call_validation::{ChatMessage, ContextFile};
 use crate::files_in_workspace::DocumentInfo;
@@ -25,7 +24,7 @@ struct SimplifiedSymbolDeclarationStruct {
     pub line2: usize,
 }
 
-async fn results2message(result: &AstCursorSearchResult) -> ChatMessage {
+pub async fn results2message(result: &AstCursorSearchResult) -> ChatMessage {
     // info!("results2message {:?}", result);
     let mut symbols = vec![];
     for res in &result.search_results {
@@ -40,8 +39,8 @@ async fn results2message(result: &AstCursorSearchResult) -> ChatMessage {
         symbols.push(ContextFile {
             file_name: file_path,
             file_content: content,
-            line1: res.symbol_declaration.definition_info.range.start_point.row as i32,
-            line2: res.symbol_declaration.definition_info.range.end_point.row as i32,
+            line1: res.symbol_declaration.definition_info.range.start_point.row + 1,
+            line2: res.symbol_declaration.definition_info.range.end_point.row + 1,
             usefulness: res.sim_to_query,
         });
     }
@@ -99,12 +98,13 @@ impl AtCommand for AtAstLookupSymbols {
         };
         let row_idx = match colon_lines_range_from_arg(&mut file_path) {
             Some(x) => {
-                if x.start < 0 {
-                    return Err("row index is not a valid number".to_string());
+                if x.kind == RangeKind::GradToCursorTwosided {
+                    x.line1
+                } else {
+                    return Err("line number is not a valid".to_string());
                 }
-                x.start as usize
             },
-            None => return Err("row index is not valid".to_string()),
+            None => return Err("line number is not a valid".to_string()),
         };
 
         let file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), &file_path.to_string()).await?;

@@ -1,14 +1,17 @@
 use std::sync::Arc;
+use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::{error, info};
+use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
+use tracing::{error, info};
 
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
+use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
-use crate::scratchpads::chat_utils_limit_history::limit_messages_history_in_bytes;
+use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::chat_utils_rag::{run_at_commands, HasVecdbResults};
 
 const DEBUG: bool = true;
@@ -16,24 +19,23 @@ const DEBUG: bool = true;
 
 // #[derive(Debug)]
 pub struct ChatPassthrough {
+    pub t: HasTokenizerAndEot,
     pub post: ChatPost,
     pub default_system_message: String,
-    pub limit_bytes: usize,
     pub has_vecdb_results: HasVecdbResults,
     pub global_context: Arc<ARwLock<GlobalContext>>,
 }
 
-const DEFAULT_LIMIT_BYTES: usize = 4096*6;
-
 impl ChatPassthrough {
     pub fn new(
+        tokenizer: Arc<StdRwLock<Tokenizer>>,
         post: ChatPost,
         global_context: Arc<ARwLock<GlobalContext>>,
     ) -> Self {
         ChatPassthrough {
+            t: HasTokenizerAndEot::new(tokenizer),
             post,
             default_system_message: "".to_string(),
-            limit_bytes: DEFAULT_LIMIT_BYTES,  // one token translates to 3 bytes (not unicode chars)
             has_vecdb_results: HasVecdbResults::new(),
             global_context,
         }
@@ -47,19 +49,24 @@ impl ScratchpadAbstract for ChatPassthrough {
         patch: &serde_json::Value,
     ) -> Result<(), String> {
         self.default_system_message = patch.get("default_system_message").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        self.limit_bytes = patch.get("limit_bytes").and_then(|x| x.as_u64()).unwrap_or(DEFAULT_LIMIT_BYTES as u64) as usize;
         Ok(())
     }
 
     async fn prompt(
         &mut self,
-        _context_size: usize,
-        _sampling_parameters_to_patch: &mut SamplingParameters,
+        context_size: usize,
+        sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         info!("chat passthrough {} messages at start", &self.post.messages.len());
-        let top_n = 6;
-        run_at_commands(self.global_context.clone(), &mut self.post, top_n, &mut self.has_vecdb_results).await;
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history_in_bytes(&self.post.messages, self.limit_bytes, &self.default_system_message)?;
+        let top_n: usize = 6;
+        let last_user_msg_starts = run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &mut self.post, top_n, &mut self.has_vecdb_results).await;
+        let limited_msgs: Vec<ChatMessage> = match limit_messages_history(&self.t, &self.post.messages, last_user_msg_starts, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message) {
+            Ok(res) => res,
+            Err(e) => {
+                error!("error limiting messages: {}", e);
+                vec![]
+            }
+        };
         info!("chat passthrough {} messages -> {} messages after applying at-commands and limits, possibly adding the default system message", &self.post.messages.len(), &limited_msgs.len());
         let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
         for msg in &limited_msgs {
@@ -87,7 +94,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let prompt = "PASSTHROUGH ".to_string() + &serde_json::to_string(&filtered_msgs).unwrap();
         if DEBUG {
             for msg in &filtered_msgs {
-                info!("filtered message role={} {}", msg.role, crate::nicer_logs::first_n_chars(&msg.content, 40));
+                info!("filtered role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content, 30));
             }
         }
         Ok(prompt.to_string())
