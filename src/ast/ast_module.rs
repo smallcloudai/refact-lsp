@@ -184,10 +184,6 @@ impl AstModule {
             top_n_near_cursor,
             top_n_usage_for_each_decl
         ).await;
-        for r in cursor_usages.iter() {
-            let last_30_chars = last_n_chars(&r.name, 30);
-            info!("found {last_30_chars}");
-        }
         for r in declarations.iter() {
             let last_30_chars = last_n_chars(&r.name, 30);
             info!("found {last_30_chars}");
