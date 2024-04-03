@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -174,7 +175,7 @@ impl AstModule {
         cursor: Point,
         top_n_near_cursor: usize,
         top_n_usage_for_each_decl: usize,
-    ) -> Result<(AstCursorSearchResult, Vec<String>), String> {
+    ) -> Result<(AstCursorSearchResult, HashMap<String, Vec<String>>), String> {
         let t0 = std::time::Instant::now();
         let (cursor_usages, declarations, usages) = self.ast_index.read().await.retrieve_cursor_symbols_by_declarations(
             doc,
@@ -218,7 +219,11 @@ impl AstModule {
             found {} declarations, {} declaration usages, {} by name",
             t0.elapsed().as_secs_f32(), declarations.len(), usages.len(), matched_by_name_symbols.len());
         
-        let was_looking_for = cursor_usages.iter().chain(declarations.iter()).chain(usages.iter()).map(|x|last_n_chars(&x.name, 30)).collect::<Vec<_>>();
+        let mut was_looking_for = HashMap::new();
+        was_looking_for.insert("cursor_usages".to_string(), cursor_usages.iter().map(|x| last_n_chars(&x.name, 30)).collect::<Vec<_>>());
+        was_looking_for.insert("declarations".to_string(), declarations.iter().map(|x| last_n_chars(&x.name, 30)).collect::<Vec<_>>());
+        was_looking_for.insert("usages".to_string(), usages.iter().map(|x| last_n_chars(&x.name, 30)).collect::<Vec<_>>());
+        
         let search_result = AstCursorSearchResult {
             query_text: "".to_string(),
             file_path: doc.path.clone(),

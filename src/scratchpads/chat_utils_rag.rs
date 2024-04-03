@@ -39,23 +39,29 @@ pub struct FileLine {
     pub take: bool,
 }
 
-pub fn context_to_fim_debug_page(postprocessed_messages: &Vec<ContextFile>, was_looking_for: &Vec<String>) -> Value {
+pub fn context_to_fim_debug_page(postprocessed_messages: &[ContextFile], was_looking_for: &HashMap<String, Vec<String>>) -> Value {
     let attached_files: Vec<_> = postprocessed_messages.iter().map(|x| {
         json!({
-            "file_name": x.file_name.clone(),
-            "file_content": x.file_content.clone(),
-            "line1": x.line1.clone(),
-            "line2": x.line2.clone(),
+            "file_name": x.file_name,
+            "file_content": x.file_content,
+            "line1": x.line1,
+            "line2": x.line2,
         })
     }).collect();
-    
-    let mut res = json!({
-        "was_looking_for": was_looking_for.clone(),
-    });
-    if let Some(obj) = res.as_object_mut() {
-        obj.insert("attached_files".to_string(), json!(attached_files));
-    }
-    res
+
+    let was_looking_for_vec: Vec<_> = was_looking_for.iter().flat_map(|(k, v)| {
+        v.iter().map(move |i| {
+            json!({
+                "from": k,
+                "symbol": i,
+            })
+        })
+    }).collect();
+
+    json!({
+        "was_looking_for": was_looking_for_vec,
+        "attached_files": attached_files,
+    })
 }
 
 pub async fn postprocess_rag_stage1(

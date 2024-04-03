@@ -5,7 +5,6 @@ use tokio::sync::RwLock as ARwLock;
 use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
-use serde_json::Value;
 use tracing::info;
 
 use crate::call_validation::{CodeCompletionPost, validate_post};
@@ -32,11 +31,9 @@ async fn _lookup_code_completion_scratchpad(
         &code_completion_post.scratchpad,
         &recommended_model_record.default_scratchpad,
     )?;
-    let mut patch = patch.clone();
     let mut n_ctx = caps_locked.code_completion_n_ctx;
     if n_ctx == 0 { n_ctx = 2048 }
-    patch["n_ctx"] = Value::from(n_ctx);
-    Ok((model_name, sname.clone(), patch, n_ctx))
+    Ok((model_name, sname.clone(), patch.clone(), n_ctx))
 }
 
 pub async fn handle_v1_code_completion(
