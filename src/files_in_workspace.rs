@@ -13,7 +13,6 @@ use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tracing::info;
 use walkdir::WalkDir;
 use which::which;
-use crate::files_in_jsonl::files_in_jsonl_w_path;
 
 use crate::telemetry;
 use crate::vecdb::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS};

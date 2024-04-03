@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use std::time::Instant;
 use std::vec;
 
 use async_trait::async_trait;
@@ -36,7 +37,7 @@ pub struct SingleFileFIM {
     pub fim_prefix: String,
     pub fim_suffix: String,
     pub fim_middle: String,
-    pub context_used: serde_json::Value,
+    pub context_used: Value,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
     pub ast_module: Option<Arc<ARwLock<AstModule>>>,
@@ -114,6 +115,7 @@ impl ScratchpadAbstract for SingleFileFIM {
         self.t.eot = patch.get("eot").and_then(|x| x.as_str()).unwrap_or("<|endoftext|>").to_string();
         self.t.eos = patch.get("eos").and_then(|x| x.as_str()).unwrap_or("").to_string();
         self.t.context_format = patch.get("context_format").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+        self.t.rag_tokens_n = patch.get("rag_tokens_n").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
         self.t.assert_one_token(&self.fim_prefix.as_str())?;
         self.t.assert_one_token(&self.fim_suffix.as_str())?;
         self.t.assert_one_token(&self.fim_middle.as_str())?;
@@ -224,8 +226,13 @@ impl ScratchpadAbstract for SingleFileFIM {
         } else {
             return Err(format!("order \"{}\" not recognized", self.order));
         }
-
-        if !self.t.context_format.is_empty() && self.post.use_ast {
+        let rag_tokens_n = if self.post.rag_tokens_n > 0 {
+            self.post.rag_tokens_n.min(2048).max(1024)
+        } else {
+            self.t.rag_tokens_n
+        };
+        if !self.t.context_format.is_empty() && self.post.use_ast && rag_tokens_n > 0 {
+            let t0 = Instant::now();
             let (ast_messages, was_looking_for) = match &self.ast_module {
                 Some(ast) => {
                     let doc = Document::new(&file_path, None);
@@ -250,11 +257,11 @@ impl ScratchpadAbstract for SingleFileFIM {
                 self.global_context.clone(),
                 ast_messages,
                 self.t.tokenizer.clone(),
-                1024, // TODO: change to a real value
+                rag_tokens_n,
             ).await;
 
             prompt = add_context_to_prompt(&self.t.context_format, &prompt, &postprocessed_messages);
-            self.context_used = context_to_fim_debug_page(&postprocessed_messages, &was_looking_for);
+            self.context_used = context_to_fim_debug_page(&t0, &postprocessed_messages, &was_looking_for);
         }
 
         if DEBUG {

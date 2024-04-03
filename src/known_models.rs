@@ -5,7 +5,8 @@ pub const KNOWN_MODELS: &str = r####"
             "n_ctx": 4096,
             "supports_scratchpads": {
                 "FIM-PSM": {
-                    "context_format": "starcoder"
+                    "context_format": "starcoder",
+                    "rag_tokens_n": 1024
                 },
                 "FIM-SPM": {}
             },

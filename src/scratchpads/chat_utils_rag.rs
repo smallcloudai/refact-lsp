@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Instant;
 use tracing::{info, warn};
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
@@ -39,7 +40,7 @@ pub struct FileLine {
     pub take: bool,
 }
 
-pub fn context_to_fim_debug_page(postprocessed_messages: &[ContextFile], was_looking_for: &HashMap<String, Vec<String>>) -> Value {
+pub fn context_to_fim_debug_page(t0: &Instant, postprocessed_messages: &[ContextFile], was_looking_for: &HashMap<String, Vec<String>>) -> Value {
     let attached_files: Vec<_> = postprocessed_messages.iter().map(|x| {
         json!({
             "file_name": x.file_name,
@@ -57,8 +58,9 @@ pub fn context_to_fim_debug_page(postprocessed_messages: &[ContextFile], was_loo
             })
         })
     }).collect();
-
+    let elapsed = t0.elapsed().as_secs_f32();
     json!({
+        "elapsed": elapsed,
         "was_looking_for": was_looking_for_vec,
         "attached_files": attached_files,
     })
