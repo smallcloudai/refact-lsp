@@ -16,7 +16,6 @@ use crate::ast::treesitter::structs::SymbolType;
 use crate::files_in_jsonl::docs_in_jsonl;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
-use crate::nicer_logs::last_n_chars;
 
 pub struct AstModule {
     ast_index_service: Arc<AMutex<AstIndexService>>,
@@ -184,11 +183,11 @@ impl AstModule {
             top_n_usage_for_each_decl
         ).await;
         for r in declarations.iter() {
-            let last_30_chars = last_n_chars(&r.name, 30);
+            let last_30_chars = crate::nicer_logs::last_n_chars(&r.name, 30);
             info!("found {last_30_chars}");
         }
         for r in usages.iter() {
-            let last_30_chars = last_n_chars(&r.name, 30);
+            let last_30_chars = crate::nicer_logs::last_n_chars(&r.name, 30);
             info!("found {last_30_chars}");
         }
         let language = get_language_id_by_filename(&doc.path);
@@ -213,38 +212,38 @@ impl AstModule {
         info!("ast retrieve_cursor_symbols_by_declarations time {:.3}s, \
             found {} declarations, {} declaration usages, {} by name",
             t0.elapsed().as_secs_f32(), declarations.len(), usages.len(), matched_by_name_symbols.len());
-
-        let search_result = AstCursorSearchResult {
-            query_text: "".to_string(),
-            file_path: doc.path.clone(),
-            cursor,
-            cursor_symbols: cursor_usages
-                .iter()
-                .map(|x| SymbolsSearchResultStruct {
-                    symbol_declaration: x.clone(),
-                    content: x.get_content_blocked().unwrap_or_default(),
-                    sim_to_query: -1.0,
-                })
-                .collect::<Vec<SymbolsSearchResultStruct>>(),
-            declaration_symbols: declarations
-                .iter()
-                .map(|x| SymbolsSearchResultStruct {
-                    symbol_declaration: x.clone(),
-                    content: x.get_content_blocked().unwrap_or_default(),
-                    sim_to_query: -1.0,
-                })
-                .collect::<Vec<SymbolsSearchResultStruct>>(),
-            declaration_usage_symbols: usages
-                .iter()
-                .map(|x| SymbolsSearchResultStruct {
-                    symbol_declaration: x.clone(),
-                    content: x.get_content_blocked().unwrap_or_default(),
-                    sim_to_query: -1.0,
-                })
-                .collect::<Vec<SymbolsSearchResultStruct>>(),
-            matched_by_name_symbols: matched_by_name_symbols
-        };
-        Ok(search_result)
+        Ok(
+            AstCursorSearchResult {
+                query_text: "".to_string(),
+                file_path: doc.path.clone(),
+                cursor,
+                cursor_symbols: cursor_usages
+                    .iter()
+                    .map(|x| SymbolsSearchResultStruct {
+                        symbol_declaration: x.clone(),
+                        content: x.get_content_blocked().unwrap_or_default(),
+                        sim_to_query: -1.0,
+                    })
+                    .collect::<Vec<SymbolsSearchResultStruct>>(),
+                declaration_symbols: declarations
+                    .iter()
+                    .map(|x| SymbolsSearchResultStruct {
+                        symbol_declaration: x.clone(),
+                        content: x.get_content_blocked().unwrap_or_default(),
+                        sim_to_query: -1.0,
+                    })
+                    .collect::<Vec<SymbolsSearchResultStruct>>(),
+                declaration_usage_symbols: usages
+                    .iter()
+                    .map(|x| SymbolsSearchResultStruct {
+                        symbol_declaration: x.clone(),
+                        content: x.get_content_blocked().unwrap_or_default(),
+                        sim_to_query: -1.0,
+                    })
+                    .collect::<Vec<SymbolsSearchResultStruct>>(),
+                matched_by_name_symbols: matched_by_name_symbols
+            }
+        )
     }
 
     pub async fn file_markup(
