@@ -20,6 +20,7 @@ use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::files_in_workspace::Document;
+use crate::nicer_logs::last_n_chars;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_rag::context_to_fim_debug_page;
@@ -240,7 +241,13 @@ impl ScratchpadAbstract for SingleFileFIM {
                         &doc, &source, Point { row: pos.line as usize, column: pos.character as usize },
                         5, 5
                     ).await {
-                        Ok((res, was_looking_for)) => (vec![results2message(&res).await], was_looking_for),
+                        Ok(res) => {
+                            let mut was_looking_for = HashMap::new();
+                            was_looking_for.insert("cursor_usages".to_string(), res.cursor_symbols.iter().map(|x| last_n_chars(&x.symbol_declaration.name, 30)).collect::<Vec<_>>());
+                            was_looking_for.insert("declarations".to_string(), res.declaration_symbols.iter().map(|x| last_n_chars(&x.symbol_declaration.name, 30)).collect::<Vec<_>>());
+                            was_looking_for.insert("usages".to_string(), res.declaration_usage_symbols.iter().map(|x| last_n_chars(&x.symbol_declaration.name, 30)).collect::<Vec<_>>());
+                            (vec![results2message(&res).await], was_looking_for)
+                        },
                         Err(err) => {
                             error!("can't fetch ast results: {}", err);
                             (vec![], HashMap::new())
