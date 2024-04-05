@@ -12,7 +12,7 @@ use strsim::normalized_damerau_levenshtein;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::utils::split_file_into_chunks_from_line_inside;
 use crate::files_in_jsonl::docs_in_jsonl;
-use crate::files_in_workspace::get_file_text_from_memory_or_disk;
+use crate::files_in_workspace::{get_file_text_from_disk_or_memory, read_file_from_disk};
 use crate::call_validation::{ChatMessage, ContextFile};
 use crate::global_context::GlobalContext;
 
@@ -415,7 +415,7 @@ impl AtCommand for AtFile {
         };
         info!("@file {:?} execute range {:?}", file_path, colon);
 
-        let mut file_text = get_file_text_from_memory_or_disk(context.global_context.clone(), &PathBuf::from(&file_path)).await?;
+        let mut file_text = get_file_text_from_disk_or_memory(context.global_context.clone(), &PathBuf::from(&file_path)).await?;
         let mut file_lines: Vec<String> = file_text.lines().map(String::from).collect();
         let lines_cnt = file_lines.len();
 

@@ -136,6 +136,7 @@ impl DocumentsState {
     }
 }
 
+#[allow(dead_code)]
 pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String> {
     if let Some(doc) = global_context.read().await.documents_state.document_map.get(file_path) {
         let doc = doc.read().await;
@@ -144,6 +145,19 @@ pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<Globa
         }
     }
     read_file_from_disk(&file_path).await.map(|x|x.to_string())
+}
+
+pub async fn get_file_text_from_disk_or_memory(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String> {
+    if let Ok(text) = read_file_from_disk(&file_path).await.map(|x|x.to_string()) {
+        return Ok(text);
+    }
+    if let Some(doc) = global_context.read().await.documents_state.document_map.get(file_path) {
+        let doc = doc.read().await;
+        if doc.text.is_some() {
+            return Ok(doc.text.clone().unwrap().to_string());
+        }
+    }
+    return Err(format!("Failed to read file from disk or memory: {}", file_path.display()));
 }
 
 async fn _run_command(cmd: &str, args: &[&str], path: &PathBuf) -> Option<Vec<PathBuf>> {

@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::ast::ast_index::RequestSymbolType;
 use crate::custom_error::ScratchError;
-use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
+use crate::files_in_workspace::{Document, get_file_text_from_disk_or_memory};
 use crate::global_context::SharedGlobalContext;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -210,7 +210,7 @@ pub async fn handle_v1_ast_file_markup(
         let x = match &ast_module {
             Some(ast) => {
                 let mut doc = Document::new(&PathBuf::from(&corrected[0]), None);
-                let text = get_file_text_from_memory_or_disk(global_context.clone(), &doc.path).await.unwrap_or_default();
+                let text = get_file_text_from_disk_or_memory(global_context.clone(), &doc.path).await.unwrap_or_default();
                 doc.update_text(&text);
 
                 ast.read().await.file_markup(&doc).await
@@ -290,7 +290,7 @@ pub async fn handle_v1_ast_file_symbols(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let mut doc = Document::new(&post.file_url.to_file_path().unwrap_or_default(), None);
-    let text = get_file_text_from_memory_or_disk(global_context.clone(), &doc.path).await.unwrap_or_default();
+    let text = get_file_text_from_disk_or_memory(global_context.clone(), &doc.path).await.unwrap_or_default();
     doc.update_text(&text);
 
     let ast_module = global_context.read().await.ast_module.clone();
@@ -328,7 +328,7 @@ pub async fn handle_v1_ast_index_file(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let mut doc = Document::new(&post.file_url.to_file_path().unwrap_or_default(), None);
-    let text = get_file_text_from_memory_or_disk(global_context.clone(), &doc.path).await.unwrap_or_default();
+    let text = get_file_text_from_disk_or_memory(global_context.clone(), &doc.path).await.unwrap_or_default();
     doc.update_text(&text);
 
     let ast_module = global_context.read().await.ast_module.clone();
