@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
@@ -142,7 +142,13 @@ impl ScratchpadAbstract for SingleFileFIM {
         context_size: usize,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        let limit: i32 = context_size as i32 - self.post.parameters.max_new_tokens as i32;
+        let rag_tokens_n = if self.post.rag_tokens_n > 0 {
+            self.post.rag_tokens_n.min(2048).max(1024)
+        } else {
+            self.t.rag_tokens_n
+        };
+        let limit: i32 = context_size as i32 - self.post.parameters.max_new_tokens as i32; // TODO: subtract rag_tokens_n
+        
         let supports_stop = true; // some hf models do not support stop, but it's a thing of the past?
         if supports_stop {
             let mut stop_list = vec![self.t.eot.clone(), "\n\n".to_string()];
@@ -182,9 +188,12 @@ impl ScratchpadAbstract for SingleFileFIM {
 
         let mut before = vec![];
         let mut after = String::new();
+        let mut before_line_n = vec![];
+        let mut after_line_n = vec![];
         tokens_used += self.t.count_tokens(
             (cursor_line1.clone() + &cursor_line2).as_str()
         )?;
+        let mut rel_line_n: usize = 0;
         while before_line.is_some() || after_line.is_some() {
             if let Some(before_line) = before_line {
                 let before_line = before_line.to_string();
@@ -194,6 +203,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                 }
                 tokens_used += tokens;
                 before.push(before_line);
+                before_line_n.push(pos.line as usize - rel_line_n);
             }
             if let Some(after_line) = after_line {
                 let after_line = after_line.to_string();
@@ -203,10 +213,15 @@ impl ScratchpadAbstract for SingleFileFIM {
                 }
                 tokens_used += tokens;
                 after.push_str(&after_line);
+                after_line_n.push(pos.line as usize + rel_line_n);
             }
             before_line = before_iter.next();
             after_line = after_iter.next();
+            rel_line_n += 1;
         }
+        let mut ignore_lines_for_context: Vec<_> = before_line_n.into_iter().chain(after_line_n.into_iter()).collect::<HashSet<_>>().into_iter().collect();
+        ignore_lines_for_context.sort();
+        
         let before = before.into_iter().rev().collect::<Vec<_>>().join("");
         info!("single file FIM prompt {} tokens used < limit {}", tokens_used, limit);
         let mut prompt: String;
@@ -237,11 +252,6 @@ impl ScratchpadAbstract for SingleFileFIM {
         } else {
             return Err(format!("order \"{}\" not recognized", self.order));
         }
-        let rag_tokens_n = if self.post.rag_tokens_n > 0 {
-            self.post.rag_tokens_n.min(2048).max(1024)
-        } else {
-            self.t.rag_tokens_n
-        };
         if !self.t.context_format.is_empty() && self.post.use_ast && rag_tokens_n > 0 {
             let t0 = Instant::now();
             let language_id = get_language_id_by_filename(&PathBuf::from(&self.post.inputs.cursor.file)).unwrap_or(LanguageId::Unknown);
@@ -285,6 +295,8 @@ impl ScratchpadAbstract for SingleFileFIM {
                 ast_messages,
                 self.t.tokenizer.clone(),
                 rag_tokens_n,
+                ignore_lines_for_context,
+                self.post.inputs.cursor.file.clone()
             ).await;
 
             prompt = add_context_to_prompt(&self.t.context_format, &prompt, &postprocessed_messages, &language_id);
