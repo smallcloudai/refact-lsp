@@ -71,8 +71,6 @@ pub async fn postprocess_rag_stage1(
     origmsgs: Vec<ContextFile>,
     files_set: HashSet<String>,
     close_small_gaps: bool,
-    ignore_lines_for_context_lines: Vec<usize>,
-    ignore_lines_for_context_file: String,
 ) -> (HashMap<String, Vec<Arc<FileLine>>>, Vec<Arc<FileLine>>) {
     // 2. Load files, with ast or not
     let mut files: HashMap<String, Arc<File>> = HashMap::new();
@@ -105,7 +103,7 @@ pub async fn postprocess_rag_stage1(
         }
     }
 
-    // 3. Generate line refs
+    // 3. Generate line refs, fill background scopes found in a file (not search results yet)
     let mut lines_by_useful: Vec<Arc<FileLine>> = vec![];
     let mut lines_in_files: HashMap<String, Vec<Arc<FileLine>>> = HashMap::new();
     for fref in files.values() {
@@ -143,6 +141,19 @@ pub async fn postprocess_rag_stage1(
             }
         }
     };
+    let colorize_minus_one = |linevec: &mut Vec<Arc<FileLine>>, line1: usize, line2: usize| {
+        for i in line1 .. line2 {
+            if i >= linevec.len() {
+                continue;
+            }
+            let l = &linevec[i];
+            let l_mut: *mut FileLine = Arc::as_ptr(l) as *mut FileLine;
+            unsafe {
+                (*l_mut).useful = -1.;
+                (*l_mut).color = "disabled".to_string();
+            }
+        }
+    };
     for linevec in lines_in_files.values_mut() {
         if linevec.len() == 0 {
             continue;
@@ -170,6 +181,10 @@ pub async fn postprocess_rag_stage1(
             continue;
         }
         let fref = linevec[0].fref.clone();
+        if omsg.usefulness < 0.0 {
+            colorize_minus_one(linevec, omsg.line1-1, omsg.line2);
+            continue;
+        }
         let mut maybe_symbol: Option<&SymbolInformation> = None;
         if !omsg.symbol.is_empty() {
             for x in fref.markup.symbols_sorted_by_path_len.iter() {
@@ -220,20 +235,6 @@ pub async fn postprocess_rag_stage1(
             info!("        {}..{} ({} affected) <= subsymbol {:?} downgrade {}", changes_cnt, line1_base0, line2_base0, subsymbol, downgrade_coef);
         }
     };
-    
-    if !ignore_lines_for_context_file.is_empty() && !ignore_lines_for_context_lines.is_empty() {
-        for linevec in lines_in_files.values_mut() {
-            for l in linevec {
-                if l.fref.file_name.ends_with(&ignore_lines_for_context_file) && ignore_lines_for_context_lines.contains(&l.line_n) {
-                    let l_mut: *mut FileLine = Arc::as_ptr(l) as *mut FileLine;
-                    unsafe {
-                        (*l_mut).useful = -1.;
-                    }
-                }
-            }
-        }
-    }
-    
     for linevec in lines_in_files.values_mut() {
         if linevec.len() == 0 {
             continue;
@@ -288,8 +289,6 @@ pub async fn postprocess_at_results2(
     messages: Vec<ChatMessage>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     tokens_limit: usize,
-    ignore_lines_for_context: Vec<usize>,
-    ignore_lines_for_context_file: String,
 ) -> Vec<ContextFile> {
     // 1. Decode all
     let mut origmsgs: Vec<ContextFile> = vec![];
@@ -311,7 +310,7 @@ pub async fn postprocess_at_results2(
 
     let close_small_gaps = true;
     let (mut lines_in_files, mut lines_by_useful) = postprocess_rag_stage1(
-        global_context, origmsgs, files_set, close_small_gaps, ignore_lines_for_context, ignore_lines_for_context_file
+        global_context, origmsgs, files_set, close_small_gaps,
     ).await;
 
     // 7. Sort
@@ -470,8 +469,6 @@ pub async fn run_at_commands(
             messages_for_postprocessing,
             tokenizer.clone(),
             context_limit,
-            vec![],
-            "".to_string(),
         ).await;
         info!("postprocess_at_results2 {:.3}s", t0.elapsed().as_secs_f32());
         if processed.len() > 0 {

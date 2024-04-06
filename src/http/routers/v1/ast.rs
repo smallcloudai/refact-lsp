@@ -263,7 +263,7 @@ pub async fn handle_v1_ast_file_dump(
 
     let close_small_gaps = false;
     let (lines_in_files, _) = crate::scratchpads::chat_utils_rag::
-        postprocess_rag_stage1(global_context.clone(), vec![], files_set, close_small_gaps, vec![], "".to_string()).await;
+        postprocess_rag_stage1(global_context.clone(), vec![], files_set, close_small_gaps).await;
     let mut result = "".to_string();
     for linevec in lines_in_files.values() {
         for lineref in linevec {

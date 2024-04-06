@@ -119,8 +119,6 @@ pub async fn handle_v1_command_preview(
         messages_for_postprocessing,
         tokenizer_arc.clone(),
         recommended_model_record.n_ctx,
-        vec![],
-        "".to_string(),
     ).await;
     let mut preview: Vec<ChatMessage> = vec![];
     if processed.len() > 0 {
