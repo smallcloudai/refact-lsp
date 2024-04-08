@@ -93,7 +93,7 @@ impl AtCommand for AtAstLookupSymbols {
         };
         let row_idx = match colon_lines_range_from_arg(&mut file_path) {
             Some(x) => {
-                if x.kind == RangeKind::GradToCursorTwosided {
+                if x.kind == RangeKind::GradToCursorTwoSided {
                     x.line1
                 } else {
                     return Err("line number is not a valid".to_string());
