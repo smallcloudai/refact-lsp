@@ -140,6 +140,7 @@ fn chunks_into_context_file(
                 line1: *line1,
                 line2: *line2,
                 symbol: "".to_string(),
+                gradient_type: -1,
                 usefulness: *usefulness_above.get(idx).unwrap_or(&100.),
             }
         })
@@ -154,6 +155,7 @@ fn chunks_into_context_file(
                 line1: *line1,
                 line2: *line2,
                 symbol: "".to_string(),
+                gradient_type: -1,
                 usefulness: *usefulness_below.get(idx).unwrap_or(&0.0),
             }
         })
@@ -341,6 +343,7 @@ impl AtCommand for AtFile {
             line1: line1 + 1,
             line2: line2,
             symbol: "".to_string(),
+            gradient_type: -1,
             usefulness: 100.0,
         });
         Ok(ChatMessage {

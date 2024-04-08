@@ -403,6 +403,7 @@ pub async fn postprocess_at_results2(
             line1: first_line,
             line2: last_line,
             symbol: "".to_string(),
+            gradient_type: -1,
             usefulness: 0.0,
         });
     }
