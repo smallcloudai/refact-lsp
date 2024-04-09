@@ -16,7 +16,7 @@ use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::ast::structs::FileASTMarkup;
-use crate::files_in_workspace::{Document, read_file_from_disk};
+use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
 
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
 
@@ -77,11 +77,14 @@ pub async fn postprocess_rag_stage1(
     let ast_module = global_context.read().await.ast_module.clone();
     for file_name in files_set {
         let path = crate::files_in_workspace::canonical_path(&file_name.clone());
-        let doc = Document::new(&path, None);
+        let text = get_file_text_from_memory_or_disk(global_context.clone(), &path).await.unwrap_or_default();
+        let mut doc = Document::new(&path, None);
+        doc.update_text(&text);
         let mut f: Option<Arc<File>> = None;
         if let Some(astmod) = &ast_module {
-            match astmod.read().await.file_markup(&doc).await {
-                Ok(markup) => {
+            match astmod.write().await.file_markup(&doc).await {
+                Ok(mut markup) => {
+                    markup.file_content = doc.get_text_or_read_from_disk().await.unwrap_or_default().to_string();
                     f = Some(Arc::new(File { markup, cpath: path }));
                 },
                 Err(err) => {
@@ -93,7 +96,7 @@ pub async fn postprocess_rag_stage1(
             f = Some(Arc::new(File {
                 markup: FileASTMarkup {
                     file_path: doc.path.clone(),
-                    file_content: read_file_from_disk(&doc.path).await.unwrap_or_default().to_string(),
+                    file_content: doc.get_text_or_read_from_disk().await.unwrap_or_default().to_string(),
                     symbols_sorted_by_path_len: Vec::new(),
                 },
                 cpath: doc.path.clone(),
