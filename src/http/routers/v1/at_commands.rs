@@ -107,7 +107,7 @@ pub async fn handle_v1_command_preview(
     for cmd in valid_commands {
         match cmd.command.lock().await.execute(&query, &cmd.args, top_n, &at_context).await {
             Ok(msg) => {
-                messages_for_postprocessing.push(msg);
+                messages_for_postprocessing.extend(msg);
             },
             Err(e) => {
                 tracing::warn!("can't execute command that indicated it can execute: {}", e);
@@ -119,7 +119,9 @@ pub async fn handle_v1_command_preview(
         messages_for_postprocessing,
         tokenizer_arc.clone(),
         recommended_model_record.n_ctx,
+        true
     ).await;
+    
     let mut preview: Vec<ChatMessage> = vec![];
     if processed.len() > 0 {
         let message = ChatMessage {

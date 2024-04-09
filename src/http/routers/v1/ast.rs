@@ -11,6 +11,7 @@ use crate::ast::ast_index::RequestSymbolType;
 use crate::custom_error::ScratchError;
 use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
 use crate::global_context::SharedGlobalContext;
+use crate::scratchpads::chat_utils_rag::{omsgs_from_paths, postprocess_rag_stage1};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct AstQuerySearchBy {
@@ -263,17 +264,16 @@ pub async fn handle_v1_ast_file_dump(
     files_set.insert(corrected[0].clone());
 
     let close_small_gaps = false;
-    let (lines_in_files, _) = crate::scratchpads::chat_utils_rag::
-        postprocess_rag_stage1(global_context.clone(), vec![], files_set, close_small_gaps).await;
+    let messages = omsgs_from_paths(global_context.clone(), files_set).await;
+    // force read text = false: already read in omsgs_from_paths
+    let (lines_in_files, _) = postprocess_rag_stage1(global_context.clone(), vec![], close_small_gaps, false).await;
     let mut result = "".to_string();
     for linevec in lines_in_files.values() {
         for lineref in linevec {
+            let line_lock = lineref.read().await;
             result.push_str(format!("{}:{:04} {:<43} {:>7.3} {}\n",
-                crate::nicer_logs::last_n_chars(&lineref.fref.cpath.to_string_lossy().to_string(), 30),
-                lineref.line_n,
-                crate::nicer_logs::first_n_chars(&lineref.line_content, 40),
-                lineref.useful,
-                lineref.color,
+                crate::nicer_logs::last_n_chars(&line_lock.fref.read().await.cpath.to_string_lossy().to_string(), 30), line_lock.line_n,
+                crate::nicer_logs::first_n_chars(&line_lock.line_content, 40), line_lock.useful, line_lock.color,
             ).as_str());
         }
     }

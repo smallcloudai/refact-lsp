@@ -252,7 +252,7 @@ impl AtCommand for AtFile {
         // false
     }
 
-    async fn execute(&self, _query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<ChatMessage, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<ContextFile>, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());
@@ -320,10 +320,7 @@ impl AtCommand for AtFile {
             for ((line1, line2), _text) in res_below.iter() {
                 info!("below: {}-{}", line1, line2);
             }
-            return Ok(ChatMessage {
-                role: "context_file".to_string(),
-                content: json!(chunks_into_context_file(res_above, res_below, &file_path)).to_string(),
-            })
+            return Ok(chunks_into_context_file(res_above, res_below, &file_path))
         }
 
         if line1 == 0 || line2 == 0 {
@@ -343,9 +340,7 @@ impl AtCommand for AtFile {
             symbol: "".to_string(),
             usefulness: 100.0,
         });
-        Ok(ChatMessage {
-            role: "context_file".to_string(),
-            content: json!(vector_of_context_file).to_string(),
-        })
+        Ok(vector_of_context_file) 
     }
 }
+

@@ -291,7 +291,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                         was_looking_for.insert("cursor_symbols".to_string(), cursor_symbols);
                         was_looking_for.insert("declarations".to_string(), declarations);
                         was_looking_for.insert("usages".to_string(), usages);
-                        (vec![results2message(&res).await], was_looking_for)
+                        (results2message(&res).await, was_looking_for)
                     },
                     Err(err) => {
                         error!("can't fetch ast results: {}", err);
@@ -309,7 +309,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                     symbol: "".to_string(),
                     usefulness: -1.0,
                 };
-                ast_messages.push(ChatMessage { role: "context_file".to_string(), content: serde_json::json!([fim_ban]).to_string() });
+                ast_messages.push(fim_ban);
             }
 
             let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
@@ -317,6 +317,7 @@ impl ScratchpadAbstract for SingleFileFIM {
                 ast_messages,
                 self.t.tokenizer.clone(),
                 rag_tokens_n,
+                true,
             ).await;
 
             prompt = add_context_to_prompt(&self.t.context_format, &prompt, &self.fim_prefix, &postprocessed_messages, &language_id);

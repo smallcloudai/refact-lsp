@@ -16,11 +16,11 @@ use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::ast::structs::FileASTMarkup;
-use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
+use crate::files_in_workspace::{canonical_path, correct_to_nearest_filename, Document, get_file_text_from_memory_or_disk};
+use crate::nicer_logs::{first_n_chars, last_n_chars};
+
 
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
-
-
 const DEBUG: bool = true;
 
 
@@ -32,7 +32,7 @@ pub struct File {
 
 #[derive(Debug)]
 pub struct FileLine {
-    pub fref: Arc<File>,
+    pub fref: Arc<ARwLock<File>>,
     pub line_n: usize,
     pub line_content: String,
     pub useful: f32,
@@ -66,229 +66,269 @@ pub fn context_to_fim_debug_page(t0: &Instant, postprocessed_messages: &[Context
     })
 }
 
+pub async fn omsgs_from_paths(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    files_set: HashSet<String>
+) -> Vec<ContextFile> {
+    let mut omsgs = vec![];
+    for file_name in files_set {
+        let path = canonical_path(&file_name.clone());
+        let text = get_file_text_from_memory_or_disk(global_context.clone(), &path).await.unwrap_or_default();
+        omsgs.push(ContextFile {
+            file_name: file_name.clone(),
+            file_content: text.clone(),
+            line1: 0,
+            line2: text.lines().count(),
+            symbol: "".to_string(),
+            usefulness: 0.,
+        });
+    }
+    omsgs
+}
+
+fn msg2doc(msg: &ContextFile) -> Document {
+    let mut doc = Document::new(&PathBuf::from(&msg.file_name), None);
+    doc.update_text(&msg.file_content);
+    doc
+}
+
+async fn colorize_if_more_useful(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: usize, line2: usize, color: &String, useful: f32) {
+    if DEBUG {
+        info!("    colorize_if_more_useful {}..{} <= color {:?} useful {}", line1, line2, color, useful);
+    }
+    for i in line1 .. line2 {
+        let u = useful - (i as f32) * 0.001;
+        match linevec.get(i) {
+            Some(line) => {
+                let mut line_lock = line.write().await;
+                if line_lock.useful < u || line_lock.color.is_empty() {
+                    line_lock.useful = u;
+                    line_lock.color = color.clone();
+                }
+            },
+            None => warn!("    {} has faulty range {}..{}", color, line1, line2),
+        }
+    }
+}
+
+async fn colorize_minus_one(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: usize, line2: usize) {
+    for i in line1 .. line2 {
+        match linevec.get(i) {
+            Some(line) => {
+                let mut line_lock = line.write().await;
+                line_lock.useful = -1.;
+                line_lock.color = "disabled".to_string();
+            },
+            None => {}
+        }
+    }
+}
+
+async fn downgrade_lines_if_subsymbol(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1_base0: usize, line2_base0: usize, subsymbol: &String, downgrade_coef: f32) {
+    let mut changes_cnt = 0;
+    for i in line1_base0 .. line2_base0 {
+        assert!(i < linevec.len());
+        match linevec.get(i) {
+            Some(line) => {
+                let mut line_lock = line.write().await;
+                if subsymbol.starts_with(&line_lock.color) {
+                    if i == line2_base0-1 || i == line1_base0 {
+                        if line_lock.line_content.trim().len() == 1 {
+                            // HACK: closing brackets at the end, leave it alone without downgrade
+                            continue;
+                        }
+                    }
+                }
+                line_lock.useful *= downgrade_coef;
+                line_lock.color = subsymbol.clone();
+                changes_cnt += 1;
+            },
+            None => { continue; }
+        }
+    }
+    if DEBUG {
+        info!("        {}..{} ({} affected) <= subsymbol {:?} downgrade {}", changes_cnt, line1_base0, line2_base0, subsymbol, downgrade_coef);
+    }
+}
+
 pub async fn postprocess_rag_stage1(
     global_context: Arc<ARwLock<GlobalContext>>,
     origmsgs: Vec<ContextFile>,
-    files_set: HashSet<String>,
     close_small_gaps: bool,
-) -> (HashMap<PathBuf, Vec<Arc<FileLine>>>, Vec<Arc<FileLine>>) {
-    // 2. Load files, with ast or not
-    let mut files: HashMap<String, Arc<File>> = HashMap::new();
+    force_read_text: bool,
+) -> (HashMap<PathBuf, Vec<Arc<ARwLock<FileLine>>>>, Vec<Arc<ARwLock<FileLine>>>){
+    // 1. Load files, with ast or not
+    let mut files = HashMap::new();
     let ast_module = global_context.read().await.ast_module.clone();
-    for file_name in files_set {
-        let path = crate::files_in_workspace::canonical_path(&file_name.clone());
-        let text = get_file_text_from_memory_or_disk(global_context.clone(), &path).await.unwrap_or_default();
-        let mut doc = Document::new(&path, None);
-        doc.update_text(&text);
-        let mut f: Option<Arc<File>> = None;
-        if let Some(astmod) = &ast_module {
-            match astmod.write().await.file_markup(&doc).await {
-                Ok(mut markup) => {
-                    markup.file_content = doc.get_text_or_read_from_disk().await.unwrap_or_default().to_string();
-                    f = Some(Arc::new(File { markup, cpath: path }));
+    
+    for msg in origmsgs.iter() {
+        let mut f: Option<File> = None;
+        let mut doc = msg2doc(&msg);
+        if force_read_text {
+            match doc.get_text_or_read_from_disk().await {
+                Ok(text) => doc.update_text(&text),
+                Err(_) => {}
+            }
+        }
+
+        if let Some(ast) = &ast_module {
+            match ast.write().await.file_markup(&doc).await {
+                Ok(markup) => {
+                    if markup.file_content == doc.text.clone().unwrap_or_default().to_string() {
+                        f = Some(File { markup, cpath: doc.path.clone() });
+                    }
                 },
                 Err(err) => {
-                    warn!("postprocess_rag_stage1 query file {:?} markup problem: {}", file_name, err);
+                    warn!("postprocess_rag_stage1 query file {:?} markup problem: {}", doc.path.display(), err);
                 }
             }
         }
         if f.is_none() {
-            f = Some(Arc::new(File {
+            f = Some(File {
                 markup: FileASTMarkup {
                     file_path: doc.path.clone(),
-                    file_content: doc.get_text_or_read_from_disk().await.unwrap_or_default().to_string(),
+                    file_content: doc.text.unwrap_or_default().to_string(),
                     symbols_sorted_by_path_len: Vec::new(),
                 },
                 cpath: doc.path.clone(),
-            }));
+            });
         }
-        if f.is_some() {
-            files.insert(file_name.clone(), f.unwrap());
-        }
+        files.insert(msg.file_name.clone(), Arc::new(ARwLock::new(f.unwrap())));
     }
-
-    // 3. Generate line refs, fill background scopes found in a file (not search results yet)
-    let mut lines_by_useful: Vec<Arc<FileLine>> = vec![];
-    let mut lines_in_files: HashMap<PathBuf, Vec<Arc<FileLine>>> = HashMap::new();
+    
+    // 2. Generate line refs, fill background scopes found in a file (not search results yet)
+    let mut lines_by_useful = vec![];
+    let mut lines_in_files = HashMap::new();
     for fref in files.values() {
-        for (line_n, line) in fref.markup.file_content.lines().enumerate() {
-            let a = Arc::new(FileLine {
+        for (line_n, line) in fref.read().await.markup.file_content.lines().enumerate() {
+            let file_line = FileLine {
                 fref: fref.clone(),
-                line_n: line_n,
+                line_n,
                 line_content: line.to_string(),
                 useful: 0.0,
                 color: "".to_string(),
                 take: false,
-            });
-            lines_by_useful.push(a.clone());
-            let lines_in_files_mut = lines_in_files.entry(fref.cpath.clone()).or_insert(vec![]);
-            lines_in_files_mut.push(a.clone());
+            };
+            let file_line_arc = Arc::new(ARwLock::new(file_line));
+            lines_by_useful.push(file_line_arc.clone());
+            lines_in_files.entry(fref.read().await.cpath.clone()).or_insert(vec![]).push(file_line_arc.clone());
         }
     }
-    let colorize_if_more_useful = |linevec: &mut Vec<Arc<FileLine>>, line1: usize, line2: usize, color: &String, useful: f32|
-    {
-        if DEBUG {
-            info!("    colorize_if_more_useful {}..{} <= color {:?} useful {}", line1, line2, color, useful);
-        }
-        for i in line1 .. line2 {
-            if i >= linevec.len() {
-                warn!("    {} has faulty range {}..{}", color, line1, line2);
-                continue;
-            }
-            let lineref_mut: *mut FileLine = Arc::as_ptr(&linevec[i]) as *mut FileLine;
-            let u = useful - (i as f32) * 0.001;
-            unsafe {
-                if (*lineref_mut).useful < u || (*lineref_mut).color.is_empty() {
-                    (*lineref_mut).useful = u;
-                    (*lineref_mut).color = color.clone();
-                }
+    
+    for linevec in lines_in_files.values() {
+        if let Some(line) = linevec.get(0) {
+            for s in line.read().await.fref.read().await.markup.symbols_sorted_by_path_len.iter() {
+                let useful = 10.;  // depends on symbol type?
+                colorize_if_more_useful(linevec, s.full_range.start_point.row, s.full_range.end_point.row+1, &format!("{}", s.symbol_path), useful).await;
             }
         }
-    };
-    let colorize_minus_one = |linevec: &mut Vec<Arc<FileLine>>, line1: usize, line2: usize| {
-        for i in line1 .. line2 {
-            if i >= linevec.len() {
-                continue;
-            }
-            let l = &linevec[i];
-            let l_mut: *mut FileLine = Arc::as_ptr(l) as *mut FileLine;
-            unsafe {
-                (*l_mut).useful = -1.;
-                (*l_mut).color = "disabled".to_string();
-            }
-        }
-    };
-    for linevec in lines_in_files.values_mut() {
-        if linevec.len() == 0 {
-            continue;
-        }
-        let fref = linevec[0].fref.clone();
-        info!("fref {:?} has {} bytes, {} symbols", fref.cpath, fref.markup.file_content.len(), fref.markup.symbols_sorted_by_path_len.len());
-        for s in fref.markup.symbols_sorted_by_path_len.iter() {
-            // info!("    {} {:?} {}-{}", s.symbol_path, s.symbol_type, s.full_range.start_point.row, s.full_range.end_point.row);
-            let useful = 10.0;  // depends on symbol type?
-            colorize_if_more_useful(linevec, s.full_range.start_point.row, s.full_range.end_point.row+1, &format!("{}", s.symbol_path), useful);
-        }
-        colorize_if_more_useful(linevec, 0, linevec.len(), &"".to_string(), 5.0);
+        colorize_if_more_useful(linevec, 0, linevec.len(), &"".to_string(), 5.).await;
     }
 
-    // 4. Fill in usefulness from search results
+    // 3. Fill in usefulness from search results
     for omsg in origmsgs.iter() {
         // Do what we can to match omsg.file_name to something real
-        let nearest = crate::files_in_workspace::correct_to_nearest_filename(global_context.clone(), &omsg.file_name, false, 1).await;
-        let cpath = if nearest.is_empty() {
-            crate::files_in_workspace::canonical_path(&omsg.file_name)
-        } else {
-            crate::files_in_workspace::canonical_path(&nearest[0])
-        };
-        let linevec: &mut Vec<Arc<FileLine>> = match lines_in_files.get_mut(&cpath) {
+        let nearest = correct_to_nearest_filename(global_context.clone(), &omsg.file_name, false, 1).await;
+        let cpath = canonical_path(&nearest.get(0).unwrap_or(&omsg.file_name));
+        
+        let linevec= match lines_in_files.get(&cpath) {
             Some(x) => x,
             None => {
                 warn!("postprocess_rag_stage1: file not found {:?} or transformed to canonical path {:?}", omsg.file_name, cpath);
                 continue;
             }
         };
-        if linevec.len() == 0 {
-            continue;
-        }
-        let fref = linevec[0].fref.clone();
-        if omsg.usefulness < 0.0 {
-            colorize_minus_one(linevec, omsg.line1-1, omsg.line2);
-            continue;
-        }
-        let mut maybe_symbol: Option<&SymbolInformation> = None;
-        if !omsg.symbol.is_empty() {
-            for x in fref.markup.symbols_sorted_by_path_len.iter() {
-                if x.guid == omsg.symbol {
-                    maybe_symbol = Some(x);
-                    break;
-                }
-            }
-            if maybe_symbol.is_none() {
-                warn!("postprocess_rag_stage1: cannot find symbol {} in file {}", omsg.symbol, omsg.file_name);
-            }
-        }
-        if let Some(s) = maybe_symbol {
-            info!("    search result {} {:?} {:.2}", s.symbol_path, s.symbol_type, omsg.usefulness);
-            colorize_if_more_useful(linevec, s.full_range.start_point.row, s.full_range.end_point.row+1, &format!("{}", s.symbol_path), omsg.usefulness);
-        } else {
-            // no symbol set in search result, go head with just line numbers, omsg.line1, omsg.line2 numbers starts from 1, not from 0
-            if omsg.line1 == 0 || omsg.line2 == 0 || omsg.line1 > omsg.line2 || omsg.line1 > linevec.len() || omsg.line2 > linevec.len() {
-                warn!("postprocess_rag_stage1: cannot use range {}:{}..{}", omsg.file_name, omsg.line1, omsg.line2);
-                continue;
-            }
-            colorize_if_more_useful(linevec, omsg.line1-1, omsg.line2, &"nosymb".to_string(), omsg.usefulness);
-        }
-    }
-
-    // 5. Downgrade sub-symbols and uninteresting regions
-    let downgrade_lines_if_subsymbol = |linevec: &mut Vec<Arc<FileLine>>, line1_base0: usize, line2_base0: usize, subsymbol: &String, downgrade_coef: f32|
-    {
-        let mut changes_cnt = 0;
-        for i in line1_base0 .. line2_base0 {
-            assert!(i < linevec.len());
-            let lineref_mut: *mut FileLine = Arc::as_ptr(&linevec[i]) as *mut FileLine;
-            unsafe {
-                if subsymbol.starts_with(&(*lineref_mut).color) { // && subsymbol != &(*lineref_mut).color {
-                    if i == line2_base0-1 || i == line1_base0 {
-                        if (*lineref_mut).line_content.trim().len() == 1 {
-                            // HACK: closing brackets at the end, leave it alone without downgrade
-                            continue;
+        let mut symbol_mb: Option<SymbolInformation> = None;
+        match linevec.get(0) {
+            Some(line) => {
+                if !omsg.symbol.is_empty() {
+                    for sym in line.read().await.fref.read().await.markup.symbols_sorted_by_path_len.iter() {
+                        if sym.guid == omsg.symbol {
+                            symbol_mb = Some(sym.clone());
+                            break;
                         }
                     }
-                    (*lineref_mut).useful *= downgrade_coef;
-                    (*lineref_mut).color = subsymbol.clone();
-                    changes_cnt += 1;
+                    if symbol_mb.is_none() {
+                        warn!("postprocess_rag_stage1: cannot find symbol {} in file {}", omsg.symbol, omsg.file_name);
+                    }
                 }
             }
+            None => { continue; }
         }
-        if DEBUG {
-            info!("        {}..{} ({} affected) <= subsymbol {:?} downgrade {}", changes_cnt, line1_base0, line2_base0, subsymbol, downgrade_coef);
-        }
-    };
-    for linevec in lines_in_files.values_mut() {
-        if linevec.len() == 0 {
+        if omsg.usefulness < 0. {
+            colorize_minus_one(linevec, omsg.line1-1, omsg.line2).await;
             continue;
         }
-        let fref = linevec[0].fref.clone();
-        if DEBUG {
-            info!("degrading body of symbols in {:?}", fref.cpath);
-        }
-        for s in fref.markup.symbols_sorted_by_path_len.iter() {
-            if DEBUG {
-                info!("    {} {:?} {}-{}", s.symbol_path, s.symbol_type, s.full_range.start_point.row, s.full_range.end_point.row);
+        
+        match symbol_mb {
+            Some(s) => {
+                info!("    search result {} {:?} {:.2}", s.symbol_path, s.symbol_type, omsg.usefulness);
+                colorize_if_more_useful(linevec, s.full_range.start_point.row, s.full_range.end_point.row+1, &format!("{}", s.symbol_path), omsg.usefulness).await;
             }
-            if s.definition_range.end_byte != 0 {
-                // decl  void f() {
-                // def      int x = 5;
-                // def   }
-                let (def0, def1) = (
-                    s.definition_range.start_point.row.max(s.declaration_range.end_point.row + 1),   // definition must stay clear of declaration
-                    s.definition_range.end_point.row + 1
-                );
-                if def1 > def0 {
-                    downgrade_lines_if_subsymbol(linevec, def0, def1, &format!("{}::body", s.symbol_path), 0.8);
-                    // NOTE: this will not downgrade function body of a function that is a search result, because it's not a subsymbol it's the symbol itself (equal path)
+            None => {
+                if omsg.line1 == 0 || omsg.line2 == 0 || omsg.line1 > omsg.line2 || omsg.line1 > linevec.len() || omsg.line2 > linevec.len() {
+                    warn!("postprocess_rag_stage1: cannot use range {}:{}..{}", omsg.file_name, omsg.line1, omsg.line2);
+                    continue;
                 }
+                colorize_if_more_useful(linevec, omsg.line1-1, omsg.line2, &"nosymb".to_string(), omsg.usefulness).await;
             }
         }
     }
 
-    // 6. A-la mathematical morphology, removes one-line holes
+    // 4. Downgrade sub-symbols and uninteresting regions
+    for linevec in lines_in_files.values() {
+        match linevec.get(0) {
+            Some(line) => {
+                let line_lock = line.read().await;
+                let fref = line_lock.fref.read().await;
+                if DEBUG {
+                    info!("degrading body of symbols in {:?}", fref.cpath);
+                }
+                for sym in fref.markup.symbols_sorted_by_path_len.iter() {
+                    if DEBUG {
+                        info!("    {} {:?} {}-{}", sym.symbol_path, sym.symbol_type, sym.full_range.start_point.row, sym.full_range.end_point.row);
+                    }
+                    if sym.definition_range.end_byte != 0 {
+                        // decl  void f() {
+                        // def      int x = 5;
+                        // def   }
+                        let (def0, def1) = (
+                            sym.definition_range.start_point.row.max(sym.declaration_range.end_point.row + 1),   // definition must stay clear of declaration
+                            sym.definition_range.end_point.row + 1
+                        );
+                        if def1 > def0 {
+                            downgrade_lines_if_subsymbol(linevec, def0, def1, &format!("{}::body", sym.symbol_path), 0.8).await;
+                            // NOTE: this will not downgrade function body of a function that is a search result, because it's not a subsymbol it's the symbol itself (equal path)
+                        }
+                    }
+
+                }
+
+            },
+            None => { continue; }
+        }
+    }
+
+    // 5. A-la mathematical morphology, removes one-line holes
     if close_small_gaps {
-        for linevec in lines_in_files.values_mut() {
-            let mut useful_copy = linevec.iter().map(|x| x.useful).collect::<Vec<f32>>();
+        for linevec in lines_in_files.values() {
+            let mut useful_copy = vec![];
+            for line in linevec.iter() {
+                useful_copy.push(line.read().await.useful);
+            }
             for i in 1 .. linevec.len() - 1 {
-                let l = linevec[i-1].useful;
-                let m = linevec[i  ].useful;
-                let r = linevec[i+1].useful;
+                let (l, m, r) = (
+                    linevec.get(i-1).unwrap().read().await.useful,
+                    linevec.get(i).unwrap().read().await.useful,
+                    linevec.get(i+1).unwrap().read().await.useful,
+                );
+                
                 let both_l_and_r_support = l.min(r);
                 useful_copy[i] = m.max(both_l_and_r_support);
             }
             for i in 0 .. linevec.len() {
-                let lineref_mut: *mut FileLine = Arc::as_ptr(linevec.get(i).unwrap()) as *mut FileLine;
-                unsafe {
-                    (*lineref_mut).useful = useful_copy[i];
+                if let Some(line) = linevec.get(i) {
+                    line.write().await.useful = useful_copy[i];
                 }
             }
         }
@@ -297,22 +337,18 @@ pub async fn postprocess_rag_stage1(
     (lines_in_files, lines_by_useful)
 }
 
-pub async fn postprocess_at_results2(
+pub async fn _postprocess2_from_chat_messages(
     global_context: Arc<ARwLock<GlobalContext>>,
     messages: Vec<ChatMessage>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     tokens_limit: usize,
+    force_read_text: bool,
 ) -> Vec<ContextFile> {
-    // 1. Decode all
     let mut origmsgs: Vec<ContextFile> = vec![];
-    let mut files_set: HashSet<String> = HashSet::new();
     for msg in messages {
         match serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
             Ok(decoded) => {
                 origmsgs.extend(decoded.clone());
-                for cf in decoded {
-                    files_set.insert(cf.file_name.clone());
-                }
             },
             Err(err) => {
                 warn!("postprocess_at_results2 decoding results problem: {}", err);
@@ -320,94 +356,112 @@ pub async fn postprocess_at_results2(
             }
         }
     }
+    postprocess_at_results2(global_context, origmsgs, tokenizer, tokens_limit, force_read_text).await
+}
 
-    let close_small_gaps = true;
-    let (mut lines_in_files, mut lines_by_useful) = postprocess_rag_stage1(
-        global_context, origmsgs, files_set, close_small_gaps,
+pub async fn postprocess_at_results2(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    messages: Vec<ContextFile>,
+    tokenizer: Arc<RwLock<Tokenizer>>,
+    tokens_limit: usize,
+    force_read_text: bool
+) -> Vec<ContextFile> {
+    // 1-5
+    let (lines_in_files, lines_by_useful) = postprocess_rag_stage1(
+        global_context, messages, true, force_read_text
     ).await;
 
-    // 7. Sort
-    lines_by_useful.sort_by(|a, b| {
-        b.useful.partial_cmp(&a.useful).unwrap_or(Ordering::Equal)
+    // 6. Sort
+    let mut useful_values = vec![];
+    for v in lines_by_useful.iter() {
+        useful_values.push(v.read().await.useful);
+    }
+    let mut indices: Vec<_> = (0..lines_by_useful.len()).collect();
+    indices.sort_by(|&a, &b| {
+        let a_useful = useful_values[a];
+        let b_useful = useful_values[b];
+        b_useful.partial_cmp(&a_useful).unwrap_or(Ordering::Equal)
     });
-
-    // 8. Convert line_content to tokens up to the limit
+    let lines_by_useful: Vec<_> = indices.into_iter().map(|i| lines_by_useful[i].clone()).collect();
+    
+    // 7. Convert line_content to tokens up to the limit
     let mut tokens_count: usize = 0;
     let mut lines_take_cnt: usize = 0;
-    for lineref in lines_by_useful.iter_mut() {
-        if lineref.useful < 0.0 {
+    for lineref in lines_by_useful.iter() {
+        let mut line_lock = lineref.write().await;
+        if line_lock.useful < 0.0 {
             continue;
         }
-        let ntokens = count_tokens(&tokenizer.read().unwrap(), &lineref.line_content);
-        if tokens_count + ntokens > tokens_limit {
+        let n_tokens = count_tokens(&tokenizer.read().unwrap(), &line_lock.line_content);
+        if tokens_count + n_tokens > tokens_limit {
             break;
         }
-        tokens_count += ntokens;
-        unsafe {
-            let lineref_mut: *mut FileLine = Arc::as_ptr(lineref) as *mut FileLine;
-            (*lineref_mut).take = true;
-            lines_take_cnt += 1;
-        }
+        tokens_count += n_tokens;
+        line_lock.take = true;
+        lines_take_cnt += 1;
     }
     info!("{} lines in {} files  =>  tokens {} < {} tokens limit  =>  {} lines", lines_by_useful.len(), lines_in_files.len(), tokens_count, tokens_limit, lines_take_cnt);
     if DEBUG {
         for linevec in lines_in_files.values() {
             for lineref in linevec.iter() {
+                let line_lock = lineref.read().await;
                 info!("{} {}:{:04} {:>7.3} {}",
-                if lineref.take { "take" } else { "dont" },
-                crate::nicer_logs::last_n_chars(&lineref.fref.cpath.to_string_lossy().to_string(), 30),
-                lineref.line_n,
-                lineref.useful,
-                crate::nicer_logs::first_n_chars(&lineref.line_content, 20)
+                if line_lock.take { "take" } else { "dont" },
+                last_n_chars(&line_lock.fref.read().await.cpath.to_string_lossy().to_string(), 30),
+                line_lock.line_n,
+                line_lock.useful,
+                first_n_chars(&line_lock.line_content, 20)
             );
             }
         }
     }
 
-    // 9. Generate output
+    // 8. Generate output
     let mut merged: Vec<ContextFile> = vec![];
-    for linevec in lines_in_files.values_mut() {
-        if linevec.len() == 0 {
-            continue;
-        }
-        let fref = linevec[0].fref.clone();
-        let cpath = fref.cpath.clone();
-        let mut out = String::new();
-        let mut first_line: usize = 0;
-        let mut last_line: usize = 0;
-        let mut prev_line: usize = 0;
-        let mut anything = false;
-        for (i, lineref) in linevec.iter_mut().enumerate() {
-            last_line = i;
-            if !lineref.take {
+    for linevec in lines_in_files.values() {
+        if let Some(line) = linevec.get(0) {
+            let cpath = line.read().await.fref.read().await.cpath.clone();
+            let mut out = String::new();
+            let mut first_line: usize = 0;
+            let mut last_line: usize = 0;
+            let mut prev_line: usize = 0;
+            let mut anything = false;
+            
+            for (i, line_i) in linevec.iter().enumerate() {
+                let line_lock = line_i.read().await;
+                last_line = i;
+                if !line_lock.take {
+                    continue;
+                }
+                anything = true;
+                if first_line == 0 { 
+                    first_line = i; 
+                }
+                if i > prev_line + 1 {
+                    out.push_str(format!("...{} lines\n", i - prev_line - 1).as_str());
+                }
+                out.push_str(&line_lock.line_content);
+                out.push_str("\n");
+                prev_line = i;
+            }
+            if last_line > prev_line + 1 {
+                out.push_str("...\n");
+            }
+            if DEBUG {
+                info!("file {:?}\n{}", cpath, out);
+            }
+            if !anything {
                 continue;
             }
-            anything = true;
-            if first_line == 0 { first_line = i; }
-            if i > prev_line + 1 {
-                out.push_str(format!("...{} lines\n", i - prev_line - 1).as_str());
-            }
-            out.push_str(&lineref.line_content);
-            out.push_str("\n");
-            prev_line = i;
+            merged.push(ContextFile {
+                file_name: cpath.to_string_lossy().to_string(),
+                file_content: out,
+                line1: first_line,
+                line2: last_line,
+                symbol: "".to_string(),
+                usefulness: 0.0,
+            });
         }
-        if last_line > prev_line + 1 {
-            out.push_str("...\n");
-        }
-        if DEBUG {
-            info!("file {:?}\n{}", cpath, out);
-        }
-        if !anything {
-            continue;
-        }
-        merged.push(ContextFile {
-            file_name: cpath.to_string_lossy().to_string(),
-            file_content: out,
-            line1: first_line,
-            line2: last_line,
-            symbol: "".to_string(),
-            usefulness: 0.0,
-        });
     }
     merged
 }
@@ -476,20 +530,21 @@ pub async fn run_at_commands(
         let mut messages_for_postprocessing = vec![];
         for cmd in valid_commands {
             match cmd.command.lock().await.execute(&user_posted, &cmd.args, top_n, &context).await {
-                Ok(msg) => {
-                    messages_for_postprocessing.push(msg);
+                Ok(msgs) => {
+                    messages_for_postprocessing.extend(msgs);
                 },
                 Err(e) => {
-                    tracing::warn!("can't execute command that indicated it can execute: {}", e);
+                    warn!("can't execute command that indicated it can execute: {}", e);
                 }
             }
         }
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let processed = postprocess_at_results2(
             global_context.clone(),
             messages_for_postprocessing,
             tokenizer.clone(),
             context_limit,
+            true,
         ).await;
         info!("postprocess_at_results2 {:.3}s", t0.elapsed().as_secs_f32());
         if processed.len() > 0 {
