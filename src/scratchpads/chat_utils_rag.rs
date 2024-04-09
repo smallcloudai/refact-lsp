@@ -90,9 +90,9 @@ fn color_with_gradient_type(omsg: &ContextFile, linevec: &mut Vec<Arc<FileLine>>
         let line_n = line_n + 1;
         let usefulness = match omsg.gradient_type {
             0 => omsg.usefulness - (line_n as f32) * 0.001,
-            1 => if line_n < omsg.line1 {(line_n as f32 * m11 + c11).max(5.)} else {(line_n as f32 * m12 + c12).max(5.)},
-            2 => if line_n <= omsg.line2 {(line_n as f32 * m21 + c21).max(5.) } else {-1.},
-            3 => if line_n < omsg.line1 {-1.} else {(line_n as f32 * m12 + c12).max(5.)},
+            1 => if line_n < omsg.line1 {(line_n as f32 * m11 + c11).max(0.)} else {(line_n as f32 * m12 + c12).max(0.)},
+            2 => if line_n <= omsg.line2 {(line_n as f32 * m21 + c21).max(0.) } else {-1.},
+            3 => if line_n < omsg.line1 {-1.} else {(line_n as f32 * m12 + c12).max(0.)},
             4 => {
                 if line_n < omsg.line1 {
                     line_n as f32 * m11 + c11
@@ -101,16 +101,21 @@ fn color_with_gradient_type(omsg: &ContextFile, linevec: &mut Vec<Arc<FileLine>>
                 } else {
                     line_n as f32 * m22 + c22
                 }
-            }.max(5.),
+            }.max(0.),
             _ => 0.0,
         };
-        set_useful_for_line(line, usefulness);
+        set_useful_for_line(line, usefulness, &format!("gradient_type: {:?}", omsg.gradient_type));
     }
 }
 
-fn set_useful_for_line(line: &Arc<FileLine>, useful: f32) {
+fn set_useful_for_line(line: &Arc<FileLine>, useful: f32, color: &String) {
     let lineref_mut: *mut FileLine = Arc::as_ptr(line) as *mut FileLine;
-    unsafe { (*lineref_mut).useful = useful; }
+    unsafe {
+        if (line.useful < useful || line.color.is_empty()) || useful < 0. {
+            (*lineref_mut).useful = useful;
+            (*lineref_mut).color = color.clone();
+        }
+    }
 }
 
 pub async fn postprocess_rag_stage1(
@@ -158,7 +163,7 @@ pub async fn postprocess_rag_stage1(
         for (line_n, line) in fref.markup.file_content.lines().enumerate() {
             let a = Arc::new(FileLine {
                 fref: fref.clone(),
-                line_n: line_n + 1,
+                line_n,
                 line_content: line.to_string(),
                 useful: 0.0,
                 color: "".to_string(),
