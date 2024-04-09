@@ -9,7 +9,6 @@ WORKDIR /usr/src/refact-lsp
 COPY src src
 COPY build.rs build.rs
 COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
 
 ENV CARGO_INCREMENTAL=0
 ENV CARGO_NET_RETRY=10
