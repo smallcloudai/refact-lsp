@@ -165,7 +165,7 @@ pub async fn postprocess_rag_stage1(
         let mut f: Option<File> = None;
         let mut doc = msg2doc(&msg);
         if force_read_text {
-            match doc.get_text_or_read_from_disk().await {
+            match get_file_text_from_memory_or_disk(global_context.clone(), &doc.path).await {
                 Ok(text) => doc.update_text(&text),
                 Err(_) => {}
             }
