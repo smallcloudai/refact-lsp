@@ -148,9 +148,9 @@ impl ScratchpadAbstract for SingleFileFIM {
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         let rag_tokens_n = if self.post.rag_tokens_n > 0 {
-            self.post.rag_tokens_n.min(4096).max(1024)
+            self.post.rag_tokens_n.min(4096).max(50)
         } else {
-            ((context_size as f64 * self.t.rag_ratio) as usize).min(4096).max(1024)
+            ((context_size as f64 * self.t.rag_ratio) as usize).min(4096).max(50)
         };
         let limit: i32 = (context_size as i32) - (self.post.parameters.max_new_tokens as i32) - (rag_tokens_n as i32);
         if limit < 512 {
