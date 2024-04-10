@@ -8,7 +8,7 @@ use std::time::Instant;
 use tracing::{info, warn};
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
@@ -30,9 +30,8 @@ pub struct File {
     pub cpath: PathBuf,
 }
 
-#[derive(Debug)]
 pub struct FileLine {
-    pub fref: Arc<ARwLock<File>>,
+    pub fref: Arc<AMutex<File>>,
     pub line_n: usize,
     pub line_content: String,
     pub useful: f32,
@@ -92,7 +91,7 @@ fn msg2doc(msg: &ContextFile) -> Document {
     doc
 }
 
-async fn colorize_if_more_useful(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: usize, line2: usize, color: &String, useful: f32) {
+async fn colorize_if_more_useful(linevec: &Vec<Arc<AMutex<FileLine>>>, line1: usize, line2: usize, color: &String, useful: f32) {
     if DEBUG {
         info!("    colorize_if_more_useful {}..{} <= color {:?} useful {}", line1, line2, color, useful);
     }
@@ -100,7 +99,7 @@ async fn colorize_if_more_useful(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: u
         let u = useful - (i as f32) * 0.001;
         match linevec.get(i) {
             Some(line) => {
-                let mut line_lock = line.write().await;
+                let mut line_lock = line.lock().await;
                 if line_lock.useful < u || line_lock.color.is_empty() {
                     line_lock.useful = u;
                     line_lock.color = color.clone();
@@ -111,11 +110,11 @@ async fn colorize_if_more_useful(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: u
     }
 }
 
-async fn colorize_minus_one(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: usize, line2: usize) {
+async fn colorize_minus_one(linevec: &Vec<Arc<AMutex<FileLine>>>, line1: usize, line2: usize) {
     for i in line1 .. line2 {
         match linevec.get(i) {
             Some(line) => {
-                let mut line_lock = line.write().await;
+                let mut line_lock = line.lock().await;
                 line_lock.useful = -1.;
                 line_lock.color = "disabled".to_string();
             },
@@ -124,13 +123,13 @@ async fn colorize_minus_one(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1: usize,
     }
 }
 
-async fn downgrade_lines_if_subsymbol(linevec: &Vec<Arc<ARwLock<FileLine>>>, line1_base0: usize, line2_base0: usize, subsymbol: &String, downgrade_coef: f32) {
+async fn downgrade_lines_if_subsymbol(linevec: &Vec<Arc<AMutex<FileLine>>>, line1_base0: usize, line2_base0: usize, subsymbol: &String, downgrade_coef: f32) {
     let mut changes_cnt = 0;
     for i in line1_base0 .. line2_base0 {
         assert!(i < linevec.len());
         match linevec.get(i) {
             Some(line) => {
-                let mut line_lock = line.write().await;
+                let mut line_lock = line.lock().await;
                 if subsymbol.starts_with(&line_lock.color) {
                     if i == line2_base0-1 || i == line1_base0 {
                         if line_lock.line_content.trim().len() == 1 {
@@ -156,7 +155,7 @@ pub async fn postprocess_rag_stage1(
     origmsgs: Vec<ContextFile>,
     close_small_gaps: bool,
     force_read_text: bool,
-) -> (HashMap<PathBuf, Vec<Arc<ARwLock<FileLine>>>>, Vec<Arc<ARwLock<FileLine>>>){
+) -> (HashMap<PathBuf, Vec<Arc<AMutex<FileLine>>>>, Vec<Arc<AMutex<FileLine>>>) {
     // 1. Load files, with ast or not
     let mut files = HashMap::new();
     let ast_module = global_context.read().await.ast_module.clone();
@@ -193,14 +192,15 @@ pub async fn postprocess_rag_stage1(
                 cpath: doc.path.clone(),
             });
         }
-        files.insert(msg.file_name.clone(), Arc::new(ARwLock::new(f.unwrap())));
+        files.insert(msg.file_name.clone(), Arc::new(AMutex::new(f.unwrap())));
     }
     
     // 2. Generate line refs, fill background scopes found in a file (not search results yet)
     let mut lines_by_useful = vec![];
     let mut lines_in_files = HashMap::new();
     for fref in files.values() {
-        for (line_n, line) in fref.read().await.markup.file_content.lines().enumerate() {
+        let fref_lock = fref.lock().await;
+        for (line_n, line) in fref_lock.markup.file_content.lines().enumerate() {
             let file_line = FileLine {
                 fref: fref.clone(),
                 line_n,
@@ -209,15 +209,15 @@ pub async fn postprocess_rag_stage1(
                 color: "".to_string(),
                 take: false,
             };
-            let file_line_arc = Arc::new(ARwLock::new(file_line));
+            let file_line_arc = Arc::new(AMutex::new(file_line));
             lines_by_useful.push(file_line_arc.clone());
-            lines_in_files.entry(fref.read().await.cpath.clone()).or_insert(vec![]).push(file_line_arc.clone());
+            lines_in_files.entry(fref_lock.cpath.clone()).or_insert(vec![]).push(file_line_arc.clone());
         }
     }
-    
     for linevec in lines_in_files.values() {
         if let Some(line) = linevec.get(0) {
-            for s in line.read().await.fref.read().await.markup.symbols_sorted_by_path_len.iter() {
+            let line_lock = line.lock().await;
+            for s in line_lock.fref.lock().await.markup.symbols_sorted_by_path_len.iter() {
                 let useful = 10.;  // depends on symbol type?
                 colorize_if_more_useful(linevec, s.full_range.start_point.row, s.full_range.end_point.row+1, &format!("{}", s.symbol_path), useful).await;
             }
@@ -242,7 +242,7 @@ pub async fn postprocess_rag_stage1(
         match linevec.get(0) {
             Some(line) => {
                 if !omsg.symbol.is_empty() {
-                    for sym in line.read().await.fref.read().await.markup.symbols_sorted_by_path_len.iter() {
+                    for sym in line.lock().await.fref.lock().await.markup.symbols_sorted_by_path_len.iter() {
                         if sym.guid == omsg.symbol {
                             symbol_mb = Some(sym.clone());
                             break;
@@ -279,8 +279,8 @@ pub async fn postprocess_rag_stage1(
     for linevec in lines_in_files.values() {
         match linevec.get(0) {
             Some(line) => {
-                let line_lock = line.read().await;
-                let fref = line_lock.fref.read().await;
+                let line_lock = line.lock().await;
+                let fref = line_lock.fref.lock().await;
                 if DEBUG {
                     info!("degrading body of symbols in {:?}", fref.cpath);
                 }
@@ -314,13 +314,13 @@ pub async fn postprocess_rag_stage1(
         for linevec in lines_in_files.values() {
             let mut useful_copy = vec![];
             for line in linevec.iter() {
-                useful_copy.push(line.read().await.useful);
+                useful_copy.push(line.lock().await.useful);
             }
             for i in 1 .. linevec.len() - 1 {
                 let (l, m, r) = (
-                    linevec.get(i-1).unwrap().read().await.useful,
-                    linevec.get(i).unwrap().read().await.useful,
-                    linevec.get(i+1).unwrap().read().await.useful,
+                    linevec.get(i-1).unwrap().lock().await.useful,
+                    linevec.get(i).unwrap().lock().await.useful,
+                    linevec.get(i+1).unwrap().lock().await.useful,
                 );
                 
                 let both_l_and_r_support = l.min(r);
@@ -328,7 +328,7 @@ pub async fn postprocess_rag_stage1(
             }
             for i in 0 .. linevec.len() {
                 if let Some(line) = linevec.get(i) {
-                    line.write().await.useful = useful_copy[i];
+                    line.lock().await.useful = useful_copy[i];
                 }
             }
         }
@@ -374,7 +374,7 @@ pub async fn postprocess_at_results2(
     // 6. Sort
     let mut useful_values = vec![];
     for v in lines_by_useful.iter() {
-        useful_values.push(v.read().await.useful);
+        useful_values.push(v.lock().await.useful);
     }
     let mut indices: Vec<_> = (0..lines_by_useful.len()).collect();
     indices.sort_by(|&a, &b| {
@@ -383,12 +383,12 @@ pub async fn postprocess_at_results2(
         b_useful.partial_cmp(&a_useful).unwrap_or(Ordering::Equal)
     });
     let lines_by_useful: Vec<_> = indices.into_iter().map(|i| lines_by_useful[i].clone()).collect();
-    
+
     // 7. Convert line_content to tokens up to the limit
     let mut tokens_count: usize = 0;
     let mut lines_take_cnt: usize = 0;
     for lineref in lines_by_useful.iter() {
-        let mut line_lock = lineref.write().await;
+        let mut line_lock = lineref.lock().await;
         if line_lock.useful < 0.0 {
             continue;
         }
@@ -404,10 +404,10 @@ pub async fn postprocess_at_results2(
     if DEBUG {
         for linevec in lines_in_files.values() {
             for lineref in linevec.iter() {
-                let line_lock = lineref.read().await;
+                let line_lock = lineref.lock().await;
                 info!("{} {}:{:04} {:>7.3} {}",
                 if line_lock.take { "take" } else { "dont" },
-                last_n_chars(&line_lock.fref.read().await.cpath.to_string_lossy().to_string(), 30),
+                last_n_chars(&line_lock.fref.lock().await.cpath.to_string_lossy().to_string(), 30),
                 line_lock.line_n,
                 line_lock.useful,
                 first_n_chars(&line_lock.line_content, 20)
@@ -420,7 +420,7 @@ pub async fn postprocess_at_results2(
     let mut merged: Vec<ContextFile> = vec![];
     for linevec in lines_in_files.values() {
         if let Some(line) = linevec.get(0) {
-            let cpath = line.read().await.fref.read().await.cpath.clone();
+            let cpath = line.lock().await.fref.lock().await.cpath.clone();
             let mut out = String::new();
             let mut first_line: usize = 0;
             let mut last_line: usize = 0;
@@ -428,7 +428,7 @@ pub async fn postprocess_at_results2(
             let mut anything = false;
             
             for (i, line_i) in linevec.iter().enumerate() {
-                let line_lock = line_i.read().await;
+                let line_lock = line_i.lock().await;
                 last_line = i;
                 if !line_lock.take {
                     continue;

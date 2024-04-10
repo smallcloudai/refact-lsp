@@ -270,9 +270,9 @@ pub async fn handle_v1_ast_file_dump(
     let mut result = "".to_string();
     for linevec in lines_in_files.values() {
         for lineref in linevec {
-            let line_lock = lineref.read().await;
+            let line_lock = lineref.lock().await;
             result.push_str(format!("{}:{:04} {:<43} {:>7.3} {}\n",
-                crate::nicer_logs::last_n_chars(&line_lock.fref.read().await.cpath.to_string_lossy().to_string(), 30), line_lock.line_n,
+                crate::nicer_logs::last_n_chars(&line_lock.fref.lock().await.cpath.to_string_lossy().to_string(), 30), line_lock.line_n,
                 crate::nicer_logs::first_n_chars(&line_lock.line_content, 40), line_lock.useful, line_lock.color,
             ).as_str());
         }
