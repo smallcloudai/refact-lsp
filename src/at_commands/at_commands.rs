@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 
@@ -12,9 +13,27 @@ use crate::at_commands::at_file::AtFile;
 use crate::at_commands::at_workspace::AtWorkspace;
 use crate::at_commands::at_diff::AtDiff;
 
-use crate::call_validation::{ContextFile};
+use crate::call_validation::{ContextDiff, ContextFile};
 use crate::global_context::GlobalContext;
 
+
+#[derive(Debug, Clone)]
+pub enum AtResponse {
+    ContextFile(ContextFile),
+    ContextDiff(ContextDiff),
+}
+
+impl Serialize for AtResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+    {
+        match self {
+            AtResponse::ContextFile(context_file) => context_file.serialize(serializer),
+            AtResponse::ContextDiff(context_diff) => context_diff.serialize(serializer),
+        }
+    }
+}
 
 pub struct AtCommandsContext {
     pub global_context: Arc<ARwLock<GlobalContext>>,
@@ -35,7 +54,7 @@ pub trait AtCommand: Send + Sync {
     fn name(&self) -> &String;
     fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>>;
     async fn can_execute(&self, _args: &Vec<String>, _context: &AtCommandsContext) -> bool {true}
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<ContextFile>, String>;
+    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<AtResponse>, String>;
 }
 
 #[async_trait]

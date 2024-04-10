@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use async_trait::async_trait;
-use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
+use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam, AtResponse};
 use tokio::sync::Mutex as AMutex;
 use crate::call_validation::ContextFile;
 use crate::vecdb::structs::{Record, VecdbSearch};
@@ -20,7 +20,7 @@ impl AtWorkspace {
     }
 }
 
-fn results2message(results: &Vec<Record>) -> Vec<ContextFile> {
+fn results2message(results: &Vec<Record>) -> Vec<AtResponse> {
     let mut vector_of_context_file: Vec<ContextFile> = vec![];
     for i in 0..results.len() {
         let r = &results[i];
@@ -33,7 +33,7 @@ fn results2message(results: &Vec<Record>) -> Vec<ContextFile> {
             usefulness: r.usefulness,
         });
     }
-    vector_of_context_file
+    vector_of_context_file.into_iter().map(AtResponse::ContextFile).collect()
 }
 
 #[async_trait]
@@ -46,7 +46,7 @@ impl AtCommand for AtWorkspace {
     {
         &self.params
     }
-    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<ContextFile>, String> {
+    async fn execute(&self, query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<AtResponse>, String> {
         match *context.global_context.read().await.vec_db.lock().await {
             Some(ref db) => {
                 let mut db_query = args.join(" ");

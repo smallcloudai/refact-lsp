@@ -203,6 +203,12 @@ pub struct ContextFile {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContextDiff {
+    pub file_name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,

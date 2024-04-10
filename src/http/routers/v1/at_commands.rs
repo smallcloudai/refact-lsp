@@ -114,7 +114,7 @@ pub async fn handle_v1_command_preview(
             }
         }
     }
-    let processed = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
+    let processed = crate::scratchpads::chat_utils_rag::postprocess_at_results(
         global_context.clone(),
         messages_for_postprocessing,
         tokenizer_arc.clone(),

@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::json;
 use tokio::sync::Mutex as AMutex;
 
 use crate::ast::structs::AstQuerySearchResult;
-use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
+use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam, AtResponse};
 use crate::at_commands::at_params::AtParamSymbolPathQuery;
 use crate::call_validation::ContextFile;
 use tracing::info;
 use crate::ast::ast_index::RequestSymbolType;
 
 
-async fn results2message(result: &AstQuerySearchResult) -> Vec<ContextFile> {
+async fn results2message(result: &AstQuerySearchResult) -> Vec<AtResponse> {
     // info!("results2message {:?}", result);
     let mut symbols = vec![];
     for res in &result.search_results {
@@ -27,7 +26,7 @@ async fn results2message(result: &AstQuerySearchResult) -> Vec<ContextFile> {
             usefulness: 100.0 * res.sim_to_query
         });
     }
-    symbols
+    symbols.into_iter().map(AtResponse::ContextFile).collect()
 }
 
 pub struct AtAstDefinition {
@@ -54,7 +53,7 @@ impl AtCommand for AtAstDefinition {
     fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>> {
         &self.params
     }
-    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<Vec<ContextFile>, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, _top_n: usize, context: &AtCommandsContext) -> Result<Vec<AtResponse>, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());

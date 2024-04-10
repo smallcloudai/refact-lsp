@@ -17,7 +17,8 @@ use crate::ast::ast_module::AstModule;
 use crate::ast::comments_wrapper::{get_language_id_by_filename, wrap_comments};
 use crate::ast::treesitter::language_id::LanguageId;
 use crate::at_commands::at_ast_lookup_symbols::results2message;
-use crate::call_validation::{CodeCompletionPost, ChatMessage, ContextFile, SamplingParameters};
+use crate::at_commands::at_commands::AtResponse;
+use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::files_in_workspace::Document;
@@ -309,10 +310,10 @@ impl ScratchpadAbstract for SingleFileFIM {
                     symbol: "".to_string(),
                     usefulness: -1.0,
                 };
-                ast_messages.push(fim_ban);
+                ast_messages.push(AtResponse::ContextFile(fim_ban));
             }
 
-            let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
+            let postprocessed_messages = crate::scratchpads::chat_utils_rag::postprocess_at_results(
                 self.global_context.clone(),
                 ast_messages,
                 self.t.tokenizer.clone(),
@@ -320,8 +321,13 @@ impl ScratchpadAbstract for SingleFileFIM {
                 true,
             ).await;
 
-            prompt = add_context_to_prompt(&self.t.context_format, &prompt, &self.fim_prefix, &postprocessed_messages, &language_id);
-            self.context_used = context_to_fim_debug_page(&t0, &postprocessed_messages, &was_looking_for);
+            // FIXME: only ContextFile messages are going to prompt
+            let cf_messages: Vec<ContextFile> = postprocessed_messages.into_iter().filter_map(|message| {
+                if let AtResponse::ContextFile(context_file) = message { Some(context_file) } else { None }
+            }).collect();
+            
+            prompt = add_context_to_prompt(&self.t.context_format, &prompt, &self.fim_prefix, &cf_messages, &language_id);
+            self.context_used = context_to_fim_debug_page(&t0, &cf_messages, &was_looking_for);
             self.context_used["n_ctx".to_string()] = Value::from(context_size as i64);
             self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
         }

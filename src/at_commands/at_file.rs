@@ -1,14 +1,13 @@
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::json;
 use tokio::sync::Mutex as AMutex;
 use tracing::info;
 use std::sync::Arc;
 
-use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
+use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam, AtResponse};
 use crate::at_commands::utils::split_file_into_chunks_from_line_inside;
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
-use crate::call_validation::{ChatMessage, ContextFile};
+use crate::call_validation::ContextFile;
 
 
 pub struct AtFile {
@@ -252,7 +251,7 @@ impl AtCommand for AtFile {
         // false
     }
 
-    async fn execute(&self, _query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<ContextFile>, String> {
+    async fn execute(&self, _query: &String, args: &Vec<String>, top_n: usize, context: &AtCommandsContext) -> Result<Vec<AtResponse>, String> {
         let can_execute = self.can_execute(args, context).await;
         if !can_execute {
             return Err("incorrect arguments".to_string());
@@ -320,7 +319,8 @@ impl AtCommand for AtFile {
             for ((line1, line2), _text) in res_below.iter() {
                 info!("below: {}-{}", line1, line2);
             }
-            return Ok(chunks_into_context_file(res_above, res_below, &file_path))
+            let res = chunks_into_context_file(res_above, res_below, &file_path);
+            return Ok(res.into_iter().map(AtResponse::ContextFile).collect())
         }
 
         if line1 == 0 || line2 == 0 {
@@ -340,7 +340,7 @@ impl AtCommand for AtFile {
             symbol: "".to_string(),
             usefulness: 100.0,
         });
-        Ok(vector_of_context_file) 
+        Ok(vector_of_context_file.into_iter().map(AtResponse::ContextFile).collect()) 
     }
 }
 

@@ -10,10 +10,10 @@ use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 
-use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_commands::at_commands::{AtCommandsContext, AtResponse};
 use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 
-use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
+use crate::call_validation::{ChatMessage, ChatPost, ContextDiff, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::ast::structs::FileASTMarkup;
 use crate::files_in_workspace::{canonical_path, correct_to_nearest_filename, Document, get_file_text_from_memory_or_disk};
@@ -356,10 +356,34 @@ pub async fn _postprocess2_from_chat_messages(
             }
         }
     }
-    postprocess_at_results2(global_context, origmsgs, tokenizer, tokens_limit, force_read_text).await
+    postprocess_context_files(global_context, origmsgs, tokenizer, tokens_limit, force_read_text).await
 }
 
-pub async fn postprocess_at_results2(
+pub async fn postprocess_at_results(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    messages: Vec<AtResponse>,
+    tokenizer: Arc<RwLock<Tokenizer>>,
+    tokens_limit: usize,
+    force_read_text: bool,
+) -> Vec<AtResponse> {
+    // TODO: define tokens counter here?
+    let cf: Vec<ContextFile> = messages.iter().cloned().filter_map(|message| {
+        if let AtResponse::ContextFile(context_file) = message { Some(context_file) } else { None }
+    }).collect();
+    
+    let cf_post = postprocess_context_files(global_context.clone(), cf, tokenizer, tokens_limit, force_read_text).await;
+
+    let cd: Vec<ContextDiff> = messages.iter().cloned().filter_map(|message| {
+        if let AtResponse::ContextDiff(context_file) = message { Some(context_file) } else { None }
+    }).collect();
+    // TODO: postprocessing for ContextDiff, including tokens counting
+
+    cf_post.into_iter().map(AtResponse::ContextFile)
+        .chain(cd.into_iter().map(AtResponse::ContextDiff))
+        .collect()
+}
+
+async fn postprocess_context_files(
     global_context: Arc<ARwLock<GlobalContext>>,
     messages: Vec<ContextFile>,
     tokenizer: Arc<RwLock<Tokenizer>>,
@@ -539,7 +563,7 @@ pub async fn run_at_commands(
             }
         }
         let t0 = Instant::now();
-        let processed = postprocess_at_results2(
+        let processed = postprocess_at_results(
             global_context.clone(),
             messages_for_postprocessing,
             tokenizer.clone(),
