@@ -20,7 +20,7 @@ use crate::ast::treesitter::language_id::LanguageId;
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::structs::SymbolType;
 use crate::ast::usages_declarations_merger::{FilePathIterator, find_decl_by_name, find_decl_by_caller_guid};
-use crate::files_in_workspace::{Document, read_file_from_disk};
+use crate::files_in_workspace::Document;
 
 
 #[derive(Debug)]
@@ -539,7 +539,7 @@ impl AstIndex {
                     .collect()
             })
             .unwrap_or_default();
-        let file_content = match read_file_from_disk(&doc.path).await {
+        let file_content = match doc.get_text_or_read_from_disk().await {
             Ok(content) => content.to_string(),
             Err(e) => return Err(e.to_string())
         };

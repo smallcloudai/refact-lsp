@@ -187,7 +187,7 @@ impl Document {
             self.text = Some(res);
         }
     }
-    pub async fn get_text_or_read_from_disk(&mut self) -> Result<String, String> {
+    pub async fn get_text_or_read_from_disk(&self) -> Result<String, String> {
         if let Some(text) = self.text.clone() {
             return Ok(text.to_string());
         }
