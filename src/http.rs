@@ -26,7 +26,7 @@ pub async fn start_server(
 ) -> Option<JoinHandle<()>> {
     let (host, port) = {
         let read_guard = global_context.read().await;
-        let host = read_guard.cmdline.http_host.clone();
+        let host = read_guard.cmdline.host.clone();
         let port = read_guard.cmdline.http_port;
         (host, port)
     };

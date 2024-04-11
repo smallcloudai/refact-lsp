@@ -345,7 +345,7 @@ pub async fn spawn_lsp_task(
     gcx: Arc<ARwLock<global_context::GlobalContext>>,
     cmdline: CommandLine
 ) -> Option<JoinHandle<()>> {
-    let ip = IpAddr::from_str(&cmdline.lsp_host).expect("Invalid IP address");
+    let ip = IpAddr::from_str(&cmdline.host).expect("Invalid IP address");
     if cmdline.lsp_stdin_stdout == 0 && cmdline.lsp_port > 0 {
         let gcx_t = gcx.clone();
         let addr: std::net::SocketAddr = (ip, cmdline.lsp_port).into();
