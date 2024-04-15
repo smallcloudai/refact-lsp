@@ -56,6 +56,8 @@ pub struct CodeAssistantCaps {
     pub code_chat_models: HashMap<String, ModelRecord>,
     pub code_chat_default_model: String,
     #[serde(default)]
+    pub n_ctx_rewrite: HashMap<String, usize>,
+    #[serde(default)]
     pub default_embeddings_model: String,
     #[serde(default)]
     pub endpoint_embeddings_template: String,

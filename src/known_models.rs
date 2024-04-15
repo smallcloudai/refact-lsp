@@ -99,16 +99,7 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
-            ]
-        },
-        "gpt-4": {
-            "n_ctx": 4096,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {
-                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
-                }
-            },
-            "similar_models": [
+                "gpt-4"
             ]
         },
         "claude-instant-1.2": {
@@ -119,6 +110,9 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
+                "claude-3-haiku",
+                "claude-3-opus",
+                "claude-3-sonnet",
                 "claude-2.1"
             ]
         },

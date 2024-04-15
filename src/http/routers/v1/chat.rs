@@ -29,7 +29,13 @@ async fn _lookup_chat_scratchpad(
         &chat_post.scratchpad,
         &recommended_model_record.default_scratchpad,
     )?;
-    Ok((model_name, sname.clone(), patch.clone(), recommended_model_record.n_ctx))
+    let mut n_ctx = recommended_model_record.n_ctx;
+    if let Some(n_ctx_rewrite) = caps_locked.n_ctx_rewrite.get(&model_name) {
+        if *n_ctx_rewrite > 0 {
+            n_ctx = *n_ctx_rewrite;
+        }
+    }
+    Ok((model_name, sname.clone(), patch.clone(), n_ctx))
 }
 
 pub async fn handle_v1_chat(
