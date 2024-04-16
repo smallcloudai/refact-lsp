@@ -27,7 +27,8 @@ pub const KNOWN_MODELS: &str = r####"
                 "starcoder2/15b/base",
                 "starcoder2/3b/vllm",
                 "starcoder2/7b/vllm",
-                "starcoder2/15b/vllm"
+                "starcoder2/15b/vllm",
+                "refact2/vllm"
             ]
         },
         "smallcloudai/Refact-1_6B-fim": {

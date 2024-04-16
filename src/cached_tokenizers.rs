@@ -1,5 +1,5 @@
 use tokio::io::AsyncWriteExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::Duration;
 use tokio::sync::RwLock as ARwLock;
@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::global_context::GlobalContext;
 use crate::caps::{CodeAssistantCaps, strip_model_from_finetune};
+use crate::files_in_workspace::read_file_from_disk;
 
 
 async fn try_open_tokenizer(
@@ -60,6 +61,34 @@ async fn download_tokenizer_file(
     Ok(())
 }
 
+async fn read_from_disk_tokenizer_file(
+    path: &PathBuf,
+    to: impl AsRef<Path>,
+) -> Result<(), String> {
+    tokio::fs::create_dir_all(
+        to.as_ref().parent().ok_or_else(|| "tokenizer path has no parent")?,
+    ).await.map_err(|e| format!("failed to create parent dir: {}", e))?;
+    if to.as_ref().exists() {
+        return Ok(());
+    }
+    info!("reading tokenizer from {:?}", path);
+    let bytes = tokio::fs::read(path);
+
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&to)
+        .await
+        .map_err(|e| format!("failed to open file: {}", e))?;
+    file.write_all(&bytes.await
+        .map_err(|e| format!("failed to fetch bytes: {}", e))?
+    ).await.map_err(|e| format!("failed to write to file: {}", e))?;
+    file.flush().await.map_err(|e| format!("failed to flush file: {}", e))?;
+    info!("saved tokenizer to {}", to.as_ref().display());
+    Ok(())
+}
+
+
 fn check_json_file(path: &Path) -> bool {
     match Tokenizer::from_file(path) {
         Ok(_) => { true }
@@ -85,7 +114,13 @@ async fn try_download_tokenizer_file_and_open(
         if i != 0 {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        let res = download_tokenizer_file(http_client, http_path, api_token.clone(), tmp_path).await;
+
+        let file_path = PathBuf::from(http_path);
+        let res = if file_path.exists() && file_path.is_file() {
+            read_from_disk_tokenizer_file(&file_path, tmp_path).await
+        } else {
+            download_tokenizer_file(http_client, http_path, api_token.clone(), tmp_path).await
+        };
         if res.is_err() {
             error!("failed to download tokenizer: {}", res.unwrap_err());
             continue;
@@ -145,7 +180,11 @@ pub async fn cached_tokenizer(
     let http_path = {
         let caps_locked = caps.read().unwrap();
         let rewritten_model_name = caps_locked.tokenizer_rewrite_path.get(&model_name).unwrap_or(&model_name);
-        caps_locked.tokenizer_path_template.replace("$MODEL", rewritten_model_name)
+        if PathBuf::from(rewritten_model_name).exists() {
+            rewritten_model_name.clone() + "/tokenizer.json"
+        } else {
+            caps_locked.tokenizer_path_template.replace("$MODEL", rewritten_model_name)
+        }
     };
     try_download_tokenizer_file_and_open(&client2, http_path.as_str(), api_key.clone(), &to).await?;
     info!("loading tokenizer \"{}\"", to.display());
