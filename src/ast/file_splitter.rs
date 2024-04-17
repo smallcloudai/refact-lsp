@@ -103,7 +103,7 @@ impl AstBasedFileSplitter {
                     &mut lines_in_files,
                     &mut lines_by_useful,
                     tokenizer.clone(),
-                    tokens_limit,
+                    tokens_limit as i32,
                     single_file_mode,
                     &settings,
                 ).await;

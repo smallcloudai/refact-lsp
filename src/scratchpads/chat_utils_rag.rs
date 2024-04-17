@@ -20,7 +20,7 @@ use crate::ast::structs::FileASTMarkup;
 use crate::caps::ModelRecord;
 use crate::files_in_workspace::Document;
 
-const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
+const RESERVE_FOR_QUESTION_AND_FOLLOWUP: i32 = 1024;  // tokens
 
 
 const DEBUG: bool = false;
@@ -457,7 +457,7 @@ pub async fn postprocess_at_results2(
     global_context: Arc<ARwLock<GlobalContext>>,
     messages: Vec<ChatMessage>,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    tokens_limit: usize,
+    tokens_limit: i32,
     single_file_mode: bool,
 ) -> Vec<ContextFile> {
     let (files_markup, origmsgs) = postprocess_rag_stage_1_2(global_context.clone(), messages).await;
@@ -503,7 +503,7 @@ pub async fn postprocess_rag_stage_7_9(
     lines_in_files: &mut HashMap<PathBuf, Vec<Arc<FileLine>>>,
     lines_by_useful: &mut Vec<Arc<FileLine>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    tokens_limit: usize,
+    tokens_limit: i32,
     single_file_mode: bool,
     settings: &PostprocessSettings,
 ) -> Vec<ContextFile> {
@@ -515,7 +515,7 @@ pub async fn postprocess_rag_stage_7_9(
     });
 
     // 8. Convert line_content to tokens up to the limit
-    let mut tokens_count: usize = 0;
+    let mut tokens_count: i32 = 0;
     let mut lines_take_cnt: usize = 0;
     let mut files_mentioned_set: HashSet<String> = HashSet::new();
     let mut files_mentioned_sequence: Vec<PathBuf> = vec![];
@@ -613,9 +613,9 @@ pub async fn postprocess_rag_stage_7_9(
 pub fn count_tokens(
     tokenizer: &Tokenizer,
     text: &str,
-) -> usize {
+) -> i32 {
     match tokenizer.encode(text, false) {
-        Ok(tokens) => tokens.len(),
+        Ok(tokens) => tokens.len() as i32,
         Err(_) => 0,
     }
 }
@@ -623,8 +623,8 @@ pub fn count_tokens(
 pub async fn run_at_commands(
     global_context: Arc<ARwLock<GlobalContext>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    maxgen: usize,
-    mut n_ctx: usize,
+    maxgen: i32,
+    mut n_ctx: i32,
     post: &mut ChatPost,
     top_n: usize,
     stream_back_to_user: &mut HasVecdbResults,
@@ -664,7 +664,7 @@ pub async fn run_at_commands(
     for msg_idx in user_msg_starts..post.messages.len() {
         let mut user_posted = post.messages[msg_idx].content.clone();
         let user_posted_ntokens = count_tokens(&tokenizer.read().unwrap(), &user_posted);
-        let mut context_limit = reserve_for_context / user_messages_with_at;
+        let mut context_limit = reserve_for_context / user_messages_with_at as i32;
         if context_limit <= user_posted_ntokens {
             context_limit = 0;
         } else {
@@ -727,14 +727,14 @@ async fn recommended_chat_model(model: &String, global_context: Arc<ARwLock<Glob
     Ok((model_name, recommended_model_record))
 }
 
-pub fn n_ctx_rag_allowed_for_model(model_record: &ModelRecord) -> usize {
+pub fn n_ctx_rag_allowed_for_model(model_record: &ModelRecord) -> i32 {
     model_record.supports_scratchpads.get(&model_record.default_scratchpad)
         .and_then(|x| x.as_object())
         .and_then(|obj| obj.get("rag_ratio"))
         .and_then(|v| v.as_f64())
-        .map(|x|(model_record.n_ctx as f64 * x) as usize)
+        .map(|x|(model_record.n_ctx as f64 * x) as i32)
         .map(|x|x.min(4096).max(50))
-        .unwrap_or(0) 
+        .unwrap_or(0)
 }
 
 pub struct HasVecdbResults {
