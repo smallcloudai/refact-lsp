@@ -15,8 +15,9 @@ use crate::ast::treesitter::ast_instance_structs::SymbolInformation;
 use crate::ast::treesitter::structs::SymbolType;
 
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile};
-use crate::global_context::GlobalContext;
+use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::ast::structs::FileASTMarkup;
+use crate::caps::ModelRecord;
 use crate::files_in_workspace::Document;
 
 const RESERVE_FOR_QUESTION_AND_FOLLOWUP: usize = 1024;  // tokens
@@ -623,7 +624,7 @@ pub async fn run_at_commands(
     global_context: Arc<ARwLock<GlobalContext>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
-    n_ctx: usize,
+    mut n_ctx: usize,
     post: &mut ChatPost,
     top_n: usize,
     stream_back_to_user: &mut HasVecdbResults,
@@ -646,6 +647,9 @@ pub async fn run_at_commands(
         } else {
             break;
         }
+    }
+    if let Ok((_, recommended_model_record)) = recommended_chat_model(&post.model, global_context.clone()).await {
+        n_ctx = n_ctx_rag_allowed_for_model(&recommended_model_record);
     }
     user_messages_with_at = user_messages_with_at.max(1);
     let reserve_for_context = n_ctx - maxgen - RESERVE_FOR_QUESTION_AND_FOLLOWUP;
@@ -711,6 +715,27 @@ pub async fn run_at_commands(
     user_msg_starts
 }
 
+async fn recommended_chat_model(model: &String, global_context: Arc<ARwLock<GlobalContext>>) -> Result<(String, ModelRecord), String> {
+    let caps = try_load_caps_quickly_if_not_present(global_context.clone(), 0).await.map_err(|e|e.to_string())?;
+    let caps_locked = caps.read().unwrap();
+    let result = crate::caps::which_model_to_use(
+        &caps_locked.code_chat_models,
+        model,
+        &caps_locked.code_chat_default_model,
+    );
+    let (model_name, recommended_model_record) = result.map(|x|(x.0, x.1.clone()))?;
+    Ok((model_name, recommended_model_record))
+}
+
+pub fn n_ctx_rag_allowed_for_model(model_record: &ModelRecord) -> usize {
+    model_record.supports_scratchpads.get(&model_record.default_scratchpad)
+        .and_then(|x| x.as_object())
+        .and_then(|obj| obj.get("rag_ratio"))
+        .and_then(|v| v.as_f64())
+        .map(|x|(model_record.n_ctx as f64 * x) as usize)
+        .map(|x|x.min(4096).max(50))
+        .unwrap_or(0) 
+}
 
 pub struct HasVecdbResults {
     pub was_sent: bool,

@@ -16,6 +16,7 @@ use crate::at_commands::query::QueryLine;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::call_validation::ChatMessage;
+use crate::scratchpads::chat_utils_rag::n_ctx_rag_allowed_for_model;
 
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -114,11 +115,12 @@ pub async fn handle_v1_command_preview(
             }
         }
     }
+    let n_ctx_rag = n_ctx_rag_allowed_for_model(&recommended_model_record);
     let processed = crate::scratchpads::chat_utils_rag::postprocess_at_results2(
         global_context.clone(),
         messages_for_postprocessing,
         tokenizer_arc.clone(),
-        recommended_model_record.n_ctx,
+        n_ctx_rag,
         false,
     ).await;
     let mut preview: Vec<ChatMessage> = vec![];
