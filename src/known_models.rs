@@ -105,7 +105,8 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
-                "gpt-4"
+                "gpt-4",
+                "gpt-4-turbo"
             ]
         },
         "claude-instant-1.2": {
