@@ -234,6 +234,7 @@ impl AstModule {
             cursor,
             top_n_near_cursor,
             top_n_usage_for_each_decl,
+            3
         ).await;
         // for r in declarations.iter() {
         //     let last_30_chars = crate::nicer_logs::last_n_chars(&r.name, 30);
