@@ -26,7 +26,8 @@ const TOO_MANY_SYMBOLS_IN_FILE: usize = 2000;
 
 #[derive(Debug)]
 pub struct AstIndex {
-    symbols_by_name: HashMap<String, Vec<AstSymbolInstanceArc>>,
+    declaration_symbols_by_name: HashMap<String, Vec<AstSymbolInstanceArc>>,
+    usage_symbols_by_name: HashMap<String, Vec<AstSymbolInstanceArc>>,
     symbols_by_guid: HashMap<Uuid, AstSymbolInstanceArc>,
     path_by_symbols: HashMap<PathBuf, Vec<AstSymbolInstanceArc>>,
     type_guid_to_dependent_guids: HashMap<Uuid, HashSet<Uuid>>,
@@ -52,7 +53,8 @@ pub(crate) struct IndexingStats {
 impl AstIndex {
     pub fn init() -> AstIndex {
         AstIndex {
-            symbols_by_name: HashMap::new(),
+            declaration_symbols_by_name: HashMap::new(),
+            usage_symbols_by_name: HashMap::new(),
             symbols_by_guid: HashMap::new(),
             path_by_symbols: HashMap::new(),
             type_guid_to_dependent_guids: HashMap::new(),
@@ -113,7 +115,11 @@ impl AstIndex {
         let mut symbol_names: SortedVec<String> = SortedVec::new();
         for symbol in symbols.iter() {
             let symbol_ref = read_symbol(symbol);
-            self.symbols_by_name.entry(symbol_ref.name().to_string()).or_insert_with(Vec::new).push(symbol.clone());
+            if symbol_ref.is_declaration() {
+                self.declaration_symbols_by_name.entry(symbol_ref.name().to_string()).or_insert_with(Vec::new).push(symbol.clone());
+            } else {
+                self.usage_symbols_by_name.entry(symbol_ref.name().to_string()).or_insert_with(Vec::new).push(symbol.clone());
+            }
             self.symbols_by_guid.insert(symbol_ref.guid().clone(), symbol.clone());
             self.path_by_symbols.entry(doc.path.clone()).or_insert_with(Vec::new).push(symbol.clone());
             symbol_names.push(symbol_ref.name().to_string());
@@ -137,11 +143,17 @@ impl AstIndex {
         for symbol in symbols
             .unwrap_or_default()
             .iter() {
-            let (name, guid) = {
+            let (name, guid, is_decl) = {
                 let symbol_ref = read_symbol(symbol);
-                (symbol_ref.name().to_string(), symbol_ref.guid().clone())
+                (symbol_ref.name().to_string(), symbol_ref.guid().clone(), symbol_ref.is_declaration())
             };
-            self.symbols_by_name
+            let symbols_by_name = if is_decl {
+                &mut self.declaration_symbols_by_name
+            } else {
+                &mut self.usage_symbols_by_name
+            };
+            // TODO: can be slow
+            symbols_by_name
                 .entry(name)
                 .and_modify(|v| {
                     v.retain(|s| *read_symbol(s).guid() != guid);
@@ -159,17 +171,18 @@ impl AstIndex {
                 self.declaration_guid_to_usage_names.remove(&guid);
             }
             removed_guids.insert(guid.clone());
-        }
-        for symbol in self.symbols_by_guid.values_mut() {
-            // FIXME: spends a lot of time here
-            symbol.write().expect("the data might be broken").remove_linked_guids(&removed_guids);
+
+            // TODO: this will not remove all possible linked guid
+            // if we have searched for symbols in multiple files in `merge_usages_to_declarations`
+            symbol.write().remove_linked_guids(&removed_guids);
         }
         self.has_changes = true;
         has_removed
     }
 
     pub fn clear_index(&mut self) {
-        self.symbols_by_name.clear();
+        self.declaration_symbols_by_name.clear();
+        self.usage_symbols_by_name.clear();
         self.symbols_by_guid.clear();
         self.path_by_symbols.clear();
         self.type_guid_to_dependent_guids.clear();
@@ -184,33 +197,20 @@ impl AstIndex {
         exception_doc: Option<Document>,
         language: Option<LanguageId>,
         try_fuzzy_if_not_found: bool,
+        sort_results: bool
     ) -> Result<Vec<AstSymbolInstanceArc>, String> {
         fn exact_search(
             symbols_by_name: &HashMap<String, Vec<AstSymbolInstanceArc>>,
             query: &str,
-            request_symbol_type: &RequestSymbolType,
         ) -> Vec<AstSymbolInstanceArc> {
-            symbols_by_name
-                .get(query)
-                .map(|x| x.clone())
-                .unwrap_or_default()
-                .iter()
-                .cloned()
-                .filter(|s| {
-                    let s_ref = read_symbol(s);
-                    match request_symbol_type {
-                        RequestSymbolType::Declaration => s_ref.is_declaration(),
-                        RequestSymbolType::Usage => !s_ref.is_declaration(),
-                        RequestSymbolType::All => true,
-                    }
-                })
-                .collect()
+            let binding = vec![];
+            let symbols = symbols_by_name.get(query).unwrap_or(&binding);
+            symbols.clone()
         }
 
         fn fuzzy_search(
             symbols_by_name: &HashMap<String, Vec<AstSymbolInstanceArc>>,
-            query: &str,
-            request_symbol_type: &RequestSymbolType,
+            query: &str
         ) -> Vec<AstSymbolInstanceArc> {
             let lower_query = query.to_lowercase();
             symbols_by_name
@@ -224,40 +224,59 @@ impl AstIndex {
                 .iter()
                 .flatten()
                 .cloned()
-                .filter(|s| {
-                    let s_ref = read_symbol(s);
-                    match request_symbol_type {
-                        RequestSymbolType::Declaration => s_ref.is_declaration(),
-                        RequestSymbolType::Usage => !s_ref.is_declaration(),
-                        RequestSymbolType::All => true,
-                    }
-                })
                 .collect()
         }
 
-        let mut symbols = exact_search(&self.symbols_by_name, query, &request_symbol_type);
-        if try_fuzzy_if_not_found && symbols.is_empty() {
-            symbols = fuzzy_search(&self.symbols_by_name, query, &request_symbol_type);
-        }
+        let symbols = match request_symbol_type {
+            RequestSymbolType::Declaration => {
+                let mut symbols = exact_search(&self.declaration_symbols_by_name, query);
+                if try_fuzzy_if_not_found && symbols.is_empty() {
+                    symbols = fuzzy_search(&self.declaration_symbols_by_name, query);
+                }
+                symbols
+            }
+            RequestSymbolType::Usage => {
+                let mut symbols = exact_search(&self.usage_symbols_by_name, query);
+                if try_fuzzy_if_not_found && symbols.is_empty() {
+                    symbols = fuzzy_search(&self.usage_symbols_by_name, query);
+                }
+                symbols
+            }
+            RequestSymbolType::All => {
+                let mut symbols = exact_search(&self.declaration_symbols_by_name, query);
+                symbols.extend(exact_search(&self.usage_symbols_by_name, query));
+                if try_fuzzy_if_not_found && symbols.is_empty() {
+                    symbols = fuzzy_search(&self.declaration_symbols_by_name, query);
+                    symbols.extend(fuzzy_search(&self.usage_symbols_by_name, query));
+                }
+                symbols
+            }
+        };
 
-        Ok(symbols
+        let symbols_it = symbols
             .iter()
             .filter(|s| {
                 let s_ref = read_symbol(s);
                 let correct_doc = exception_doc.clone().map_or(true, |doc| doc.path != *s_ref.file_path());
                 let correct_language = language.map_or(true, |l| l == *s_ref.language());
                 correct_doc && correct_language
-            })
-            .map(|s| {
-                let s_ref = read_symbol(s);
-                (s, (jaro_winkler(query, s_ref.name()) as f32).max(f32::MIN_POSITIVE))
-            })
-            .sorted_by(|(_, dist_1), (_, dist_2)|
-                dist_1.partial_cmp(dist_2).unwrap_or(std::cmp::Ordering::Equal)
-            )
-            .rev()
-            .map(|(s, _)| s.clone())
-            .collect::<Vec<_>>())
+            });
+
+        if sort_results {
+            Ok(symbols_it
+                .map(|s| {
+                    let s_ref = read_symbol(s);
+                    (s, (jaro_winkler(query, s_ref.name()) as f32).max(f32::MIN_POSITIVE))
+                })
+                .sorted_by(|(_, dist_1), (_, dist_2)|
+                    dist_1.partial_cmp(dist_2).unwrap_or(std::cmp::Ordering::Equal)
+                )
+                .rev()
+                .map(|(s, _)| s.clone())
+                .collect::<Vec<_>>())
+        } else {
+            Ok(symbols_it.cloned().collect::<Vec<_>>())
+        }
     }
 
     pub async fn search_by_content(
@@ -391,12 +410,14 @@ impl AstIndex {
         let t_cursor_ms = t_cursor_t0.elapsed().as_millis() as i32;
 
         let t_decl_t0 = std::time::Instant::now();
+        let mut decl_fuzzy_count = 0;
         let declarations_matched_by_name = unfiltered_cursor_symbols
             .iter()
             .map(|s| {
                 let s_ref = read_symbol(s);
                 let use_fuzzy_search = s_ref.full_range().start_point.row == cursor.row && s_ref.is_error();
-                self.search_by_name(&s_ref.name(), RequestSymbolType::Declaration, None, language.clone(), use_fuzzy_search)
+                decl_fuzzy_count += if use_fuzzy_search { 1 } else { 0 };
+                self.search_by_name(&s_ref.name(), RequestSymbolType::Declaration, None, language.clone(), use_fuzzy_search, false)
                     .unwrap_or_else(|_| vec![])
             })
             .flatten()
@@ -440,6 +461,7 @@ impl AstIndex {
 
         // (5) Match function calls by name, with fuzzy search on the current line
         let t_stage5_t0 = std::time::Instant::now();
+        let mut stage5_fuzzy_count = 0;
         let func_calls_matched_by_name = declarations
             .iter()
             .filter(|s| read_symbol(s).symbol_type() == SymbolType::FunctionDeclaration)
@@ -449,7 +471,8 @@ impl AstIndex {
                     (s_ref.full_range().clone(), s_ref.name().to_string())
                 };
                 let use_fuzzy_search = full_range.start_point.row == cursor.row;
-                self.search_by_name(&name, RequestSymbolType::Usage, None, language.clone(), use_fuzzy_search)
+                stage5_fuzzy_count += if use_fuzzy_search { 1 } else { 0 };
+                self.search_by_name(&name, RequestSymbolType::Usage, None, language.clone(), use_fuzzy_search, false)
                     .unwrap_or_else(|_| vec![])
             })
             .flatten()
@@ -531,7 +554,12 @@ impl AstIndex {
             .cloned()
             .collect::<Vec<_>>();
         let t_stage6_ms = t_stage6_t0.elapsed().as_millis() as i32;
-        info!("t_parse={t_parse_ms}ms t_cursor={t_cursor_ms}ms t_decl={t_decl_ms}ms t_stage3={t_stage3_ms}ms t_stage5={t_stage5_ms}ms t_stage4={t_stage4_ms}ms t_stage6={t_stage6_ms}ms");
+        info!(
+            "\t_parse={t_parse_ms}ms t_cursor={t_cursor_ms}ms \
+            t_decl={t_decl_ms}ms ({decl_fuzzy_count} fuzzy_req) \
+            t_stage3={t_stage3_ms}ms t_stage5={t_stage5_ms}ms ({stage5_fuzzy_count} fuzzy_req) \
+            t_stage4={t_stage4_ms}ms t_stage6={t_stage6_ms}ms"
+        );
 
         (
             unfiltered_cursor_symbols
@@ -656,7 +684,7 @@ impl AstIndex {
                 }
 
                 let name = t.name.clone().expect("filter has invalid condition");
-                let maybe_guid = match self.symbols_by_name.get(&name) {
+                let maybe_guid = match self.declaration_symbols_by_name.get(&name) {
                     Some(symbols) => {
                         symbols
                             .iter()
@@ -687,8 +715,7 @@ impl AstIndex {
                 }
             }
             assert_eq!(new_guids.len(), type_names.len());
-            symbol
-                .write().expect("the data might be broken")
+            symbol.write()
                 .set_guids_to_types(&new_guids);
         }
         stats
@@ -799,9 +826,7 @@ impl AstIndex {
                 match decl_guid {
                     Some(guid) => {
                         {
-                            usage_symbol
-                                .write()
-                                .expect("the data might be broken")
+                            usage_symbol.write()
                                 .set_linked_decl_guid(Some(guid))
                         }
                         stats.found += 1;
