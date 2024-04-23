@@ -807,10 +807,10 @@ impl CppParser {
 
         #[cfg(test)]
         for symbol in symbols.iter_mut() {
-            let mut sym = symbol.write().unwrap();
+            let mut sym = symbol.write();
             sym.fields_mut().childs_guid = sym.fields_mut().childs_guid.iter()
                 .sorted_by_key(|x| {
-                    guid_to_symbol_map.get(*x).unwrap().read().unwrap().full_range().start_byte
+                    guid_to_symbol_map.get(*x).unwrap().read().full_range().start_byte
                 }).map(|x| x.clone()).collect();
         }
 
