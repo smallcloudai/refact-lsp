@@ -665,6 +665,7 @@ impl AstIndex {
 
                 if let Some(guid) = t.guid {
                     if self.symbols_by_guid.contains_key(&guid) {
+                        new_guids.push(t.guid.clone());
                         continue;
                     }
                 }
