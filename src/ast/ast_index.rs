@@ -20,7 +20,7 @@ use crate::ast::usages_declarations_merger::{FilePathIterator, find_decl_by_name
 use crate::files_in_workspace::Document;
 
 
-const TOO_MANY_SYMBOLS_IN_FILE: usize = 2000;
+const TOO_MANY_SYMBOLS_IN_FILE: usize = 10000;
 
 
 #[derive(Debug)]
