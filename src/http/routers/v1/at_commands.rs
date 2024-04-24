@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use axum::response::Result;
 use axum::Extension;
 use hyper::{Body, Response, StatusCode};
@@ -58,7 +59,7 @@ pub async fn handle_v1_command_completion(
     }
 
     let response = CommandCompletionResponse {
-        completions: completions.clone(),
+        completions: completions.into_iter().collect::<HashSet<_>>().into_iter().collect(),
         replace: (pos1, pos2),
         is_cmd_executable,
     };
