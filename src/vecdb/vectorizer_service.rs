@@ -142,14 +142,11 @@ async fn vectorize_thread(
         }
 
         let file_splitter = AstBasedFileSplitter::new(constants.splitter_window_size, constants.splitter_soft_limit);
-        let tokens_limit = 256;
-        let split_data = match file_splitter.vectorization_split(&doc, tokenizer.clone(), global_context.clone(), tokens_limit).await {
-            Ok(data) => data,
-            Err(err) => {
-                info!("{}", err);
-                vec![]
-            }
-        };
+        let tokens_limit = constants.splitter_soft_limit;
+        let split_data = file_splitter.vectorization_split(&doc, tokenizer.clone(), global_context.clone(), tokens_limit).await.unwrap_or_else(|err| {
+            info!("{}", err);
+            vec![]
+        });
 
         let mut vecdb_handler = vecdb_handler_ref.lock().await;
         let mut split_data_unknown: Vec<SplitResult> = split_data

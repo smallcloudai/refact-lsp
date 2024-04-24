@@ -86,7 +86,7 @@ impl AstBasedFileSplitter {
                 let single_file_mode = true;
 
                 let mut settings = crate::scratchpads::chat_utils_rag::PostprocessSettings::new();
-                settings.take_floor = 50.0;
+                settings.take_floor = 30.0;
                 settings.useful_background = 0.0;
                 settings.useful_symbol_default = 0.0;
                 settings.close_small_gaps = false;
