@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use crate::ast::file_splitter::AstBasedFileSplitter;
 use crate::cached_tokenizers;
-use crate::fetch_embedding::get_embedding_with_retry;
+use crate::fetch_embedding::get_embedding;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 use crate::vecdb::handler::VecDBHandler;
@@ -170,14 +170,13 @@ async fn vectorize_thread(
                 batch_req.push(x.window_text.clone());
             }
             status.lock().await.requests_made_since_start += 1;
-            let batch_result = match get_embedding_with_retry(
+            let batch_result = match get_embedding(
                 client.clone(),
                 &constants.endpoint_embeddings_style.clone(),
                 &constants.model_name.clone(),
                 &constants.endpoint_embeddings_template.clone(),
                 batch_req,
                 &api_key,
-                1,
             ).await {
                 Ok(x) => x,
                 Err(err) => {

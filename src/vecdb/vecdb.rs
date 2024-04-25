@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use crate::global_context::{CommandLine, GlobalContext};
 use crate::background_tasks::BackgroundTasksHolder;
 
-use crate::fetch_embedding;
+use crate::fetch_embedding::get_embedding;
 use crate::files_in_workspace::Document;
 use crate::vecdb::handler::VecDBHandler;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
@@ -237,14 +237,13 @@ impl VecDb {
 impl VecdbSearch for VecDb {
     async fn vecdb_search(&self, query: String, top_n: usize) -> Result<SearchResult, String> {
         let t0 = std::time::Instant::now();
-        let embedding_mb = fetch_embedding::get_embedding_with_retry(
+        let embedding_mb = get_embedding(
             self.vecdb_emb_client.clone(),
             &self.constants.endpoint_embeddings_style,
             &self.constants.model_name,
             &self.constants.endpoint_embeddings_template,
             vec![query.clone()],
             &self.cmdline.api_key,
-            5
         ).await;
         if embedding_mb.is_err() {
             return Err(embedding_mb.unwrap_err().to_string());
