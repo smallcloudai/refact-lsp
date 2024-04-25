@@ -308,7 +308,7 @@ fn downgrade_lines_if_subsymbol(linevec: &mut Vec<Arc<FileLine>>, line1_base0: u
         let lineref_mut: *mut FileLine = Arc::as_ptr(&linevec[i]) as *mut FileLine;
         unsafe {
             if subsymbol.starts_with(&(*lineref_mut).color) {
-                if i == line2_base0-1 || i == line1_base0 {
+                if i as i32 == line2_base0 as i32 -1 || i == line1_base0 {
                     if (*lineref_mut).line_content.trim().len() == 1 {
                         continue;
                     }
@@ -394,7 +394,7 @@ pub async fn postprocess_rag_stage_3_6(
         color_with_gradient_type(omsg, linevec);
         let fref = linevec[0].fref.clone();
         if omsg.usefulness < 0.0 {
-            colorize_minus_one(linevec, omsg.line1-1, omsg.line2);
+            colorize_minus_one(linevec, omsg.line1, omsg.line2);
             continue;
         }
         let mut maybe_symbol: Option<&SymbolInformation> = None;
@@ -426,7 +426,7 @@ pub async fn postprocess_rag_stage_3_6(
             if omsg.line1 == 0 || omsg.line2 == 0 || omsg.line1 > omsg.line2 || omsg.line1 > linevec.len() || omsg.line2 > linevec.len() {
                 warn!("range in search results is outside of file lines that actually exist {}:{}-{}", omsg.file_name, omsg.line1, omsg.line2);
             }
-            colorize_if_more_useful(linevec, omsg.line1-1, omsg.line2, &"nosymb".to_string(), omsg.usefulness);
+            colorize_if_more_useful(linevec, omsg.line1, omsg.line2, &"nosymb".to_string(), omsg.usefulness);
         }
         colorize_comments_up(linevec, settings);
     }
