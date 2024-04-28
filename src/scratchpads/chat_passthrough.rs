@@ -84,6 +84,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                                     context_file.line1,
                                     context_file.line2,
                                     context_file.file_content),
+                                kind: "text".to_string(),
                             });
                         }
                     },
