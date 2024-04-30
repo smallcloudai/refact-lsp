@@ -75,15 +75,14 @@ impl Document {
 
     pub fn is_text_machine_generated(&self) -> bool {
         // Some simple tests to find if the text is suitable to parse (not generated or compressed code)
-        assert!(self.text.is_some());
-        let r = self.text.as_ref().unwrap();
-        let is_machine_generated = {
+        if let Some(r) = &self.text {
             let total_chars = r.chars().count();
             let total_lines = r.lines().count();
             let avg_line_length = total_chars / total_lines;
             avg_line_length > 100
-        };
-        return is_machine_generated;
+        } else {
+            false
+        }
     }
 }
 
