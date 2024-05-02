@@ -158,11 +158,12 @@ async fn vectorize_thread(
     loop {
         let (doc_mb, unprocessed_files_count) = {
             let mut queue_locked = queue.lock().await;
-            (queue_locked.pop_front(), queue_locked.len())
+            let q_len =  queue_locked.len();
+            (queue_locked.pop_front(), q_len)
         };
 
         loop {
-            if embed_q.len() >= B || (!embed_q.is_empty() && unprocessed_files_count == 1) {
+            if embed_q.len() >= B || (!embed_q.is_empty() && unprocessed_files_count == 0) {
                 vectorize_batch_from_q(&mut embed_q, status.clone(), client.clone(), &constants, &api_key, vecdb_handler_ref.clone(), B).await.unwrap_or_else(|err| {
                     warn!("Error vectorizing: {}", err);
                 });
