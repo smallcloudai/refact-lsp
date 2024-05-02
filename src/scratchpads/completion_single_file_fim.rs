@@ -336,13 +336,18 @@ impl ScratchpadAbstract for SingleFileFIM {
                 self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
             }
         }
-
+        
+        let time_start = Instant::now();
+        if let Ok(tokens_cnt) = self.t.count_tokens(prompt.as_str()) {
+            let allowed_tokens_cnt = context_size as i32 - self.post.parameters.max_new_tokens as i32;
+            info!("re-encode whole prompt again gives {} tokens; allowed: {}; took {}ms", tokens_cnt, allowed_tokens_cnt, time_start.elapsed().as_millis());
+            assert!(tokens_cnt <= allowed_tokens_cnt);
+        }
+        
         if DEBUG {
             info!("cursor position\n{:?}", self.post.inputs.cursor);
             info!("prompt\n{}", prompt);
-            info!("re-encode whole prompt again gives {} tokens", self.t.count_tokens(prompt.as_str())?);
         }
-        info!("re-encode whole prompt again gives {} tokens", self.t.count_tokens(prompt.as_str())?);
         Ok(prompt)
     }
 
