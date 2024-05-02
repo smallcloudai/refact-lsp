@@ -209,11 +209,14 @@ pub struct ContextFile {
 fn default_gradient_type_value() -> i32 {
     -1
 }
+fn default_chat_message_kind() -> String { "text".to_string() }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(default="default_chat_message_kind")]
+    pub kind: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

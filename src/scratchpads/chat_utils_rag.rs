@@ -698,6 +698,7 @@ pub async fn run_at_commands(
             let message = ChatMessage {
                 role: "context_file".to_string(),
                 content: serde_json::to_string(&processed).unwrap(),
+                kind: "text".to_string(),
             };
             rebuilt_messages.push(message.clone());
             stream_back_to_user.push_in_json(json!(message));
@@ -706,6 +707,7 @@ pub async fn run_at_commands(
             let msg = ChatMessage {
                 role: "user".to_string(),
                 content: user_posted,  // stream back to the user, without commands
+                kind: post.messages[msg_idx].kind.clone(),
             };
             rebuilt_messages.push(msg.clone());
             stream_back_to_user.push_in_json(json!(msg));
