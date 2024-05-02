@@ -5,6 +5,9 @@ from typing import List, Dict, Any
 from termcolor import colored
 
 
+# TODO: check if file:10-20 is in results as well
+
+
 def at_preview_post(query: str) -> List[Dict[str, Any]]:
     payload = {
         "query": query,
@@ -21,42 +24,40 @@ def at_preview_post(query: str) -> List[Dict[str, Any]]:
     return decoded
 
 
+def file_name_score(file_name: str, results: List[Dict]) -> int:
+    score = -1
+    for idx, r in enumerate(results, 1):
+        if r.get('file_name', '').endswith(file_name):
+            score = idx
+            break
+    return score
+
+
 def test1() -> int:
     query = "@workspace usages of ast_based_file_splitter"
     results = at_preview_post(query)
-    if any("vectorizer_service.rs" in r['file_name'] for r in results):
-        return 1
-    else:
-        print([r['file_name'] for r in results])
-        return 0
+    return file_name_score("ast_based_file_splitter.rs", results)
 
 
 def test2() -> int:
     query = "@workspace what compiled in commands are there in toolbox?"
     results = at_preview_post(query)
-    if any("toolbox_compiled_in.rs" in r['file_name'] for r in results):
-        return 1
-    else:
-        print([r['file_name'] for r in results])
-    return 0
+    return file_name_score("toolbox_compiled_in.rs", results)
 
 
 def test3() -> int:
     query = "@workspace fields in fields in code assistant caps"
     results = at_preview_post(query)
-    if any("src/caps.rs" in r['file_name'] for r in results):
-        return 1
-    else:
-        print([r['file_name'] for r in results])
-    return 0
+    return file_name_score("src/caps.rs", results)
 
 
 def main():
     tests = [test1, test2, test3]
     for i, test in enumerate(tests, 1):
-        result = "passed" if test() else "failed"
+        score = test()
+        result = "passed" if score else "failed"
         color = "green" if result == "passed" else "red"
-        print(colored(f"test {i} {result}", color))
+        print(colored(f"test {i} {result}; score={score}", color))
 
 
 if __name__ == "__main__":

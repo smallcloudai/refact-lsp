@@ -25,6 +25,7 @@ fn vecdb_constants(
     VecdbConstants {
         model_name: caps_locked.default_embeddings_model.clone(),
         embedding_size: caps_locked.size_embeddings.clone(),
+        vectorizer_n_ctx: 512, // TODO: get it from caps
         endpoint_embeddings_template: caps_locked.endpoint_embeddings_template.clone(),
         endpoint_embeddings_style: caps_locked.endpoint_embeddings_style.clone(),
         cooldown_secs: 20,

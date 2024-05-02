@@ -19,12 +19,12 @@ pub struct VecdbConstants {
     // constant in a sense it cannot be changed without creating a new db
     pub model_name: String,
     pub embedding_size: i32,
-    // pub vectorizer_n_ctx    -- TODO: add this constant
+    pub vectorizer_n_ctx: usize, // tokens
     pub endpoint_embeddings_template: String,
     pub endpoint_embeddings_style: String,
     pub cooldown_secs: u64,
-    pub splitter_window_size: usize,
-    pub splitter_soft_limit: usize,
+    pub splitter_window_size: usize, // characters
+    pub splitter_soft_limit: usize, // characters
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
