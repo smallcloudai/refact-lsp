@@ -55,6 +55,10 @@ pub async fn handle_v1_command_completion(
         let query_line_val = query_line_val.chars().take(cursor_rel as usize).collect::<String>();
         let query_line = QueryLine::new(query_line_val, cursor_rel, cursor_line_start);
         (completions, is_cmd_executable, pos1, pos2) = command_completion(&query_line, &context, post.cursor, post.top_n).await;
+        // it would be more honest to check if query_line is executable, but it would require more time to check: to check each param in completions
+        if !query_line.command().is_some_and(|x|x.focused) {
+            completions = completions.into_iter().map(|x|format!("{}\n", x)).collect();
+        }
     }
 
     let response = CommandCompletionResponse {
