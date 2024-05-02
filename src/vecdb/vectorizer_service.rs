@@ -158,13 +158,19 @@ async fn vectorize_thread(
     loop {
         let (doc_mb, unprocessed_files_count) = {
             let mut queue_locked = queue.lock().await;
-            let queue_len = queue_locked.len();
-            if queue_len > 0 {
-                (queue_locked.pop_front(), queue_len)
-            } else {
-                (None, 0)
-            }
+            (queue_locked.pop_front(), queue_locked.len())
         };
+
+        loop {
+            if embed_q.len() >= B || (!embed_q.is_empty() && unprocessed_files_count == 1) {
+                vectorize_batch_from_q(&mut embed_q, status.clone(), client.clone(), &constants, &api_key, vecdb_handler_ref.clone(), B).await.unwrap_or_else(|err| {
+                    warn!("Error vectorizing: {}", err);
+                });
+            } else {
+                break;
+            }
+        }
+
         if (unprocessed_files_count + 99).div(100) != (reported_unprocessed + 99).div(100) {
             info!("have {} unprocessed files", unprocessed_files_count);
             reported_unprocessed = unprocessed_files_count;
@@ -205,8 +211,8 @@ async fn vectorize_thread(
             info!("{}: {}", last_30_chars, err);
             continue;
         }
-        if doc.is_text_machine_generated() {
-            info!("embeddings {} skip because text is likely machine-generated", last_30_chars);
+        if doc.is_text_ok() {
+            info!("embeddings {} skip because text is not ok: likely machine-generated", last_30_chars);
             continue;
         }
 
@@ -226,16 +232,6 @@ async fn vectorize_thread(
             vecdb_handler.try_add_from_cache(res).await
         };
         embed_q.extend(file_split_data);
-        
-        loop {
-            if embed_q.len() >= B || (!embed_q.is_empty() && unprocessed_files_count == 1) {
-                vectorize_batch_from_q(&mut embed_q, status.clone(), client.clone(), &constants, &api_key, vecdb_handler_ref.clone(), B).await.unwrap_or_else(|err| {
-                    warn!("Error vectorizing: {}", err);
-                });
-            } else {
-                break;
-            }
-        }
     }
 }
 
