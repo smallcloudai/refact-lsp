@@ -128,5 +128,4 @@ impl AtCommand for AtAstLookupSymbols {
         };
         x
     }
-    fn is_hidden_in_completion(&self) -> bool {true}
 }
