@@ -203,7 +203,8 @@ async fn vectorize_thread(
                         // }
                         write!(std::io::stderr(), "VECDB COMPLETE\n").unwrap();
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
-                        info!("vectorizer since start {} API calls, {} vectors", status.lock().await.requests_made_since_start, status.lock().await.vectors_made_since_start);
+                        let status_locked = status.lock().await;
+                        info!("vectorizer since start {} API calls, {} vectors", status_locked.requests_made_since_start, status_locked.vectors_made_since_start);
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
                     continue;
