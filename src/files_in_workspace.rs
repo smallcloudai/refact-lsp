@@ -73,18 +73,18 @@ impl Document {
         return Err(format!("no text loaded in {}", self.path.display()));
     }
 
-    pub fn is_text_ok(&self) -> bool {
+    pub fn does_text_look_good(&self) -> bool {
         // Some simple tests to find if the text is suitable to parse (not generated or compressed code)
         assert!(self.text.is_some());
         let r = self.text.as_ref().unwrap();
-        
+
         fn is_machine_generated(r: &Rope) -> bool {
             let total_chars = r.chars().count();
             let total_lines = r.lines().count();
             let avg_line_length = total_chars / total_lines;
             avg_line_length > 100
         }
-        
+
         is_machine_generated(r)
     }
 }

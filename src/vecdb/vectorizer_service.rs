@@ -7,6 +7,7 @@ use tokenizers::Tokenizer;
 use std::sync::RwLock as StdRwLock;
 use tokio::sync::{Mutex as AMutex, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::ast::file_splitter::AstBasedFileSplitter;
@@ -81,10 +82,11 @@ async fn vectorize_batch_from_q(
     constants: &VecdbConstants,
     api_key: &String,
     vecdb_handler_ref: Arc<AMutex<VecDBHandler>>,
+    #[allow(non_snake_case)]
     B: usize,
 ) -> Result<(), String> {
     let batch = embed_q.drain(..B.min(embed_q.len())).collect::<Vec<_>>();
-    status.lock().await.requests_made_since_start += 1;
+    let t0 = Instant::now();
 
     let batch_result = get_embedding_with_retry(
         client.clone(),
@@ -95,11 +97,15 @@ async fn vectorize_batch_from_q(
         api_key,
         1,
     ).await?;
-    
-    status.lock().await.requests_made_since_start += 1;
-    
+
     if batch_result.len() != batch.len() {
         return Err(format!("vectorize: batch_result.len() != batch.len(): {} vs {}", batch_result.len(), batch.len()));
+    }
+
+    {
+        let mut status_locked = status.lock().await;
+        status_locked.requests_made_since_start += 1;
+        status_locked.vectors_made_since_start += batch_result.len();
     }
 
     let mut records = vec![];
@@ -124,7 +130,7 @@ async fn vectorize_batch_from_q(
     }
 
     if records.len() > 0 {
-        info!("saving {} records", records.len());
+        info!("embeddings got {} records in {}ms", records.len(), t0.elapsed().as_millis());
         match vecdb_handler_ref.lock().await.add_or_update(records, true).await {
             Err(e) => {
                 warn!("Error adding/updating records in VecDB: {}", e);
@@ -132,7 +138,6 @@ async fn vectorize_batch_from_q(
             _ => {}
         }
     }
-    // oleg's idea:
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;  // be nice to the server: up to 60 requests per minute
 
     Ok(())
@@ -150,11 +155,11 @@ async fn vectorize_thread(
 ) {
     const SPLIT_DATA_MAX_TOKENS: usize = 256;
     const B: usize = 64;
-    
+
     let mut reported_unprocessed: usize = 0;
     let mut reported_vecdb_complete: bool = false;
     let mut embed_q: Vec<SplitResult> = vec![];
-    
+
     loop {
         let (doc_mb, unprocessed_files_count) = {
             let mut queue_locked = queue.lock().await;
@@ -198,7 +203,7 @@ async fn vectorize_thread(
                         // }
                         write!(std::io::stderr(), "VECDB COMPLETE\n").unwrap();
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
-                        info!("embedding API calls since start {}", status.lock().await.requests_made_since_start);
+                        info!("vectorizer since start {} API calls, {} vectors", status.lock().await.requests_made_since_start, status.lock().await.vectors_made_since_start);
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
                     continue;
@@ -212,8 +217,8 @@ async fn vectorize_thread(
             info!("{}: {}", last_30_chars, err);
             continue;
         }
-        if doc.is_text_ok() {
-            info!("embeddings {} skip because text is not ok: likely machine-generated", last_30_chars);
+        if doc.does_text_look_good() {
+            info!("embeddings {} doesn't look good: likely machine-generated", last_30_chars);
             continue;
         }
 
@@ -260,6 +265,7 @@ impl FileVectorizerService {
             VecDbStatus {
                 unprocessed_files_count: 0,
                 requests_made_since_start: 0,
+                vectors_made_since_start: 0,
                 db_size: 0,
                 db_cache_size: 0,
             }
