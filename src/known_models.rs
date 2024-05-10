@@ -26,6 +26,7 @@ pub const KNOWN_MODELS: &str = r####"
                 "starcoder2/7b/base",
                 "starcoder2/15b/base",
                 "starcoder2/3b/vllm",
+                "starcoder2/3b/vllm/loraless",
                 "starcoder2/7b/vllm",
                 "starcoder2/15b/vllm",
                 "starcoder2/3b",
@@ -45,7 +46,8 @@ pub const KNOWN_MODELS: &str = r####"
             "default_scratchpad": "FIM-SPM",
             "similar_models": [
                 "Refact/1.6B",
-                "Refact/1.6B/vllm"
+                "Refact/1.6B/vllm",
+                "Refact/1.6B/vllm/loraless"
             ]
         },
         "codellama/CodeLlama-13b-hf": {
