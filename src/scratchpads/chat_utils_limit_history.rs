@@ -1,6 +1,26 @@
+use std::time::Instant;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::call_validation::ChatMessage;
+use crate::call_validation::{ChatMessage, ContextFile};
 
+
+fn count_tokens(
+    t: &HasTokenizerAndEot,
+    msg: &ChatMessage,
+) -> Result<i32, String> {
+    let content = if msg.role == "context_file" {
+        // decode takes ~100ms for 14_000 tokens
+        serde_json::from_str::<Vec<ContextFile>>(&msg.content)
+            .map(
+                |msgs| msgs.iter()
+                .map(|m| format!("{}\n{}\n", m.file_name, m.file_content))
+                .collect::<String>()
+            )
+            .unwrap_or(msg.content.clone())
+    } else {
+        msg.content.clone()
+    };
+    Ok(t.count_tokens(&content)?)
+}
 
 pub fn limit_messages_history(
     t: &HasTokenizerAndEot,
@@ -18,7 +38,9 @@ pub fn limit_messages_history(
     let mut message_take: Vec<bool> = vec![false; messages.len()];
     let mut have_system = false;
     for (i, msg) in messages.iter().enumerate() {
-        let tcnt = (3 + t.count_tokens(msg.content.as_str())?) as i32;  // 3 for role "\n\nASSISTANT:" kind of thing
+        let t0 = Instant::now();
+        let tcnt = 3 + count_tokens(t, msg)?;  // 3 for role "\n\nASSISTANT:" kind of thing
+        tracing::info!("count_tokens took {} ms", t0.elapsed().as_millis());
         message_token_count[i] = tcnt;
         if i==0 && msg.role == "system" {
             message_take[i] = true;
