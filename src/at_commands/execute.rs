@@ -1,4 +1,5 @@
 use regex::Regex;
+use tracing::warn;
 
 use crate::at_commands::at_commands::{AtCommandCall, AtCommandsContext};
 use crate::call_validation::ContextFile;
@@ -43,6 +44,23 @@ async fn correct_call_if_needed(
         corrected.push(completion);
     }
     call.args = corrected;
+}
+
+fn prepare_query_for_execution(query: &String, at_command_names: &Vec<String>) -> String {
+    let mut res = vec![];
+    for line in query.lines().map(|x|x.to_string()) {
+        if !res.is_empty() && line.is_empty() {
+            break;
+        }
+        for (word, pos0, _) in parse_words_from_line(&line) {
+            if at_command_names.contains(&word) {
+                res.push(line.chars().take((pos0 - 1).max(0)).collect::<String>());
+                return res.join("\n")
+            }
+        }
+        res.push(line);
+    }
+    res.join("\n")
 }
 
 async fn execute_at_commands_from_query_line(
@@ -92,7 +110,13 @@ async fn execute_at_commands_from_query_line(
             let mut executed = false;
             let mut text_on_clip = String::new();
             if highlights_local.iter().all(|x|x.ok) {
-                match call.command.lock().await.execute(query, &call.args, top_n, context).await {
+                match call.command.lock().await.execute(
+                    &prepare_query_for_execution(
+                        &query.chars().skip(highlights_local.last().unwrap().pos2 + 1).collect::<String>(),
+                        &at_command_names,
+                    ),
+                    &call.args, top_n, context
+                ).await {
                     Ok((m_res, m_text_on_clip)) =>
                         { 
                             executed = true; 
@@ -100,7 +124,7 @@ async fn execute_at_commands_from_query_line(
                             msgs.extend(m_res) 
                         },
                     Err(e) => {
-                        tracing::warn!("can't execute command that indicated it can execute: {}", e);
+                        warn!("can't execute command that indicated it can execute: {}", e);
                     }
                 }
             }

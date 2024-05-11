@@ -9,6 +9,7 @@ use crate::at_commands::at_ast_definition::AtAstDefinition;
 use crate::at_commands::at_ast_lookup_symbols::AtAstLookupSymbols;
 use crate::at_commands::at_ast_reference::AtAstReference;
 use crate::at_commands::at_file::AtFile;
+use crate::at_commands::at_file_search::AtFileSearch;
 use crate::at_commands::at_workspace::AtWorkspace;
 use crate::call_validation::ContextFile;
 use crate::global_context::GlobalContext;
@@ -63,6 +64,7 @@ pub async fn at_commands_dict() -> HashMap<String, Arc<AMutex<Box<dyn AtCommand 
     return HashMap::from([
         ("@workspace".to_string(), Arc::new(AMutex::new(Box::new(AtWorkspace::new()) as Box<dyn AtCommand + Send>))),
         ("@file".to_string(), Arc::new(AMutex::new(Box::new(AtFile::new()) as Box<dyn AtCommand + Send>))),
+        ("@file-search".to_string(), Arc::new(AMutex::new(Box::new(AtFileSearch::new()) as Box<dyn AtCommand + Send>))),
         ("@definition".to_string(), Arc::new(AMutex::new(Box::new(AtAstDefinition::new()) as Box<dyn AtCommand + Send>))),
         ("@references".to_string(), Arc::new(AMutex::new(Box::new(AtAstReference::new()) as Box<dyn AtCommand + Send>))),
         ("@symbols-at".to_string(), Arc::new(AMutex::new(Box::new(AtAstLookupSymbols::new()) as Box<dyn AtCommand + Send>))),

@@ -21,7 +21,7 @@ impl AtWorkspace {
     }
 }
 
-fn results2message(results: &Vec<Record>) -> Vec<ContextFile> {
+pub fn vdb_search_results2context_file(results: &Vec<Record>) -> Vec<ContextFile> {
     let mut vector_of_context_file: Vec<ContextFile> = vec![];
     for i in 0..results.len() {
         let r = &results[i];
@@ -55,9 +55,9 @@ impl AtCommand for AtWorkspace {
                 if db_query.is_empty() {
                     db_query = query.clone();
                 }
-                let search_result = db.vecdb_search(db_query, top_n).await?;
+                let search_result = db.vecdb_search(db_query, top_n, None).await?;
                 let results = search_result.results.clone();
-                Ok((results2message(&results), args.join(" ")))
+                Ok((vdb_search_results2context_file(&results), args.join(" ")))
             }
             None => Err("vecdb is not available".to_string())
         }
