@@ -526,14 +526,14 @@ pub async fn postprocess_rag_stage_7_9(
         if lineref.useful <= settings.take_floor {
             continue;
         }
-        let mut ntokens = count_tokens(&tokenizer.read().unwrap(), &lineref.line_content);
+        let mut ntokens = count_tokens(&tokenizer.read().unwrap(), &lineref.line_content, true);
         let filename = lineref.fref.cpath.to_string_lossy().to_string();
 
         if !files_mentioned_set.contains(&filename) {
             files_mentioned_set.insert(filename.clone());
             files_mentioned_sequence.push(lineref.fref.cpath.clone());
             if !single_file_mode {
-                ntokens += count_tokens(&tokenizer.read().unwrap(), &filename.as_str());
+                ntokens += count_tokens(&tokenizer.read().unwrap(), &filename.as_str(), true);
                 ntokens += 5;  // any overhead: file_sep, new line, etc
             }
         }
@@ -617,14 +617,17 @@ pub async fn postprocess_rag_stage_7_9(
     merged
 }
 
-pub fn count_tokens(
+fn count_tokens(
     tokenizer: &Tokenizer,
     text: &str,
+    serialize: bool,
 ) -> usize {
-    match tokenizer.encode(text, false) {
-        Ok(tokens) => tokens.len(),
-        Err(_) => 0,
-    }
+    let text = if serialize {
+        json!(text).to_string()
+    } else {
+        text.to_string()
+    };
+    tokenizer.encode(text.as_str(), false).map(|tokens| tokens.len()).unwrap_or(0)
 }
 
 pub async fn run_at_commands(
@@ -666,7 +669,7 @@ pub async fn run_at_commands(
     let mut rebuilt_messages: Vec<ChatMessage> = post.messages.iter().take(user_msg_starts).map(|m| m.clone()).collect();
     for msg_idx in user_msg_starts..post.messages.len() {
         let mut user_posted = post.messages[msg_idx].content.clone();
-        let user_posted_ntokens = count_tokens(&tokenizer.read().unwrap(), &user_posted);
+        let user_posted_ntokens = count_tokens(&tokenizer.read().unwrap(), &user_posted, false);
         let mut context_limit = reserve_for_context / user_messages_with_at;
         if context_limit <= user_posted_ntokens {
             context_limit = 0;
