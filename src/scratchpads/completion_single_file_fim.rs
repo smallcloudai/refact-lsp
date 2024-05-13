@@ -23,6 +23,7 @@ use crate::completion_cache;
 use crate::files_in_workspace::Document;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_utils_rag::count_tokens;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
 
@@ -316,6 +317,14 @@ impl ScratchpadAbstract for SingleFileFIM {
                 rag_tokens_n,
                 false,
             ).await;
+            
+            let content = postprocessed_messages.iter()
+                    .map(|m| format!("{}\n{}\n", m.file_name, m.file_content))
+                    .collect::<String>();
+            let content_tokens = self.t.count_tokens(content.as_str())? as usize;
+            info!("({} < {})", content_tokens, rag_tokens_n);
+            assert!(content_tokens <= rag_tokens_n);
+
 
             prompt = add_context_to_prompt(&self.t.context_format, &prompt, &self.fim_prefix, &postprocessed_messages, &language_id);
             let rag_ms = rag_t0.elapsed().as_millis() as i32;
