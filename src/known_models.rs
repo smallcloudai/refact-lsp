@@ -109,7 +109,8 @@ pub const KNOWN_MODELS: &str = r####"
             },
             "similar_models": [
                 "gpt-4",
-                "gpt-4-turbo"
+                "gpt-4-turbo",
+                "gpt-4o"
             ]
         },
         "claude-instant-1.2": {
@@ -245,7 +246,8 @@ pub const KNOWN_MODELS: &str = r####"
         "gpt-3.5-turbo":      "Xenova/gpt-3.5-turbo-16k",
         "gpt-3.5-turbo-1106": "Xenova/gpt-3.5-turbo-16k",
         "gpt-4":              "Xenova/gpt-4",
-        "gpt-4-turbo":        "Xenova/gpt-4"
+        "gpt-4-turbo":        "Xenova/gpt-4",
+        "gpt-4o":             "Xenova/gpt-4o"
     }
 }
 "####;
