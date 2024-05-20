@@ -128,6 +128,11 @@ impl AstIndex {
         }
         let mut symbols_cloned = symbols
             .iter()
+            .filter(|s| {
+                s.read().symbol_type() != SymbolType::VariableUsage
+                    && s.read().symbol_type() != SymbolType::FunctionCall
+                    && s.read().symbol_type() != SymbolType::VariableDefinition
+            })
             .map(|sym| {
                 let mut write_lock = sym.write();
                 Rc::new(RefCell::new(std::mem::replace(&mut *write_lock, Box::new(ImportDeclaration::default()))))
