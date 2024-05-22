@@ -140,6 +140,25 @@ pub const KNOWN_MODELS: &str = r####"
                 "claude-3-sonnet"
             ]
         },
+        "llama3-8b": {
+            "n_ctx": 8000,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {
+                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
+                }
+            },
+            "similar_models": [
+                "llama3-70b"
+            ]
+        },
+        "mixtral-8x7b": {
+            "n_ctx": 32000,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {
+                    "default_system_message": "You are a coding assistant that outputs short answers, gives links to documentation."
+                }
+            }
+        },
         "starchat/15b/beta": {
             "n_ctx": 4096,
             "supports_scratchpads": {
