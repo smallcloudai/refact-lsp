@@ -42,6 +42,7 @@ pub struct AstIndex {
     import_components_succ_solution_index: HashMap<String, ImportDeclaration>,
     ast_index_max_files: usize,
     has_changes: bool,
+    ast_light_mode: bool
 }
 
 unsafe impl Send for AstIndex {}
@@ -65,7 +66,8 @@ pub(crate) struct IndexingStats {
 impl AstIndex {
     pub fn init(
         ast_index_max_files: usize,
-        shutdown_flag: Arc<AtomicBool>
+        shutdown_flag: Arc<AtomicBool>,
+        ast_light_mode: bool
     ) -> AstIndex {
         AstIndex {
             shutdown_flag,
@@ -78,6 +80,7 @@ impl AstIndex {
             import_components_succ_solution_index: HashMap::new(),
             ast_index_max_files,
             has_changes: false,
+            ast_light_mode
         }
     }
 
@@ -129,9 +132,11 @@ impl AstIndex {
         let mut symbols_cloned = symbols
             .iter()
             .filter(|s| {
-                s.read().symbol_type() != SymbolType::VariableUsage
-                    && s.read().symbol_type() != SymbolType::FunctionCall
-                    && s.read().symbol_type() != SymbolType::VariableDefinition
+                let symbol_type = s.read().symbol_type();
+                let is_reference_type = symbol_type == SymbolType::VariableUsage
+                    && symbol_type == SymbolType::FunctionCall
+                    && symbol_type == SymbolType::VariableDefinition;
+                !self.ast_light_mode || !is_reference_type
             })
             .map(|sym| {
                 let mut write_lock = sym.write();
