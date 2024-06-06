@@ -1,3 +1,6 @@
+use log::info;
+use uuid::Uuid;
+
 #[derive(Debug)]
 pub struct DeltaDeltaChatStreamer {
     // This class helps chat implementations to stop at two-token phrases (at most) when streaming,
@@ -31,12 +34,29 @@ impl DeltaDeltaChatStreamer {
         for (i, x) in choices.iter().enumerate() {
             let (s, mut finished) = cut_result(&x, &self.stop_list);
             finished |= stopped[i];
+            let (content, functioncall) = parse_functioncall(&s);
+            let mut message_json = serde_json::json!({
+                "role": self.role.clone(),
+                "content": content,
+            });
+            if functioncall != serde_json::Value::Null {
+                message_json["tool_calls"] = functioncall
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| {
+                        serde_json::json!({
+                            "id": Uuid::new_v4().to_string(),
+                            "function": item,
+                            "type": "function"
+                        })
+                    })
+                    .collect();
+            }
             json_choices.push(serde_json::json!({
                 "index": i,
-                "message": {
-                    "role": self.role.clone(),
-                    "content": s.clone()
-                },
+                "message": message_json,
                 "finish_reason": (if finished { "stop" } else { "length" }).to_string(),
             }));
         }
@@ -134,3 +154,23 @@ fn cut_result(
     return (ans.replace("\r", ""), true);
 }
 
+fn parse_functioncall(
+    content: &str,
+) -> (&str, serde_json::Value) {
+    let start_tag = "<functioncall>";
+    let end_tag = "</functioncall>";
+
+    if let Some(start_idx) = content.find(start_tag) {
+        if let Some(end_idx) = content.find(end_tag) {
+            let context = &content[..start_idx];
+            let functioncall = &content[start_idx + start_tag.len()..end_idx];
+            if let Ok(parsed_json) = serde_json::from_str(functioncall) {
+                return (context, parsed_json);
+            } else {
+                return (context, serde_json::Value::Null);
+            }
+        }
+    }
+
+    return (content, serde_json::Value::Null);
+}

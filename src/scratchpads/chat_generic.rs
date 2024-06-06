@@ -8,6 +8,7 @@ use tokio::sync::RwLock as ARwLock;
 use tracing::{info, error};
 
 use crate::at_commands::execute_at::run_at_commands;
+use crate::at_tools::execute_att::run_tools;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
@@ -59,6 +60,44 @@ impl GenericChatScratchpad {
     }
 }
 
+fn patch_content_with_tool_calls(
+    msg: &ChatMessage,
+) -> String {
+    let mut content = msg.content.clone();
+    if let Some(ref tools_mb) = msg.tool_calls {
+        let mut tools = vec![];
+        for _chat_tool_call in tools_mb {
+            let mut chat_tool_call = _chat_tool_call.clone();
+            chat_tool_call.function.arguments = serde_json::from_str(
+                &chat_tool_call.function.arguments).unwrap_or_else(|_| "".to_string());
+            tools.push(chat_tool_call);
+        }
+        let tools_json_str =
+            serde_json::to_string(&tools).unwrap_or_else(|_| "[]".to_string());
+        return format!("{}\n\n<functioncall>{}</functioncall>\n\n", msg.content, tools_json_str);
+    }
+    return content;
+}
+
+fn prompt_patch_with_available_tools(
+    tools_mb: &Option<Vec<serde_json::Value>>,
+) -> String {
+    let mut patch: String = "".to_string();
+    if let Some(ref tools_mb) = tools_mb {
+        let tools_json = serde_json::to_string(&tools_mb).unwrap_or_else(|_| "[]".to_string());
+        let fc_template = r#"<functioncall>[{"name":"function_name","arguments":"{\"arg_1\":\"val_1\",\"arg_2\":\"val_2\" ... }"}]</functioncall>"#;
+        patch = format!(
+            "User knows about following available tools:\n\n\
+            {}\n\n\
+            To use these tools respond with:\n\n\
+            {}\n\n\
+            Accurately read available tools and respond in given format.\n\
+            Do not use tools that unknown to the user.\n\n",
+            tools_json.as_str(), fc_template);
+    }
+    return patch;
+}
+
 #[async_trait]
 impl ScratchpadAbstract for GenericChatScratchpad {
     async fn apply_model_adaptation_patch(
@@ -101,6 +140,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         } else {
             (self.post.messages.clone(), self.post.messages.len())
         };
+        let (messages, _tools_success) = run_tools(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &messages, top_n, &mut self.has_rag_results).await;
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, self.post.parameters.max_new_tokens, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = Some(self.dd.stop_list.clone());
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
@@ -112,19 +152,24 @@ impl ScratchpadAbstract for GenericChatScratchpad {
                 prompt.push_str(self.keyword_syst.as_str());
                 prompt.push_str(msg.content.as_str());
                 prompt.push_str("\n");
+                prompt.push_str(prompt_patch_with_available_tools(&_tools_mb).as_str());
             } else if msg.role == "user" {
                 prompt.push_str(self.keyword_user.as_str());
                 prompt.push_str(msg.content.as_str());
                 prompt.push_str("\n");
             } else if msg.role == "assistant" {
                 prompt.push_str(self.keyword_asst.as_str());
-                prompt.push_str(msg.content.as_str());
+                prompt.push_str(patch_content_with_tool_calls(&msg).as_str());
                 prompt.push_str("\n");
             } else if msg.role == "context_file" {
                 let vector_of_context_files: Vec<ContextFile> = serde_json::from_str(&msg.content).map_err(|e|error!("parsing context_files has failed: {}; content: {}", e, &msg.content)).unwrap_or(vec![]);
                 for context_file in vector_of_context_files {
                     prompt.push_str(format!("{}\n```\n{}```\n\n", context_file.file_name, context_file.file_content).as_str());
                 }
+            } else if msg.role == "tool" {
+                prompt.push_str(self.keyword_user.as_str());
+                prompt.push_str(msg.content.as_str());
+                prompt.push_str("\n");
             } else {
                 return Err(format!("role \"{}\"not recognized", msg.role));
             }
@@ -134,7 +179,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         if last_role == "assistant" || last_role == "system" {
             self.dd.role = "user".to_string();
             prompt.push_str(self.keyword_user.as_str());
-        } else if last_role == "user" {
+        } else if last_role == "user" || last_role == "tool" || last_role == "context_file" {
             self.dd.role = "assistant".to_string();
             prompt.push_str(self.keyword_asst.as_str());
         }
