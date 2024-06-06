@@ -13,6 +13,7 @@ pub fn get_language_id_by_filename(filename: &PathBuf) -> Option<LanguageId> {
         "rs" => Some(LanguageId::Rust),
         "ts" => Some(LanguageId::TypeScript),
         "tsx" => Some(LanguageId::TypeScriptReact),
+        "cs" => Some(LanguageId::CSharp),
         _ => None
     }
 }
