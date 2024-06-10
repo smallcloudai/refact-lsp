@@ -32,9 +32,10 @@ impl DeltaDeltaChatStreamer {
         assert!(!self.finished, "already finished");
         let mut json_choices = Vec::<serde_json::Value>::new();
         for (i, x) in choices.iter().enumerate() {
-            let (s, mut finished) = cut_result(&x, &self.stop_list);
-            finished |= stopped[i];
-            let (content, functioncall) = parse_functioncall(&s);
+            let (content, delimiter) =
+                split_buffer_min_prefix(&x, &self.stop_list, true);
+            let finished = stopped[i] | self.stop_list.contains(&delimiter);
+            let (content, functioncall) = parse_functioncall(&content);
             let mut message_json = serde_json::json!({
                 "role": self.role.clone(),
                 "content": content,
@@ -152,6 +153,50 @@ fn cut_result(
     let cut_at = cut_at.into_iter().min().unwrap_or(text.len());
     let ans = text.split_at(cut_at).0.to_string();
     return (ans.replace("\r", ""), true);
+}
+
+fn split_buffer(
+    buffer: &str,
+    delimiter: &String,
+) -> (String, String, String) {
+    // NOTE: this function tries to split given String into 3 parts:
+    // 1. prefix of buffer where is no delimiter, or it's prefix
+    // 2. delimiter or it's prefix
+    // 3. remained buffer's suffix
+    let text = buffer.to_string().replace("\r", "");
+    let parts: Vec<&str> = text.split(delimiter).collect();
+    if parts.len() > 1 {
+        return (parts[0].to_string(), delimiter.clone(), parts[1..parts.len()].join(delimiter));
+    }
+    let mut prefix = String::new();
+    let mut middle = String::new();
+    for idx in 1..delimiter.len() {
+        if parts[0].ends_with(&delimiter[..idx]) {
+            prefix = parts[0][..parts[0].len() - idx].to_string();
+            middle = delimiter[..idx].to_string();
+        }
+    }
+    return (prefix, middle, String::new());
+}
+
+fn split_buffer_min_prefix(
+    buffer: &str,
+    delimiters: &Vec<String>,
+    full_match: bool,
+) -> (String, String) {
+    // NOTE: this function finds shortest prefix of buffer without delimiter symbols.
+    // if you set full_match to true, it will return result only for full matches
+    let mut result = (String::from(buffer), String::new(), String::new());
+    for delimiter in delimiters {
+        let t = split_buffer(buffer, delimiter);
+        if full_match && t.1.as_str() != delimiter.as_str() {
+            continue;
+        }
+        if t.0.len() < result.0.len() {
+            result = t;
+        }
+    }
+    return (result.0, result.1);
 }
 
 fn parse_functioncall(
