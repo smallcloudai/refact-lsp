@@ -6,8 +6,7 @@ pub struct DeltaDeltaChatStreamer {
     // This class helps chat implementations to stop at two-token phrases (at most) when streaming,
     // by delaying output by 1 token.
     // (the problem is the naive approach would have already sent the first token to the user, instead of stopping)
-    pub delta1: String,
-    pub delta2: String,
+    pub buffer: String,
     pub finished: bool,
     pub stop_list: Vec<String>,
     pub role: String,
@@ -16,8 +15,7 @@ pub struct DeltaDeltaChatStreamer {
 impl DeltaDeltaChatStreamer {
     pub fn new() -> Self {
         Self {
-            delta1: String::new(),
-            delta2: String::new(),
+            buffer: String::new(),
             finished: false,
             stop_list: Vec::new(),
             role: String::new(),
@@ -74,85 +72,35 @@ impl DeltaDeltaChatStreamer {
         stopped: bool,
     ) -> Result<(serde_json::Value, bool), String>
     {
-        // let prev_delta = self.delta2;
-        self.delta2 = self.delta1.clone();
-        self.delta1 = delta.clone();
-        let mut finished;
-        let json_choices;
-        if !delta.is_empty() {
-            assert!(!self.finished, "already finished");
-            let big_delta = self.delta2.clone() + self.delta1.as_str();
-            let s: String;
-            (s, finished) = cut_result(&big_delta, &self.stop_list);
-            finished |= stopped;
-            if finished {
-                json_choices = serde_json::json!([{
-                    "index": 0,
-                    "delta": {
-                        "role": self.role.clone(),
-                        "content": s.clone(),
-                    },
-                    "finish_reason": serde_json::Value::String("stop".to_string()),
-                }]);
-            } else {
-                json_choices = serde_json::json!([{
-                    "index": 0,
-                    "delta": {
-                        "role": self.role.clone(),
-                        "content": self.delta2
-                    },
-                    "finish_reason": serde_json::Value::Null
-                }]);
-            }
-            self.finished = finished;
-        } else {
-            let leftovers = self.delta2.clone();
-            let s: String;
-            (s, finished) = cut_result(&leftovers, &self.stop_list);
-            if finished {
-                json_choices = serde_json::json!([{
-                    "index": 0,
-                    "delta": {
-                        "role": self.role.clone(),
-                        "content": s.clone(),
-                    },
-                    "finish_reason": serde_json::Value::String("stop".to_string()),
-                }]);
-            } else {
-                json_choices = serde_json::json!([{
-                    "index": 0,
-                    "delta": {
-                        "role": self.role.clone(),
-                        "content": self.delta2
-                    },
-                    "finish_reason": "length"
-                }]);
-            }
+        self.buffer += delta.as_str();
+
+        let (content, middle) =
+            split_buffer_min_prefix(&self.buffer, &self.stop_list, delta.is_empty());
+        let finished = stopped | self.stop_list.contains(&middle);
+        let mut finish_reason: serde_json::Value =
+            if !delta.is_empty() { serde_json::Value::Null }
+            else { serde_json::Value::String("length".to_string()) };
+        if finished {
+            finish_reason = serde_json::Value::String("stop".to_string());
         }
+        self.buffer = middle;
         self.finished = finished;
+
         let ans = serde_json::json!({
-            "choices": json_choices,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": self.role.clone(),
+                        "content": content.clone(),
+                    },
+                    "finish_reason": finish_reason,
+                }
+            ]
         });
+
         Ok((ans, finished))
     }
-}
-
-fn cut_result(
-    text: &str,
-    local_stop_list: &Vec<String>,
-) -> (String, bool) {
-    let mut cut_at = vec![];
-    for t in local_stop_list {
-        if let Some(x) = text.find(t) {
-            cut_at.push(x);
-        }
-    }
-    if cut_at.is_empty() {
-        return (text.to_string().replace("\r", ""), false);
-    }
-    let cut_at = cut_at.into_iter().min().unwrap_or(text.len());
-    let ans = text.split_at(cut_at).0.to_string();
-    return (ans.replace("\r", ""), true);
 }
 
 fn split_buffer(
@@ -168,7 +116,7 @@ fn split_buffer(
     if parts.len() > 1 {
         return (parts[0].to_string(), delimiter.clone(), parts[1..parts.len()].join(delimiter));
     }
-    let mut prefix = String::new();
+    let mut prefix = parts[0].to_string();
     let mut middle = String::new();
     for idx in 1..delimiter.len() {
         if parts[0].ends_with(&delimiter[..idx]) {
