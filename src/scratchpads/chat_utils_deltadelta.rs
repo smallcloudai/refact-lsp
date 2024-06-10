@@ -1,4 +1,3 @@
-use log::info;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -33,26 +32,30 @@ impl DeltaDeltaChatStreamer {
             let (content, delimiter) =
                 split_buffer_min_prefix(&x, &self.stop_list, true);
             let finished = stopped[i] | self.stop_list.contains(&delimiter);
-            let (content, functioncall) = parse_functioncall(&content);
+
+            let function_call_tag_begin = String::from("<functioncall>");
+            let function_call_tag_end = String::from("</functioncall>");
+            let (content, delimiter, postfix) =
+                split_buffer(&content, &function_call_tag_begin);
+            let (function_call_text, _, _) =
+                split_buffer(&postfix, &function_call_tag_end);
+
             let mut message_json = serde_json::json!({
                 "role": self.role.clone(),
                 "content": content,
             });
-            if functioncall != serde_json::Value::Null {
-                message_json["tool_calls"] = functioncall
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
+            if let Ok(function_call) = serde_json::from_str::<serde_json::Value>(&function_call_text.as_str()) {
+                message_json["tool_calls"] = function_call
+                    .as_array().unwrap().iter().enumerate()
                     .map(|(index, item)| {
                         serde_json::json!({
                             "id": Uuid::new_v4().to_string(),
                             "function": item,
                             "type": "function"
                         })
-                    })
-                    .collect();
+                    }).collect();
             }
+
             json_choices.push(serde_json::json!({
                 "index": i,
                 "message": message_json,
@@ -145,25 +148,4 @@ fn split_buffer_min_prefix(
         }
     }
     return (result.0, result.1);
-}
-
-fn parse_functioncall(
-    content: &str,
-) -> (&str, serde_json::Value) {
-    let start_tag = "<functioncall>";
-    let end_tag = "</functioncall>";
-
-    if let Some(start_idx) = content.find(start_tag) {
-        if let Some(end_idx) = content.find(end_tag) {
-            let context = &content[..start_idx];
-            let functioncall = &content[start_idx + start_tag.len()..end_idx];
-            if let Ok(parsed_json) = serde_json::from_str(functioncall) {
-                return (context, parsed_json);
-            } else {
-                return (context, serde_json::Value::Null);
-            }
-        }
-    }
-
-    return (content, serde_json::Value::Null);
 }
