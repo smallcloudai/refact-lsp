@@ -1,7 +1,9 @@
 use uuid::Uuid;
+use serde_json::{Value, json};
 
 const FUNCTION_CALL_TAG_BEGIN: &str = "<functioncall>";
 const FUNCTION_CALL_TAG_END: &str = "</functioncall>";
+
 
 #[derive(Debug)]
 pub struct DeltaDeltaChatStreamer {
@@ -18,10 +20,10 @@ pub struct DeltaDeltaChatStreamer {
 impl DeltaDeltaChatStreamer {
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
+            buffer: "".to_string(),
             finished: false,
-            stop_list: Vec::new(),
-            role: String::new(),
+            stop_list: vec![],
+            role: "".to_string(),
             is_function_call: false,
         }
     }
@@ -30,28 +32,25 @@ impl DeltaDeltaChatStreamer {
         &mut self,
         choices: Vec<String>,
         stopped: Vec<bool>,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<Value, String> {
         assert!(!self.finished, "already finished");
-        let mut json_choices = Vec::<serde_json::Value>::new();
+        let mut json_choices = vec![];
         for (i, x) in choices.iter().enumerate() {
             let (content, delimiter) =
                 split_buffer_min_prefix(&x, &self.stop_list, true);
             let finished = stopped[i] | self.stop_list.contains(&delimiter);
 
-            let (content, _, postfix) =
-                split_buffer(&content, &FUNCTION_CALL_TAG_BEGIN.to_string());
-            let (function_call_text, _, _) =
-                split_buffer(&postfix, &FUNCTION_CALL_TAG_END.to_string());
+            let (content, _, postfix) = split_buffer(&content, &FUNCTION_CALL_TAG_BEGIN.to_string());
+            let (function_call_text, _, _) = split_buffer(&postfix, &FUNCTION_CALL_TAG_END.to_string());
 
-            let mut message_json = serde_json::json!({
+            let mut message_json = json!({
                 "role": self.role.clone(),
                 "content": content,
             });
-            if let Ok(function_call) = serde_json::from_str::<serde_json::Value>(&function_call_text.as_str()) {
-                message_json["tool_calls"] = function_call
-                    .as_array().unwrap().iter()
+            if let Ok(function_call) = serde_json::from_str::<Value>(&function_call_text.as_str()) {
+                message_json["tool_calls"] = function_call.as_array().unwrap().iter()
                     .map(|item| {
-                        serde_json::json!({
+                        json!({
                             "id": Uuid::new_v4().to_string(),
                             "function": item,
                             "type": "function"
@@ -59,45 +58,40 @@ impl DeltaDeltaChatStreamer {
                     }).collect();
             }
 
-            json_choices.push(serde_json::json!({
+            json_choices.push(json!({
                 "index": i,
                 "message": message_json,
                 "finish_reason": (if finished { "stop" } else { "length" }).to_string(),
             }));
         }
-        Ok(serde_json::json!(
-            {
-                "choices": json_choices,
-            }
-        ))
+        Ok(json!({"choices": json_choices}))
     }
 
     pub fn response_streaming(
         &mut self,
         delta: String,
         stopped: bool,
-    ) -> Result<(serde_json::Value, bool), String>
-    {
-        self.buffer += delta.as_str();
+    ) -> Result<(Value, bool), String> {
+        self.buffer += &delta;
 
-        let (mut content, mut middle) =
-            split_buffer_min_prefix(&self.buffer, &self.stop_list, delta.is_empty());
+        let (mut content, mut middle) = split_buffer_min_prefix(&self.buffer, &self.stop_list, delta.is_empty());
         let mut finished = stopped | self.stop_list.contains(&middle);
 
-        let mut finish_reason: serde_json::Value =
-            if !delta.is_empty() { serde_json::Value::Null }
-            else { serde_json::Value::String("length".to_string()) };
+        let mut finish_reason = if delta.is_empty() {
+            Value::String("length".to_string())
+        } else {
+            Value::Null
+        };
         if finished {
-            finish_reason = serde_json::Value::String("stop".to_string());
+            finish_reason = Value::String("stop".to_string());
         }
 
-        let mut function_call = serde_json::Value::Null;
+        let mut function_call = Value::Null;
         if !self.is_function_call {
             // trying to find that function call tag begins
             let delimiter: String;
             let postfix: String;
-            (content, delimiter, postfix) =
-                split_buffer(&content, &FUNCTION_CALL_TAG_BEGIN.to_string());
+            (content, delimiter, postfix) = split_buffer(&content, &FUNCTION_CALL_TAG_BEGIN.to_string());
             if delimiter == FUNCTION_CALL_TAG_BEGIN {
                 // immediately process function call parsing, skip previous content
                 content = postfix.clone();
@@ -110,23 +104,20 @@ impl DeltaDeltaChatStreamer {
         if self.is_function_call {
             // in function call mode we don't send any content, but hold it in buffer
             let delimiter: String;
-            (middle, delimiter, _) =
-                split_buffer(&content, &FUNCTION_CALL_TAG_END.to_string());
+            (middle, delimiter, _) = split_buffer(&content, &FUNCTION_CALL_TAG_END.to_string());
             // if function call tag found we need now to parse and send it's content
             if delimiter == FUNCTION_CALL_TAG_END {
-                function_call = serde_json::from_str::<serde_json::Value>(&middle.as_str())
-                    .unwrap_or_else(|_| serde_json::Value::Null);
-                function_call = function_call
-                    .as_array().unwrap().iter()
+                function_call = serde_json::from_str::<Value>(&middle.as_str()).unwrap_or_else(|_| Value::Null);
+                function_call = function_call.as_array().unwrap().iter()
                     .map(|item| {
-                        serde_json::json!({
+                        json!({
                             "id": Uuid::new_v4().to_string(),
                             "function": item,
                             "type": "function",
                             "index": 0,
                         })
                     }).collect();
-                finish_reason = serde_json::Value::String("tool_calls".to_string());
+                finish_reason = Value::String("tool_calls".to_string());
                 finished |= true;
             }
         }
@@ -134,20 +125,19 @@ impl DeltaDeltaChatStreamer {
         self.buffer = middle;
         self.finished = finished;
 
-        let json_delta: serde_json::Value;
-        if self.is_function_call {
-            json_delta = serde_json::json!({
+        let json_delta = if self.is_function_call {
+            json!({
                 "role": self.role.clone(),
                 "tool_calls": function_call,
-            });
+            })
         } else {
-            json_delta = serde_json::json!({
+            json!({
                 "role": self.role.clone(),
                 "content": content.clone(),
-            });
-        }
+            })
+        };
 
-        let ans = serde_json::json!({
+        let ans = json!({
             "choices": [
                 {
                     "index": 0,
@@ -161,10 +151,8 @@ impl DeltaDeltaChatStreamer {
     }
 }
 
-fn normalize_buffer(
-    buffer: &str,
-) -> String {
-    return buffer.to_string().replace("\r", "");
+fn normalize_buffer(buffer: &str) -> String {
+    buffer.to_string().replace("\r", "")
 }
 
 fn split_buffer(
@@ -181,14 +169,14 @@ fn split_buffer(
         return (parts[0].to_string(), delimiter.clone(), parts[1..parts.len()].join(delimiter));
     }
     let mut prefix = parts[0].to_string();
-    let mut middle = String::new();
+    let mut middle = "".to_string();
     for idx in 1..delimiter.len() {
         if parts[0].ends_with(&delimiter[..idx]) {
             prefix = parts[0][..parts[0].len() - idx].to_string();
             middle = delimiter[..idx].to_string();
         }
     }
-    return (prefix, middle, String::new());
+    (prefix, middle, "".to_string())
 }
 
 fn split_buffer_min_prefix(
@@ -199,7 +187,7 @@ fn split_buffer_min_prefix(
     // NOTE: this function finds shortest prefix of buffer without delimiter symbols.
     // if you set full_match to true, it will return result only for full matches
     let text = normalize_buffer(buffer);
-    let mut result = (text.clone(), String::new(), String::new());
+    let mut result = (text.clone(), "".to_string(), "".to_string());
     for delimiter in delimiters {
         let t = split_buffer(&text, delimiter);
         if full_match && t.1.as_str() != delimiter.as_str() {
@@ -209,5 +197,5 @@ fn split_buffer_min_prefix(
             result = t;
         }
     }
-    return (result.0, result.1);
+    (result.0, result.1)
 }
