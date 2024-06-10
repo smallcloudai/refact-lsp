@@ -63,7 +63,6 @@ impl GenericChatScratchpad {
 fn patch_content_with_tool_calls(
     msg: &ChatMessage,
 ) -> String {
-    let mut content = msg.content.clone();
     if let Some(ref tools_mb) = msg.tool_calls {
         let mut tools = vec![];
         for _chat_tool_call in tools_mb {
@@ -76,7 +75,7 @@ fn patch_content_with_tool_calls(
             serde_json::to_string(&tools).unwrap_or_else(|_| "[]".to_string());
         return format!("{}\n\n<functioncall>{}</functioncall>\n\n", msg.content, tools_json_str);
     }
-    return content;
+    return msg.content.clone();
 }
 
 fn prompt_patch_with_available_tools(
