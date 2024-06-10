@@ -60,9 +60,7 @@ impl GenericChatScratchpad {
     }
 }
 
-fn patch_content_with_tool_calls(
-    msg: &ChatMessage,
-) -> String {
+fn patch_content_with_tool_calls(msg: &ChatMessage) -> String {
     if let Some(ref tools_mb) = msg.tool_calls {
         let mut tools = vec![];
         for _chat_tool_call in tools_mb {
@@ -71,19 +69,16 @@ fn patch_content_with_tool_calls(
                 &chat_tool_call.function.arguments).unwrap_or_else(|_| "".to_string());
             tools.push(chat_tool_call);
         }
-        let tools_json_str =
-            serde_json::to_string(&tools).unwrap_or_else(|_| "[]".to_string());
+        let tools_json_str = serde_json::to_string(&tools).unwrap_or_else(|_| "[]".to_string());
         return format!("{}\n\n<functioncall>{}</functioncall>\n\n", msg.content, tools_json_str);
     }
-    return msg.content.clone();
+    msg.content.clone()
 }
 
-fn prompt_patch_with_available_tools(
-    tools_mb: &Option<Vec<serde_json::Value>>,
-) -> String {
+fn prompt_patch_with_available_tools(tools_mb: &Option<Vec<Value>>) -> String {
     let mut patch: String = "".to_string();
-    if let Some(ref tools_mb) = tools_mb {
-        let tools_json = serde_json::to_string(&tools_mb).unwrap_or_else(|_| "[]".to_string());
+    if let Some(tools) = tools_mb {
+        let tools_json = serde_json::to_string(tools).unwrap_or_else(|_| "[]".to_string());
         let fc_template = r#"<functioncall>[{"name":"function_name","arguments":"{\"arg_1\":\"val_1\",\"arg_2\":\"val_2\" ... }"}]</functioncall>"#;
         patch = format!(
             "User knows about following available tools:\n\n\
@@ -92,9 +87,9 @@ fn prompt_patch_with_available_tools(
             {}\n\n\
             Accurately read available tools and respond in given format.\n\
             Do not use tools that unknown to the user.\n\n",
-            tools_json.as_str(), fc_template);
+            tools_json, fc_template);
     }
-    return patch;
+    patch
 }
 
 #[async_trait]
