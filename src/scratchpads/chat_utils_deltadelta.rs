@@ -49,8 +49,8 @@ impl DeltaDeltaChatStreamer {
             });
             if let Ok(function_call) = serde_json::from_str::<serde_json::Value>(&function_call_text.as_str()) {
                 message_json["tool_calls"] = function_call
-                    .as_array().unwrap().iter().enumerate()
-                    .map(|(index, item)| {
+                    .as_array().unwrap().iter()
+                    .map(|item| {
                         serde_json::json!({
                             "id": Uuid::new_v4().to_string(),
                             "function": item,
@@ -117,8 +117,8 @@ impl DeltaDeltaChatStreamer {
                 function_call = serde_json::from_str::<serde_json::Value>(&middle.as_str())
                     .unwrap_or_else(|_| serde_json::Value::Null);
                 function_call = function_call
-                    .as_array().unwrap().iter().enumerate()
-                    .map(|(index, item)| {
+                    .as_array().unwrap().iter()
+                    .map(|item| {
                         serde_json::json!({
                             "id": Uuid::new_v4().to_string(),
                             "function": item,
@@ -161,6 +161,12 @@ impl DeltaDeltaChatStreamer {
     }
 }
 
+fn normalize_buffer(
+    buffer: &str,
+) -> String {
+    return buffer.to_string().replace("\r", "");
+}
+
 fn split_buffer(
     buffer: &str,
     delimiter: &String,
@@ -169,7 +175,7 @@ fn split_buffer(
     // 1. prefix of buffer where is no delimiter, or it's prefix
     // 2. delimiter or it's prefix
     // 3. remained buffer's suffix
-    let text = buffer.to_string().replace("\r", "");
+    let text = normalize_buffer(buffer);
     let parts: Vec<&str> = text.split(delimiter).collect();
     if parts.len() > 1 {
         return (parts[0].to_string(), delimiter.clone(), parts[1..parts.len()].join(delimiter));
@@ -192,9 +198,10 @@ fn split_buffer_min_prefix(
 ) -> (String, String) {
     // NOTE: this function finds shortest prefix of buffer without delimiter symbols.
     // if you set full_match to true, it will return result only for full matches
-    let mut result = (String::from(buffer), String::new(), String::new());
+    let text = normalize_buffer(buffer);
+    let mut result = (text.clone(), String::new(), String::new());
     for delimiter in delimiters {
-        let t = split_buffer(buffer, delimiter);
+        let t = split_buffer(&text, delimiter);
         if full_match && t.1.as_str() != delimiter.as_str() {
             continue;
         }
