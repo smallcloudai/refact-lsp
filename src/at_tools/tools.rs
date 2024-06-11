@@ -28,6 +28,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("symbols_at".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_ast_lookup_symbols::AttAstLookupSymbols{}) as Box<dyn AtTool + Send>))),
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
+        ("doc_sources".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources::AttDocSources{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -117,6 +118,18 @@ tools:
         description: "The exact name of a function, method, class, type alias. No spaces allowed."
     parameters_required:
       - "symbol"
+
+  - name: "doc_sources"
+    description: "Tool to interact with documentation sources"
+    parameters:
+      - name: "action"
+        type: "string"
+        description: "Either 'list', 'add', or 'remove'"
+      - name: "source"
+        type: "string"
+        description: "A local folder or http(s) url. Required when action is not 'list'."
+    parameters_required:
+      - "action"
 "####;
 
 // - name: "remember_how_to_use_tools"
