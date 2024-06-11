@@ -6,18 +6,21 @@ use crate::at_commands::at_file_search::{execute_at_file_search, text_on_clip};
 use crate::at_tools::at_tools::AtTool;
 use crate::call_validation::{ChatMessage, ContextEnum};
 
+
 pub struct AttFileSearch;
 
 #[async_trait]
 impl AtTool for AttFileSearch {
     async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         let file_path = match args.get("file_path") {
-            Some(file_path) => file_path.to_string(),
-            None => return Err("Missing file_path argument for att_file_search".to_string())
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `file_path` is not a string: {:?}", v)),
+            None => return Err("Missing argument `file_path` for att_file_search".to_string())
         };
         let query = match args.get("query") {
-            Some(query) => query.to_string(),
-            None => return Err("Missing query argument for att_file_search".to_string())
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `query` is not a string: {:?}", v)),
+            None => return Err("Missing argument `query` for att_file_search".to_string())
         };
 
         let vector_of_context_file = execute_at_file_search(ccx, &file_path, &query).await?;

@@ -42,8 +42,8 @@ pub async fn execute_at_file_search(ccx: &mut AtCommandsContext, file_path: &Str
         return Err(format!("parameter {:?} is uncorrectable :/", file_path));
     }
     let file_path = candidates.get(0).unwrap().clone();
-    let filter = format!("(file_path = \"{}\")", file_path);
-    let vector_of_context_file = execute_at_workspace(ccx, query, Some(filter)).await?;
+    let vecdb_scope_filter = format!("(file_path = \"{}\")", file_path);
+    let vector_of_context_file = execute_at_workspace(ccx, query, Some(vecdb_scope_filter)).await?;
 
     Ok(vector_of_context_file)
 }

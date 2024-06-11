@@ -262,7 +262,7 @@ impl VecdbSearch for VecDb {
         &self,
         query: String,
         top_n: usize,
-        filter_mb: Option<String>,
+        vecdb_scope_filter_mb: Option<String>,
     ) -> Result<SearchResult, String> {
         let t0 = std::time::Instant::now();
         let embedding_mb = fetch_embedding::get_embedding_with_retry(
@@ -281,7 +281,7 @@ impl VecdbSearch for VecDb {
 
         let mut handler_locked = self.vecdb_handler.lock().await;
         let t1 = std::time::Instant::now();
-        let mut results = match handler_locked.search(&embedding_mb.unwrap()[0], top_n, filter_mb).await {
+        let mut results = match handler_locked.search(&embedding_mb.unwrap()[0], top_n, vecdb_scope_filter_mb).await {
             Ok(res) => res,
             Err(err) => { return Err(err.to_string()) }
         };

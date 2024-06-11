@@ -672,13 +672,13 @@ impl VecDBHandler {
         &mut self,
         embedding: &Vec<f32>,
         top_n: usize,
-        filter_mb: Option<String>,
+        vecdb_scope_filter_mb: Option<String>,
     ) -> vectordb::error::Result<Vec<Record>> {
         let query = self
             .data_table
             .clone()
             .search(Some(Float32Array::from(embedding.clone())))
-            .filter(filter_mb)
+            .filter(vecdb_scope_filter_mb)
             .limit(top_n)
             .use_index(true)
             .execute()

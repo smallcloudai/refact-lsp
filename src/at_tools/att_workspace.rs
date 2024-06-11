@@ -13,8 +13,9 @@ pub struct AttWorkspace;
 impl AtTool for AttWorkspace {
     async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         let query = match args.get("query") {
-            Some(query) => query.to_string(),
-            None => return Err("Missing query argument for att_workspace".to_string())
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `query` is not a string: {:?}", v)),
+            None => return Err("Missing argument `query` for att_workspace".to_string())
         };
         let vector_of_context_file = execute_at_workspace(ccx, &query, None).await?;
         let text = text_on_clip(&query, true);

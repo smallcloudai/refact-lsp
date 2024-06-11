@@ -188,6 +188,8 @@ impl AtToolDict {
 pub fn at_tools_compiled_in_only() -> Result<Vec<AtToolDict>, String> {
     let at_dict: AtDictDeserialize = serde_yaml::from_str(AT_DICT)
         .map_err(|e|format!("Failed to parse AT_DICT: {}", e))?;
+    
+    // TODO: filter out some tools that depend on vecdb or ast if those are disabled
 
     Ok(at_dict.tools)
 }
