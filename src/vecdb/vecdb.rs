@@ -200,6 +200,7 @@ pub async fn vecdb_background_reload(
                 Ok(_) => {
                 }
                 Err(err) => {
+                    gcx.write().await.last_rag_error = err.clone();
                     error!("vecdb: init failed: {}", err);
                     // gcx.vec_db stays None, the rest of the system continues working
                 }

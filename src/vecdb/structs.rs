@@ -34,11 +34,13 @@ pub struct VecdbConstants {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VecDbStatus {
-    pub unprocessed_files_count: usize,
+    pub files_unprocessed: usize,
+    pub files_total: usize,
     pub requests_made_since_start: usize,
     pub vectors_made_since_start: usize,
     pub db_size: usize,
     pub db_cache_size: usize,
+    pub state: String  // status: "start", "vectorizing", "completed"
 }
 
 
