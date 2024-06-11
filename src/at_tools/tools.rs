@@ -34,6 +34,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         ("workspace_map".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_ast_workspace_map::AttAstWorkspaceMap{}) as Box<dyn Tool + Send>))),
         ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn Tool + Send>))),
         ("web".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_web::AttWeb{}) as Box<dyn Tool + Send>))),
+        ("doc_sources_list".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_list::AttDocSourcesList{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -179,6 +180,11 @@ const NOT_READY_TOOLS: &str = r####"
         type: "string"
         description: "Path to the specific file to diff (optional)."
     parameters_required:
+
+  - name: "doc_sources_list"
+    description: "Tool to list all of the documentation sources"
+    parameters: []
+    parameters_required: []
 "####;
 
 
