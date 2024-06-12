@@ -182,6 +182,16 @@ pub async fn execute_at_file(
     let gradient_type = gradient_type_from_range_kind(&colon_kind_mb);
 
     let cpath = crate::files_correction::canonical_path(&file_path);
+    
+    if from_tool_call {
+        let project_paths = ccx.global_context.read().await.documents_state.workspace_folders.lock().unwrap().clone();
+        if let Some(p_path) = project_paths.get(0).map(|x|x.to_string_lossy().to_string()) {
+            if !cpath.starts_with(&p_path) {
+                return Err(format!("@file path {:?} does not belong to the project", file_path));
+            }
+        }
+    }
+
     let file_text = get_file_text_from_memory_or_disk(ccx.global_context.clone(), &cpath).await?;
 
     if let Some(colon) = &colon_kind_mb {
