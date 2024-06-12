@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -6,6 +8,7 @@ use serde_json::Value;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::at_tools::AtTool;
 use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::files_in_workspace::Document;
 
 pub struct AttDocSourcesAdd;
 
@@ -23,19 +26,28 @@ impl AtTool for AttDocSourcesAdd {
             None => return Err("Missing source argument for doc_sources_add".to_string()),
         };
 
-        let gc = ccx.global_context
-            .write()
-            .await;
+        let abs_source_path = PathBuf::from(source.as_str());
+        if fs::canonicalize(abs_source_path).is_err() {
+            return Err(format!("File or directory '{}' doesn't exist", source));
+        }
 
-        let mut files = gc
-            .documents_state
-            .documentation_files
-            .lock()
-            .await;
+        let gcx = ccx.global_context.write().await;
+
+        let mut files = gcx.documents_state.documentation_files.lock().await;
 
         if !files.contains(&source) {
-            files.push(source);
+            files.push(source.clone());
         }
+
+        let vec_db_module = {
+            *gcx.documents_state.cache_dirty.lock().await = true;
+            gcx.vec_db.clone()
+        };
+        let document = Document::new(&PathBuf::from(source.as_str()));
+        match *vec_db_module.lock().await {
+            Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
+            None => {}
+        };
 
         let results = vec![ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
