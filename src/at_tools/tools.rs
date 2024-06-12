@@ -36,6 +36,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         ("web".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_web::AttWeb{}) as Box<dyn Tool + Send>))),
         ("doc_sources_list".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_list::AttDocSourcesList{}) as Box<dyn AtTool + Send>))),
         ("doc_sources_add".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_add::AttDocSourcesAdd{}) as Box<dyn AtTool + Send>))),
+        ("doc_sources_remove".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_remove::AttDocSourcesRemove{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -189,6 +190,15 @@ const NOT_READY_TOOLS: &str = r####"
 
   - name: "doc_sources_add"
     description: "Adds a source to the list of documentation sources"
+    parameters:
+      - name: "source"
+        type: "string"
+        description: "A local folder or http(s) url"
+    parameters_required:
+      - "source"
+
+  - name: "doc_sources_remove"
+    description: "Remove a source from the list of documentation sources"
     parameters:
       - name: "source"
         type: "string"
