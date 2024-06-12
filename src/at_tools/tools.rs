@@ -29,6 +29,7 @@ pub async fn at_tools_merged(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         ("doc_sources_list".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_list::AttDocSourcesList{}) as Box<dyn AtTool + Send>))),
+        ("doc_sources_add".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_add::AttDocSourcesAdd{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let tconfig_maybe = crate::toolbox::toolbox_config::load_customization(gcx.clone()).await;
@@ -104,6 +105,15 @@ tools:
     description: "Tool to list all of the documentation sources"
     parameters: []
     parameters_required: []
+
+  - name: "doc_sources_add"
+    description: "Adds a source to the list of documentation sources"
+    parameters:
+      - name: "source"
+        type: "string"
+        description: "A local folder or http(s) url"
+    parameters_required:
+      - "source"
 "####;
 
 // - name: "remember_how_to_use_tools"
