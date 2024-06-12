@@ -24,7 +24,7 @@ impl AtTool for AttFile {
         //     None => return Err("line".to_string()),
         // };
 
-        let context_file = execute_at_file(ccx, p.clone()).await?;
+        let context_file = execute_at_file(ccx, p.clone(), true).await?;
         let text = text_on_clip(&context_file, true);
 
         let mut results = vec_context_file_to_context_tools(vec![context_file]);

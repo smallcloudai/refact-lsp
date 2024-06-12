@@ -104,12 +104,12 @@ fn put_colon_back_to_arg(value: &mut String, colon: &Option<ColonLinesRange>) {
 pub async fn parameter_repair_candidates(
     value: &String,
     ccx: &AtCommandsContext,
+    fuzzy: bool,
 ) -> Vec<String>
 {
     let mut correction_candidate = value.clone();
     let colon_mb = colon_lines_range_from_arg(&mut correction_candidate);
 
-    let fuzzy = true;
     let result: Vec<String> = crate::files_correction::correct_to_nearest_filename(
         ccx.global_context.clone(),
         &correction_candidate,
@@ -157,12 +157,17 @@ impl AtParam for AtParamFilePath {
     }
 
     async fn complete(&self, value: &String, ccx: &AtCommandsContext) -> Vec<String> {
-        return parameter_repair_candidates(value, ccx).await;
+        return parameter_repair_candidates(value, ccx, true).await;
     }
 }
 
-pub async fn execute_at_file(ccx: &mut AtCommandsContext, file_path: String) -> Result<ContextFile, String> {
-    let candidates = parameter_repair_candidates(&file_path, ccx).await;
+pub async fn execute_at_file(
+    ccx: &mut AtCommandsContext, 
+    file_path: String,
+    from_tool_call: bool,
+) -> Result<ContextFile, String> {
+    let fuzzy = !from_tool_call;
+    let candidates = parameter_repair_candidates(&file_path, ccx, fuzzy).await;
     if candidates.is_empty() {
         info!("parameter {:?} is uncorrectable :/", &file_path);
         return Err(format!("parameter {:?} is uncorrectable :/", &file_path));
@@ -221,7 +226,7 @@ impl AtCommand for AtFile {
             return Err(format!("file_path is incorrect: {:?}. Reason: {:?}", file_path.text, file_path.reason));
         }
         
-        let context_file = execute_at_file(ccx, file_path.text.clone()).await?;
+        let context_file = execute_at_file(ccx, file_path.text.clone(), false).await?;
         let text = text_on_clip(&context_file, false);
         Ok((vec_context_file_to_context_tools(vec![context_file]), text))
     }
