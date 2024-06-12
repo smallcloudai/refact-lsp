@@ -6,6 +6,7 @@ from refact import chat_client
 
 DUMP_PREFIX = datetime.now().strftime("%Y%m%d-%H%M%S")
 
+# MODEL = "llama3/8b/instruct"  # normal working of this model requires at least 8k context size
 # MODEL = "gpt-4-turbo"
 # MODEL = "gpt-4o"
 # MODEL = "gpt-3.5-turbo-1106"  # $1, multi call works

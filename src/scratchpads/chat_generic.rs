@@ -83,10 +83,14 @@ fn prompt_patch_with_available_tools(tools_mb: &Option<Vec<Value>>) -> String {
         patch = format!(
             "User knows about following available tools:\n\n\
             {}\n\n\
-            To use these tools respond with:\n\n\
+            Here is the format of calling tools:\n\n\
             {}\n\n\
             Accurately read available tools and respond in given format.\n\
-            Do not use tools that unknown to the user.\n\n",
+            Each tool you need to call should contain it's name and arguments.\n\
+            Name should be string with tool name. Arguments should be stringified parameters of given tool.\n\
+            If you're not need to call do not place it you're answer.\n\
+            Before using function calls, make sure that they're listed as available.\n\
+            If you need to make function calls, place them at the end of your answer.\n\n",
             tools_json, fc_template);
     }
     patch
