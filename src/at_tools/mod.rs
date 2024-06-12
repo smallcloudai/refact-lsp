@@ -10,4 +10,5 @@ mod att_note_to_self;
 mod att_workspace;
 mod att_doc_sources_list;
 mod att_doc_sources_add;
+mod att_doc_sources_remove;
 pub mod execute_att;
