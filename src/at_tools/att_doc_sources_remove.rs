@@ -18,7 +18,8 @@ impl AtTool for AttDocSourcesRemove {
         args: &HashMap<String, Value>,
     ) -> Result<Vec<ContextEnum>, String> {
         let source = match args.get("source") {
-            Some(source) => source.to_string(),
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
             None => return Err("Missing source argument for doc_sources_remove".to_string()),
         };
 
