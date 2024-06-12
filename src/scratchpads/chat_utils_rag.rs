@@ -447,15 +447,15 @@ pub async fn postprocess_rag_stage_3_6(
         // example: see comment in class Toad
         colorize_comments_up(linevec, settings);
 
-        // if file has multiple chunks, lines from each following chunk get de-multiplier for usefulness
-        // that would benefit diversity of files in the output
-        let chunk_n = *chunk_n_in_files.get(&cpath).unwrap();
-        let demult = 1. - (chunk_n as f32 * 0.1).max(0.1);
-        for line in linevec {
-            let u = line.useful * demult;
-            if u == line.useful {continue;}
-            set_useful_for_line(line, u, None);
-        }
+        // // if file has multiple chunks, lines from each following chunk get de-multiplier for usefulness
+        // // that would benefit diversity of files in the output
+        // let chunk_n = *chunk_n_in_files.get(&cpath).unwrap();
+        // let demult = 1. - (chunk_n as f32 * 0.1).max(0.1);
+        // for line in linevec {
+        //     let u = line.useful * demult;
+        //     if u == line.useful {continue;}
+        //     set_useful_for_line(line, u, None);
+        // }
     }
 
     // 5. Downgrade sub-symbols and uninteresting regions
