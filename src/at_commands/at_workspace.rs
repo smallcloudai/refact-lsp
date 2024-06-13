@@ -38,7 +38,7 @@ fn results2message(results: &Vec<vecdb::structs::Record>) -> Vec<ContextFile> {
         let mut usefulness = r.usefulness;
         // diversifying results
         let chunk_n =  vector_of_context_file.iter().map(|x|&x.file_name).filter(|x|**x == file_name).count();
-        usefulness *= 1. / (chunk_n as f32 + 1.);
+        usefulness *= 1. / (chunk_n as f32 * 0.1 + 1.);
         // info!("file_name {}; usefulness {}", file_name, usefulness);
         
         vector_of_context_file.push(ContextFile {
