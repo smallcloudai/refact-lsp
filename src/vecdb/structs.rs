@@ -40,7 +40,7 @@ pub struct VecDbStatus {
     pub vectors_made_since_start: usize,
     pub db_size: usize,
     pub db_cache_size: usize,
-    pub state: String  // status: "start", "vectorizing", "completed"
+    pub state: String
 }
 
 

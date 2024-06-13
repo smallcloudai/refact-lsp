@@ -289,7 +289,7 @@ impl FileVectorizerService {
                 vectors_made_since_start: 0,
                 db_size: 0,
                 db_cache_size: 0,
-                state: "idle".to_string(),
+                state: "starting".to_string(),
             }
         ));
         FileVectorizerService {
