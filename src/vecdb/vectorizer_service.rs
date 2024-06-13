@@ -178,26 +178,25 @@ async fn vectorize_thread(
             }
         }
 
-        if files_unprocessed > files_total {
-            files_total = files_unprocessed;
-        }
-
         if (files_unprocessed + 99).div(100) != (reported_unprocessed + 99).div(100) {
             info!("have {} unprocessed files", files_unprocessed);
             reported_unprocessed = files_unprocessed;
         }
 
-        {
-            let mut locked_status = status.lock().await;
-            locked_status.files_unprocessed = files_unprocessed;
-            locked_status.files_total = files_total;
-            locked_status.state = "parsing".to_string();
-        }
-        reported_vecdb_complete &= files_unprocessed ==0;
+        reported_vecdb_complete &= files_unprocessed == 0;
 
         let mut doc = {
             match doc_mb {
-                Some(doc) => doc,
+                Some(doc) => {
+                    let mut locked_status = status.lock().await;
+                    locked_status.files_unprocessed = files_unprocessed;
+                    if files_unprocessed > files_total {
+                        files_total = files_unprocessed;
+                    }
+                    locked_status.files_total = files_total;
+                    locked_status.state = "parsing".to_string();
+                    doc
+                },
                 None => {
                     // No files left to process
                     if !reported_vecdb_complete {
