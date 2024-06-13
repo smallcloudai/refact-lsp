@@ -117,18 +117,16 @@ fn color_with_gradient_type(omsg: &ContextFile, linevec: &mut Vec<Arc<FileLine>>
             }.max(0.),
             _ => 0.0,
         };
-        set_useful_for_line(line, usefulness, Some(format!("gradient_type: {:?}", omsg.gradient_type)));
+        set_useful_for_line(line, usefulness, &format!("gradient_type: {:?}", omsg.gradient_type));
     }
 }
 
-fn set_useful_for_line(line: &Arc<FileLine>, useful: f32, color_mb: Option<String>) {
+fn set_useful_for_line(line: &Arc<FileLine>, useful: f32, color: &String) {
     let lineref_mut: *mut FileLine = Arc::as_ptr(line) as *mut FileLine;
     unsafe {
         if (line.useful < useful) || useful < 0. {
             (*lineref_mut).useful = useful;
-            if let Some(color) = color_mb {
-                (*lineref_mut).color = color.clone();
-            }
+            (*lineref_mut).color = color.clone();
         }
     }
 }
@@ -381,7 +379,6 @@ pub async fn postprocess_rag_stage_3_6(
     }
 
     // 4. Fill in usefulness from search results
-    let mut chunk_n_in_files = HashMap::new();
     for omsg in origmsgs.iter() {
         // Do what we can to match omsg.file_name to something real
         let nearest = crate::files_correction::correct_to_nearest_filename(global_context.clone(), &omsg.file_name, false, 1).await;
@@ -390,8 +387,6 @@ pub async fn postprocess_rag_stage_3_6(
         } else {
             crate::files_correction::canonical_path(&nearest[0])
         };
-        *chunk_n_in_files.entry(cpath.clone()).or_insert(-1) += 1;
-
         let linevec: &mut Vec<Arc<FileLine>> = match lines_in_files.get_mut(&cpath) {
             Some(x) => x,
             None => {
@@ -446,16 +441,6 @@ pub async fn postprocess_rag_stage_3_6(
         }
         // example: see comment in class Toad
         colorize_comments_up(linevec, settings);
-
-        // // if file has multiple chunks, lines from each following chunk get de-multiplier for usefulness
-        // // that would benefit diversity of files in the output
-        // let chunk_n = *chunk_n_in_files.get(&cpath).unwrap();
-        // let demult = 1. - (chunk_n as f32 * 0.1).max(0.1);
-        // for line in linevec {
-        //     let u = line.useful * demult;
-        //     if u == line.useful {continue;}
-        //     set_useful_for_line(line, u, None);
-        // }
     }
 
     // 5. Downgrade sub-symbols and uninteresting regions
