@@ -14,7 +14,7 @@ struct RagStatus {
     ast_alive: String,
     vecdb: Option<VecDbStatus>,
     vecdb_alive: String,
-    last_rag_error: String,
+    vec_db_error: String,
 }
 
 pub async fn handle_v1_rag_status(
@@ -43,7 +43,7 @@ pub async fn handle_v1_rag_status(
         ast_alive: ast_message,
         vecdb: maybe_vecdb_status,
         vecdb_alive: vecdb_message,
-        last_rag_error: cx_locked.vec_db_error.clone()
+        vec_db_error: cx_locked.vec_db_error.clone()
     };
     let json_string = serde_json::to_string_pretty(&status).map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("JSON serialization problem: {}", e))
