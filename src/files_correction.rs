@@ -6,6 +6,13 @@ use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use strsim::normalized_damerau_levenshtein;
 use tracing::info;
 
+pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
+    let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
+    let paths_from_workspace: Vec<PathBuf> = global_context.read().await.documents_state.workspace_files.lock().unwrap().clone();
+    let paths_from_jsonl: Vec<PathBuf> = global_context.read().await.documents_state.jsonl_files.lock().unwrap().clone();
+    let paths_from_anywhere = file_paths_from_memory.into_iter().chain(paths_from_workspace.into_iter().chain(paths_from_jsonl.into_iter()));
+    paths_from_anywhere.collect::<Vec<PathBuf>>()
+}
 
 pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, String>>, Arc<Vec<String>>)
 {
@@ -27,15 +34,12 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
         // - cx_locked.documents_state.workspace_files
         // - global_context.read().await.cmdline.files_jsonl_path
         info!("rebuilding files cache...");
-        let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
-        let paths_from_workspace: Vec<PathBuf> = global_context.read().await.documents_state.workspace_files.lock().unwrap().clone();
-        let paths_from_jsonl: Vec<PathBuf> = global_context.read().await.documents_state.jsonl_files.lock().unwrap().clone();
 
         let mut cache_correction = HashMap::<String, String>::new();
         let mut cache_fuzzy_set = HashSet::<String>::new();
         let mut cnt = 0;
 
-        let paths_from_anywhere = file_paths_from_memory.into_iter().chain(paths_from_workspace.into_iter().chain(paths_from_jsonl.into_iter()));
+        let paths_from_anywhere = paths_from_anywhere(global_context.clone()).await;
         for path in paths_from_anywhere {
             let path_str = path.to_str().unwrap_or_default().to_string();
             let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
