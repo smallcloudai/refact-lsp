@@ -67,7 +67,7 @@ pub async fn run_at_commands(
         }
 
         for exec_result in messages_exec_output.iter() {
-            // at commands exec() can produce both role="user" and role="assistant" messages
+            // at commands exec() can produce both role="user" and role="assistant" and role="diff" messages
             if let ContextEnum::ChatMessage(raw_msg) = exec_result {
                 rebuilt_messages.push(raw_msg.clone());
                 stream_back_to_user.push_in_json(json!(raw_msg));
@@ -84,13 +84,10 @@ pub async fn run_at_commands(
             false,
             top_n,
         ).await;
-        if post_processed.len() > 0 {
+        if !post_processed.is_empty() {
             // post-processed files after all custom messages
-            any_context_produced = true;
-            let json_vec = post_processed.iter().map(|p| {
-                json!(p)
-            }).collect::<Vec<Value>>();
-            if json_vec.len() > 0 {
+            let json_vec = post_processed.iter().map(|p| { json!(p)}).collect::<Vec<Value>>();
+            if !json_vec.is_empty() {
                 let message = ChatMessage::new(
                     "context_file".to_string(),
                     serde_json::to_string(&json_vec).unwrap_or("".to_string()),
@@ -184,7 +181,7 @@ pub async fn execute_at_commands_in_query(
     (context_enums, highlight_members)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AtCommandMember {
     pub kind: String,
     pub text: String,
@@ -201,11 +198,10 @@ impl AtCommandMember {
 }
 
 pub fn parse_words_from_line(line: &String) -> Vec<(String, usize, usize)> {
-    // TODO: make regex better
-    let word_regex = Regex::new(r#"(@?[^ !?@\n]*)"#).expect("Invalid regex");
+    let word_regex = Regex::new(r#"(@?[^ !?@\n]+|\n|@)"#).expect("Invalid regex");
     let mut results = vec![];
     for cap in word_regex.captures_iter(line) {
-        if let Some(matched) = cap.get(1) {
+        if let Some(matched) = cap.get(0) {
             results.push((matched.as_str().to_string(), matched.start(), matched.end()));
         }
     }
