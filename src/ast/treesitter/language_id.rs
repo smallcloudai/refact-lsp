@@ -155,6 +155,8 @@ impl From<Language> for LanguageId {
             Self::TypeScript
         } else if value == tree_sitter_typescript::language_tsx() {
             Self::TypeScriptReact
+        } else if value == tree_sitter_c_sharp::language() {
+            Self::CSharp
         } else {
             Self::Unknown
         }

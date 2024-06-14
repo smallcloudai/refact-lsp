@@ -16,6 +16,51 @@ mod java;
 mod cpp;
 mod ts;
 mod js;
+mod csharp;
+
+
+fn print_symbol(symbol: &AstSymbolInstanceArc,
+                guid_to_symbol_map: &HashMap<Uuid, AstSymbolInstanceArc>,
+                used_guids: &mut HashSet<Uuid>,
+                code: &str, indent: usize) {
+    let sym = symbol.read();
+    if used_guids.contains(&sym.guid()) {
+        return;
+    }
+    used_guids.insert(sym.guid().clone());
+    let indent_str = " ".repeat(indent);
+    let full_range = sym.full_range().clone();
+    let range = full_range.start_byte..full_range.end_byte;
+    let mut name = sym.name().to_string();
+    if let Some(caller_guid) = sym.get_caller_guid() {
+        if guid_to_symbol_map.contains_key(&caller_guid) {
+            name = format!("{} -> {}", name, caller_guid.to_string().slice(0..6));
+        }
+    }
+    
+    // Prepare a single line summary of the symbol
+    let summary = format!(
+        "{}| {}{} | {} | {} | {}",
+        full_range.start_point.row + 1,
+        indent_str,
+        sym.guid().to_string().slice(0..6),
+        name,
+        sym.symbol_type(),
+        code.slice(range).lines().collect::<Vec<_>>().first().unwrap(),
+    );
+
+    // Print the summary
+    println!("{}", summary);
+
+    // Recursively print children if any
+    let children = sym.childs_guid().iter().filter_map( 
+        |x| guid_to_symbol_map.get(x)
+    ).sorted_by_key(|x| x.read().full_range().start_byte).collect::<Vec<_>>();
+    
+    for child in children {
+        print_symbol(&child, &guid_to_symbol_map, used_guids, code, indent + 4);  // Increase indent for child elements
+    }
+}
 
 pub(crate) fn print(symbols: &Vec<AstSymbolInstanceArc>, code: &str) {
     let guid_to_symbol_map = symbols.iter()
@@ -24,43 +69,7 @@ pub(crate) fn print(symbols: &Vec<AstSymbolInstanceArc>, code: &str) {
     let mut used_guids: HashSet<Uuid> = Default::default();
 
     for sym in sorted {
-        let guid = sym.read().guid().clone();
-        if used_guids.contains(&guid) {
-            continue;
-        }
-        let caller_guid = sym.read().get_caller_guid().clone();
-        let mut name = sym.read().name().to_string();
-        let type_name = sym.read().symbol_type().to_string();
-        if let Some(caller_guid) = caller_guid {
-            if guid_to_symbol_map.contains_key(&caller_guid) {
-                name = format!("{} -> {}", name, caller_guid.to_string().slice(0..6));
-            }
-        }
-        let full_range = sym.read().full_range().clone();
-        let range = full_range.start_byte..full_range.end_byte;
-        println!("{0} {1} [{2}] {3}", guid.to_string().slice(0..6), name, code.slice(range).lines().collect::<Vec<_>>().first().unwrap(), type_name);
-        used_guids.insert(guid.clone());
-        let mut candidates: VecDeque<(i32, Uuid)> = VecDeque::from_iter(sym.read().childs_guid().iter().map(|x| (4, x.clone())));
-        while let Some((offest, cand)) = candidates.pop_front() {
-            used_guids.insert(cand.clone());
-            if let Some(sym_l) = guid_to_symbol_map.get(&cand) {
-                let caller_guid = sym_l.read().get_caller_guid().clone();
-                let mut name = sym_l.read().name().to_string();
-                let type_name = sym_l.read().symbol_type().to_string();
-                if let Some(caller_guid) = caller_guid {
-                    if guid_to_symbol_map.contains_key(&caller_guid) {
-                        name = format!("{} -> {}", name, caller_guid.to_string().slice(0..6));
-                    }
-                }
-                let full_range = sym_l.read().full_range().clone();
-                let range = full_range.start_byte..full_range.end_byte;
-                println!("{0} {1} {2} [{3}] {4}", cand.to_string().slice(0..6), str::repeat(" ", offest as usize),
-                         name, code.slice(range).lines().collect::<Vec<_>>().first().unwrap(), type_name);
-                let mut new_candidates = VecDeque::from_iter(sym_l.read().childs_guid().iter().map(|x| (offest + 2, x.clone())));
-                new_candidates.extend(candidates.clone());
-                candidates = new_candidates;
-            }
-        }
+        print_symbol(&sym, &guid_to_symbol_map, &mut used_guids, code, 0);
     }
 }
 
@@ -135,8 +144,12 @@ fn compare_symbols(symbols: &Vec<AstSymbolInstanceArc>,
             
             for child in childs {
                 let child_l = child.read();
-                let closest_sym = ref_childs.iter().filter(|s| child_l.full_range() == s.full_range())
+                let _f = child_l.fields();
+                let closest_sym = ref_childs.iter().filter(|s| child_l.full_range() == s.full_range() 
+                    && child_l.declaration_range() == s.declaration_range())
                     .collect::<Vec<_>>();
+                let _fs: Vec<_> = closest_sym.iter().map(|x| x.fields().clone()).collect(); 
+                
                 assert_eq!(closest_sym.len(), 1);
                 let closest_sym = closest_sym.first().unwrap();
                 candidates.push((child.clone(), closest_sym));
@@ -179,9 +192,9 @@ pub(crate) fn base_test(parser: &mut Box<dyn AstLanguageParser>,
                         path: &PathBuf,
                         code: &str, symbols_str: &str) {
     let symbols = parser.parse(code, &path);
-    // use std::fs;
-    // let symbols_str_ = serde_json::to_string_pretty(&symbols).unwrap();
-    // fs::write("output.json", symbols_str_).expect("Unable to write file");
+    use std::fs;
+    let symbols_str_ = serde_json::to_string_pretty(&symbols).unwrap();
+    fs::write("output.json", symbols_str_).expect("Unable to write file");
     check_duplicates(&symbols);
     print(&symbols, code);
     let ref_symbols: Vec<Box<dyn AstSymbolInstance>> = serde_json::from_str(&symbols_str).unwrap();
