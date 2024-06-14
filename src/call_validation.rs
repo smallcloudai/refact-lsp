@@ -220,6 +220,7 @@ pub struct ContextMemory {
 pub enum ContextEnum {
     ContextFile(ContextFile),
     ChatMessage(ChatMessage),
+    DiffChunk(DiffChunk),
 }
 
 fn default_gradient_type_value() -> i32 {
@@ -285,4 +286,19 @@ pub struct ChatPost {
     pub only_deterministic_messages: bool,  // means don't sample from the model
     #[serde(default)]
     pub chat_id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DiffChunk {
+    pub file_name: String,
+    pub file_action: String,
+    pub line1: usize,
+    pub line2: usize,
+    pub lines_remove: String,
+    pub lines_add: String,
+}
+
+#[derive(Deserialize)]
+pub struct DiffPost {
+    pub content: Vec<DiffChunk>,
 }

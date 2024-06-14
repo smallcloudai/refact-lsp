@@ -99,6 +99,7 @@ impl Document {
 pub struct DocumentsState {
     pub workspace_folders: Arc<StdMutex<Vec<PathBuf>>>,
     pub workspace_files: Arc<StdMutex<Vec<PathBuf>>>,
+    pub last_accessed_file: Arc<StdMutex<Option<PathBuf>>>,
     pub jsonl_files: Arc<StdMutex<Vec<PathBuf>>>,
     // document_map on windows: c%3A/Users/user\Documents/file.ext
     // query on windows: C:/Users/user/Documents/file.ext
@@ -136,6 +137,7 @@ impl DocumentsState {
         Self {
             workspace_folders: Arc::new(StdMutex::new(workspace_dirs)),
             workspace_files: Arc::new(StdMutex::new(Vec::new())),
+            last_accessed_file: Arc::new(StdMutex::new(None)),
             jsonl_files: Arc::new(StdMutex::new(Vec::new())),
             memory_document_map: HashMap::new(),
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
@@ -242,6 +244,18 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
     } else if path.join(".svn").exists() && which("svn").is_ok() {
         // SVN repository
         _run_command("svn", &["list", "-R"], path).await
+    } else {
+        None
+    }
+}
+
+pub fn detect_vcs_in_dir(path: &PathBuf) -> Option<String> {
+    if path.join(".git").exists() && which("git").is_ok() {
+        Some("git".to_string())
+    } else if path.join(".hg").exists() && which("hg").is_ok() {
+        Some("hg".to_string())
+    } else if path.join(".svn").exists() && which("svn").is_ok() {
+        Some("svn".to_string())
     } else {
         None
     }
@@ -409,6 +423,7 @@ pub async fn on_did_open(
     if mark_dirty {
         (*dirty_arc.lock().await) = true;
     }
+    *gcx.read().await.documents_state.last_accessed_file.lock().unwrap() = Some(cpath.clone());
 }
 
 pub async fn on_did_change(
