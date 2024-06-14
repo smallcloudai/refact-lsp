@@ -49,7 +49,6 @@ html2text = "0.12.5"
 select = "0.6.0"
 indexmap = {version = "1.9.1", features = ["serde-1"]}
 
-
 regex-automata = { version = "0.1.10", features = ["transducer"] }
 sorted-vec = "0.8.3"
 tree-sitter = "0.22"
