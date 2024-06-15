@@ -27,6 +27,7 @@ fn vecdb_constants(
     VecdbConstants {
         model_name: caps_locked.default_embeddings_model.clone(),
         embedding_size: caps_locked.size_embeddings.clone(),
+        vectorizer_n_ctx: caps_locked.embedding_n_ctx,
         tokenizer: tokenizer.clone(),
         endpoint_embeddings_template: caps_locked.endpoint_embeddings_template.clone(),
         endpoint_embeddings_style: caps_locked.endpoint_embeddings_style.clone(),
@@ -198,8 +199,10 @@ pub async fn vecdb_background_reload(
                 consts.unwrap(),
             ).await {
                 Ok(_) => {
+                    gcx.write().await.vec_db_error = "".to_string();
                 }
                 Err(err) => {
+                    gcx.write().await.vec_db_error = err.clone();
                     error!("vecdb: init failed: {}", err);
                     // gcx.vec_db stays None, the rest of the system continues working
                 }
