@@ -1,27 +1,37 @@
-use std::hash::Hash;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use hashbrown::HashMap;
+use serde::Deserialize;
+
 use axum::Extension;
 use axum::http::{Response, StatusCode};
-use hashbrown::HashMap;
 use hyper::Body;
-use serde::Deserialize;
+use itertools::Itertools;
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
+use tokio::sync::RwLock as ARwLock;
+use tracing::info;
+
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use tokio::sync::RwLock as ARwLock;
 use crate::files_in_workspace::read_file_from_disk;
 
 
 #[derive(Deserialize)]
-struct DiffApplyPost {
+struct DiffApplyChunk {
     id: usize,
-    file_name: String,
-    file_action: String,
     line1: usize,
     line2: usize,
+    text_orig: String,
     text: String,
+}
+
+#[derive(Deserialize)]
+struct DiffApplyPost {
+    file_action: String,
+    file_name: String,
+    chunks: Vec<DiffApplyChunk>,
 }
 
 pub struct DiffsState {
@@ -40,8 +50,21 @@ impl DiffsState {
 
 #[derive(Clone)]
 pub struct DiffLine {
+    pub line_n: usize,
     pub text: String,
-    pub overwritten_by_id: Option<usize>
+    pub overwritten_by_id: Option<usize>,
+    pub matches: Vec<usize>,
+}
+
+impl DiffLine {
+    pub fn new(line_n: usize, text: String) -> Self {
+        DiffLine {
+            line_n,
+            text,
+            overwritten_by_id: None,
+            matches: vec![]
+        }
+    }
 }
 
 async fn get_file_text(global_context: Arc<ARwLock<GlobalContext>>, file_path: &String) -> Result<(PathBuf, String), ScratchError>{
@@ -64,39 +87,39 @@ async fn get_file_text(global_context: Arc<ARwLock<GlobalContext>>, file_path: &
     Ok((cpath, file_text))
 }
 
-fn apply_lines_to_text(
-    file_text: &mut String, 
-    post: &DiffApplyPost
-) -> Result<(Vec<DiffLine>, Vec<DiffLine>, Vec<DiffLine>), ScratchError> {
-    let lines: Vec<&str> = file_text.lines().collect();
-    if post.line2 >= lines.len() || post.line1 > post.line2 {
-        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Invalid line range".to_string()));
-    }
-    let mut diff_lines = vec![];
-    for l in lines {
-        diff_lines.push(DiffLine {
-            text: l.to_string(),
-            overwritten_by_id: None
-        })
-    }
-    
-    let mut diff_lines_insert = vec![];
-    for l in post.text.lines() {
-        diff_lines_insert.push(DiffLine {
-            text: l.to_string(),
-            overwritten_by_id: Some(post.id)
-        })
-    }
-    
-    let to_replace = diff_lines[post.line1..=post.line2].into_iter().cloned().collect();
-    
-    let mut new_text = diff_lines[..post.line1].to_vec();
-    new_text.extend(diff_lines_insert.clone());
-    new_text.extend_from_slice(&diff_lines[post.line2 + 1..]);
-
-    *file_text = new_text.iter().map(|d|d.text.clone()).collect::<Vec<String>>().join("\n");
-    Ok((to_replace, diff_lines_insert, new_text))
-}
+// fn apply_lines_to_text(
+//     file_text: &mut String,
+//     post: &DiffApplyPost
+// ) -> Result<(Vec<DiffLine>, Vec<DiffLine>, Vec<DiffLine>), ScratchError> {
+//     let lines: Vec<&str> = file_text.lines().collect();
+//     if post.line2 >= lines.len() || post.line1 > post.line2 {
+//         return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Invalid line range".to_string()));
+//     }
+//     let mut diff_lines = vec![];
+//     for l in lines {
+//         diff_lines.push(DiffLine {
+//             text: l.to_string(),
+//             overwritten_by_id: None
+//         })
+//     }
+//
+//     let mut diff_lines_insert = vec![];
+//     for l in post.text.lines() {
+//         diff_lines_insert.push(DiffLine {
+//             text: l.to_string(),
+//             overwritten_by_id: Some(post.id)
+//         })
+//     }
+//
+//     let to_replace = diff_lines[post.line1..=post.line2].into_iter().cloned().collect();
+//
+//     let mut new_text = diff_lines[..post.line1].to_vec();
+//     new_text.extend(diff_lines_insert.clone());
+//     new_text.extend_from_slice(&diff_lines[post.line2 + 1..]);
+//
+//     *file_text = new_text.iter().map(|d|d.text.clone()).collect::<Vec<String>>().join("\n");
+//     Ok((to_replace, diff_lines_insert, new_text))
+// }
 
 async fn write_to_file(path: &PathBuf, text: &str) -> Result<(), ScratchError> {
     let mut file = OpenOptions::new()
@@ -115,25 +138,105 @@ async fn write_to_file(path: &PathBuf, text: &str) -> Result<(), ScratchError> {
     Ok(())
 }
 
+fn find_streaks(hashsets: Vec<HashSet<usize>>, streaks: &mut Vec<HashSet<usize>>, streak_size: usize) {
+    let mut res: Vec<HashSet<usize>> = vec![];
+    info!("find streaks for hashsets: {:?}", hashsets);
+    if hashsets.len() > 1 {
+        for (h1, h2) in hashsets.iter().cloned().tuple_windows() {
+            let h1 = if res.is_empty() { h1 } else { res.last().unwrap().clone() };
+            let h2 = h2.iter().filter(|x| **x > 0).map(|x| x.clone()).collect::<HashSet<usize>>();
+            info!("h1: {:?}; h2: {:?}", h1, h2);
+            let i = h1.intersection(&h2.iter().map(|x| x - 1).collect::<HashSet<_>>()).cloned().collect::<HashSet<_>>();
+            if res.is_empty() {
+                res.push(i.clone());
+            }
+            res.push(i.iter().map(|x| x + 1).collect());
+        }
+    } else {
+        res.push(hashsets.iter().next().unwrap().clone());
+    }
+    info!("res: {:?}", res);
+    info!("streak size: {:?}", streak_size);
+
+    let mut possible_streaks: usize = 0;
+    for w in res.windows(streak_size).map(|w|w.to_vec()) {
+        if w.iter().all(|s|s.len() == 1) {
+            streaks.push(w.iter().map(|x|x.iter().next().unwrap().clone()).collect::<HashSet<usize>>());
+        }
+        if !w.iter().any(|s|s.is_empty()) {
+            possible_streaks += 1;
+        }
+    }
+    if possible_streaks > 1 {
+        find_streaks(res, streaks, streak_size);
+    } else {
+        return;
+    }
+}
+
+fn apply_chunk_to_text_fuzzy(
+    lines_orig: &Vec<DiffLine>,
+    chunk: &DiffApplyChunk,
+    fuzzy_n: usize,
+) -> Result<(), ScratchError> {
+    let mut chunk_lines_orig = chunk.text_orig.lines().map(|l| DiffLine::new(0, l.to_string())).collect::<Vec<_>>();
+    let chunk_lines = chunk.text.lines().map(|l| DiffLine::new(0, l.to_string())).collect::<Vec<_>>();
+
+    for l in chunk_lines_orig.iter_mut() {
+        l.matches = lines_orig[(chunk.line1 as i32 - 1 - fuzzy_n as i32).max(0) as usize..(chunk.line2 as i32 - 1 + fuzzy_n as i32).min(lines_orig.len() as i32) as usize].iter()
+            .filter(|ol| l.text == ol.text)
+            .map(|ol| ol.line_n)
+            .collect();
+        if l.matches.is_empty() {
+            return Err(ScratchError::new(StatusCode::BAD_REQUEST, "No matches found".to_string()));
+        }
+    }
+
+    let hashsets = chunk_lines_orig.iter().map(|l| l.matches.iter().cloned().collect::<HashSet<_>>()).collect::<Vec<_>>();
+    let mut streaks = vec![];
+    find_streaks(hashsets, &mut streaks, chunk_lines_orig.len());
+
+    let streak = match streaks.get(0) {
+        Some(s) => s.clone(),
+        None => return Err(ScratchError::new(StatusCode::BAD_REQUEST, "No streaks found".to_string()))
+    };
+    info!("streak: {:?}", streak);
+
+    Ok(())
+}
+
+fn apply_chunks(chunks: &mut Vec<DiffApplyChunk>, file_text: &String) -> Result<(), ScratchError> {
+    let lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine::new(line_n + 1, l.to_string())).collect::<Vec<_>>();
+
+    for chunk in chunks.iter_mut().rev() {
+        if chunk.line1 < 1 {
+            return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Invalid line range: line1 cannot be < 1".to_string()));
+        }
+        chunk.line1 -= 1;
+        chunk.line2 -= 1;
+
+        apply_chunk_to_text_fuzzy(&lines_orig, &chunk, 5)?;
+
+    }
+
+    Ok(())
+}
+
 pub async fn handle_v1_diff_apply(
     Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let mut post = serde_json::from_slice::<DiffApplyPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    if post.line1 < 1 {
-        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Invalid line range: line1 cannot be < 1".to_string()));
-    }
-    post.line1 -= 1;
-    post.line2 -= 1;
-    
-    let (cpath, mut file_text) = get_file_text(global_context.clone(), &post.file_name).await?;
-    write_to_file(&cpath, &file_text).await?;
 
-    let (replaced, inserted, result) = apply_lines_to_text(&mut file_text, &post)?;
-    let cx = global_context.read().await;
-    cx.diffs_state.files.lock().unwrap().insert(post.file_name.clone(), result);
-    cx.diffs_state.edits.lock().unwrap().insert(post.id, (replaced, inserted));
+    let (cpath, file_text) = get_file_text(global_context.clone(), &post.file_name).await?;
+    apply_chunks(&mut post.chunks, &file_text)?;
+
+    // write_to_file(&cpath, &file_text).await?;
+    // let (replaced, inserted, result) = apply_lines_to_text(&mut file_text, &post)?;
+    // let cx = global_context.read().await;
+    // cx.diffs_state.files.lock().unwrap().insert(post.file_name.clone(), result);
+    // cx.diffs_state.edits.lock().unwrap().insert(post.id, (replaced, inserted));
     
     Ok(
         Response::builder()
