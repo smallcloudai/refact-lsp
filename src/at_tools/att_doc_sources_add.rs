@@ -18,21 +18,6 @@ use crate::files_in_workspace::Document;
 
 pub struct AttDocSourcesAdd;
 
-async fn download_and_convert_page(url: &str) -> Result<String, String> {
-    let html = reqwest::get(url)
-        .await
-        .map_err(|_| format!("Unable to connect to '{url}'"))?
-        .text()
-        .await
-        .map_err(|_| "Unable to convert page to text".to_string())?;
-
-    let text = html2text::config::plain()
-        .string_from_read(&html.as_bytes()[..], 200)
-        .map_err(|_| "Unable to convert html to text".to_string())?;
-
-    Ok(text)
-}
-
 async fn walk_links(url_str: &str, depth: usize, max_pages: usize) -> Result<Vec<String>, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
