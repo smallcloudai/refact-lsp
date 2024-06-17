@@ -15,6 +15,9 @@ use crate::files_in_workspace::read_file_from_disk;
 use crate::global_context::GlobalContext;
 
 
+const FUZZY_N: usize = 0;
+
+
 #[derive(Clone, Debug)]
 struct DiffLine {
     line_n: usize,
@@ -77,33 +80,29 @@ fn apply_chunk_to_text_fuzzy(
     let chunk_lines_orig: Vec<_> = chunk.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
     let chunk_lines: Vec<_> = chunk.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk_id)}).collect();
     
+    if chunk_lines_orig.is_empty() {
+        let mut new_lines = vec![];
+        new_lines.extend(lines_orig[..chunk.line1 - 1].iter().cloned().collect::<Vec<_>>());
+        new_lines.extend(chunk_lines.iter().cloned().collect::<Vec<_>>());
+        new_lines.extend(lines_orig[chunk.line2 - 1..].iter().cloned().collect::<Vec<_>>());
+        return Ok(new_lines);
+    }
+    
     let search_in_window: Vec<_> = lines_orig.iter()
         .filter(|l|l.overwritten_by_id.is_none() && l.line_n >= (chunk.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
     
-    // info!("search in window: \n{}\n", search_in_window.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
-    
+    // info!("search in window: \n{}\n\n", search_in_window.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n"));
     let streaks = find_chunk_streaks(&chunk_lines_orig, search_in_window);
     let streak = streaks.map_err(|e| ScratchError::new(StatusCode::BAD_REQUEST, format!("No streaks found: {}", e)))?[0].clone();
-
-    // info!("streak: {:?}", streak);
     
     let mut new_lines = vec![];
-    let mut replaced_lines = vec![];
-    let mut insert = false;
     for l in lines_orig.iter() {
         if streak.ends_with(&[l.line_n]) {
-            insert = true;
+            new_lines.extend(chunk_lines.clone());
         }
         if !streak.contains(&l.line_n) {
             new_lines.push(l.clone());
-        } else {
-            replaced_lines.push(l.clone());
-        }
-        if insert {
-            new_lines.extend(chunk_lines.clone());
-            insert = false;
-        }
-    }
+        } }
     Ok(new_lines)
 }
 
@@ -123,7 +122,7 @@ fn apply_chunks(
     for (idx, chunk) in chunks.iter_mut().enumerate() {
         validate_chunk(chunk)?;
 
-        let lines_orig_new = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, 0)?;
+        let lines_orig_new = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, FUZZY_N)?;
         lines_orig = lines_orig_new;
     }
     Ok(lines_orig)
@@ -140,17 +139,18 @@ fn undo_chunks(
         
         chunk.line2 = chunk.line1 + chunk.lines_remove.lines().count();
 
-        let mut lines_orig_new = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, 0)?;
+        let mut lines_orig_new = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, FUZZY_N)?;
         lines_orig_new = lines_orig_new.iter_mut().enumerate().map(|(idx, l)|{
             l.line_n = idx + 1;
             return l.clone();
         }).collect::<Vec<_>>();
+        // info!("lines_orig_new: \n\n{}\n\n", lines_orig_new.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n"));
         lines_orig = lines_orig_new;
     }
     Ok(lines_orig)
 }
 
-async fn process_content(content: &Vec<DiffChunk>, undo: bool) -> Result<(), ScratchError>{
+async fn process_content(content: &Vec<DiffChunk>, undo: bool) -> Result<(), ScratchError> {
     let mut chunk_groups = HashMap::new();
     for c in content.iter().cloned() {
         chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
