@@ -18,17 +18,17 @@ use crate::files_in_workspace::read_file_from_disk;
 
 #[derive(Deserialize)]
 struct DiffApplyChunk {
-    id: usize,
+    file_name: String,
+    file_action: String,
     line1: usize,
     line2: usize,
-    text_orig: String,
-    text: String,
+    lines_remove: String,
+    lines_add: String,
 }
 
 #[derive(Deserialize)]
 struct DiffApplyPost {
-    file_name: String,
-    chunks: Vec<DiffApplyChunk>,
+    content: Vec<DiffApplyChunk>,
 }
 
 pub struct DiffsState {
@@ -99,12 +99,13 @@ fn find_chunk_streaks(chunk_lines: &Vec<DiffLine>, orig_lines: Vec<&DiffLine>) -
 }
 
 fn apply_chunk_to_text_fuzzy(
+    chunk_id: usize,
     lines_orig: &Vec<DiffLine>,
     chunk: &DiffApplyChunk,
     fuzzy_n: usize,
 ) -> Result<(Vec<DiffLine>, Vec<DiffLine>, Vec<DiffLine>), ScratchError> {
-    let chunk_lines_orig: Vec<_> = chunk.text_orig.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
-    let chunk_lines: Vec<_> = chunk.text.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk.id)}).collect();
+    let chunk_lines_orig: Vec<_> = chunk.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
+    let chunk_lines: Vec<_> = chunk.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk_id)}).collect();
 
     let lines_orig_filtered: Vec<_> = lines_orig.iter().filter(|l| l.overwritten_by_id.is_none()).collect();
     let search_in_window: Vec<_> = lines_orig_filtered[(chunk.line1 as i32 - 1 - fuzzy_n as i32).max(0) as usize..(chunk.line2 as i32 - 1 + fuzzy_n as i32).min(lines_orig_filtered.len() as i32) as usize].to_vec();
@@ -141,13 +142,13 @@ fn apply_chunks(
     let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
 
     let mut mods = HashMap::new();
-    for chunk in chunks.iter_mut() {
+    for (idx, chunk) in chunks.iter_mut().enumerate() {
         if chunk.line1 < 1 {
             return Err(ScratchError::new(StatusCode::BAD_REQUEST, "Invalid line range: line1 cannot be < 1".to_string()));
         }
 
-        let (lines_orig_new, replaced_lines, chunk_lines) = apply_chunk_to_text_fuzzy(&lines_orig, &chunk, 5)?;
-        mods.insert(chunk.id, (replaced_lines, chunk_lines));
+        let (lines_orig_new, replaced_lines, chunk_lines) = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, 5)?;
+        mods.insert(idx, (replaced_lines, chunk_lines));
         lines_orig = lines_orig_new;
     }
     Ok((lines_orig, mods))
@@ -157,20 +158,27 @@ pub async fn handle_v1_diff_apply(
     Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let mut post = serde_json::from_slice::<DiffApplyPost>(&body_bytes)
+    let post = serde_json::from_slice::<DiffApplyPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    
+    let mut chunk_groups = HashMap::new();
+    for c in post.content {
+        chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
+    }
+    
+    for (file_name, chunks) in chunk_groups.iter_mut() {
+        let file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
+            ScratchError::new(StatusCode::NOT_FOUND, format!("couldn't read file: {:?}. Error: {}", file_name, e))
+        }).map(|x| x.to_string())?;
 
-    let file_text = read_file_from_disk(&PathBuf::from(&post.file_name)).await.map_err(|e|{
-        ScratchError::new(StatusCode::NOT_FOUND, format!("couldn't read file: {:?}. Error: {}", post.file_name, e))
-    }).map(|x|x.to_string())?;
+        let (new_lines, mods) = apply_chunks(chunks, &file_text)?;
+        let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+        write_to_file(&file_name, &new_text).await?;
 
-    let (new_lines, mods) = apply_chunks(&mut post.chunks, &file_text)?;
-    let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
-    write_to_file(&post.file_name, &new_text).await?;
-
-    // let cx = global_context.read().await;
-    // cx.diffs_state.files.lock().unwrap().insert(post.file_name.clone(), result);
-    // cx.diffs_state.edits.lock().unwrap().insert(post.id, (replaced, inserted));
+        // let cx = global_context.read().await;
+        // cx.diffs_state.files.lock().unwrap().insert(post.file_name.clone(), result);
+        // cx.diffs_state.edits.lock().unwrap().insert(post.id, (replaced, inserted));
+    }
     
     Ok(
         Response::builder()
