@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::mem::swap;
@@ -63,7 +64,7 @@ async fn walk_links(url_str: &str, depth: usize, max_pages: usize) -> Result<Vec
             let file_path = format!("./.refact/{}/parsed.md", url.split("://").nth(1).unwrap());
             let directory = Path::new(&file_path).parent().unwrap();
             fs::create_dir_all(directory)
-                .map_err(|_| format!("Unable to create directory {directory:?}"))?;
+                .map_err(|e| format!("Unable to create directory {:?} {directory:?}: {e:?}", env::current_dir()))?;
             let mut file = File::create(&file_path)
                 .map_err(|_| format!("Unable to create file {file_path}"))?;
             file.write_all(text.as_bytes())
@@ -84,6 +85,9 @@ async fn walk_links(url_str: &str, depth: usize, max_pages: usize) -> Result<Vec
                         return;
                     };
                     let link = link.as_str();
+                    if !link.starts_with(&base_url.to_string()) {
+                        return;
+                    }
                     if visited_pages.len() >= max_pages || visited_pages.contains(link) {
                         return;
                     }
