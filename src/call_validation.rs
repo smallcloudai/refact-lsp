@@ -285,3 +285,18 @@ pub struct ChatPost {
     #[serde(default)]
     pub chat_id: String,
 }
+
+#[derive(Deserialize, Clone)]
+pub struct DiffChunk {
+    pub file_name: String,
+    pub file_action: String,
+    pub line1: usize,
+    pub line2: usize,
+    pub lines_remove: String,
+    pub lines_add: String,
+}
+
+#[derive(Deserialize)]
+pub struct DiffPost {
+    pub content: Vec<DiffChunk>,
+}
