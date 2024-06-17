@@ -21,7 +21,6 @@ use crate::caps::CodeAssistantCaps;
 use crate::completion_cache::CompletionCache;
 use crate::custom_error::ScratchError;
 use crate::files_in_workspace::DocumentsState;
-use crate::http::routers::v1::diffs::DiffsState;
 use crate::telemetry::telemetry_structs;
 use crate::vecdb::vecdb::VecDb;
 
@@ -95,7 +94,6 @@ pub struct GlobalContext {
     pub vec_db_error: String,
     pub ask_shutdown_sender: Arc<StdMutex<std::sync::mpsc::Sender<String>>>,
     pub documents_state: DocumentsState,
-    pub diffs_state: DiffsState,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -263,7 +261,6 @@ pub async fn create_global_context(
         vec_db_error: String::new(),
         ask_shutdown_sender: Arc::new(StdMutex::new(ask_shutdown_sender)),
         documents_state: DocumentsState::new(workspace_dirs).await,
-        diffs_state: DiffsState::new(),
     };
     let gcx = Arc::new(ARwLock::new(cx));
     if cmdline.ast {
