@@ -44,7 +44,7 @@ mod at_commands;
 mod ast;
 mod at_tools;
 mod status;
-pub mod diffs;
+mod diffs;
 
 pub fn make_v1_router() -> Router {
     Router::new()
