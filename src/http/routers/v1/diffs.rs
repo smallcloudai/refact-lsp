@@ -8,7 +8,6 @@ use hyper::Body;
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 use tokio::sync::RwLock as ARwLock;
-use tracing::info;
 
 use crate::call_validation::{DiffChunk, DiffPost};
 use crate::custom_error::ScratchError;
@@ -81,12 +80,12 @@ fn apply_chunk_to_text_fuzzy(
     let search_in_window: Vec<_> = lines_orig.iter()
         .filter(|l|l.overwritten_by_id.is_none() && l.line_n >= (chunk.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
     
-    info!("search in window: \n{}\n", search_in_window.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
+    // info!("search in window: \n{}\n", search_in_window.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
     
     let streaks = find_chunk_streaks(&chunk_lines_orig, search_in_window);
     let streak = streaks.map_err(|e| ScratchError::new(StatusCode::BAD_REQUEST, format!("No streaks found: {}", e)))?[0].clone();
 
-    info!("streak: {:?}", streak);
+    // info!("streak: {:?}", streak);
     
     let mut new_lines = vec![];
     let mut replaced_lines = vec![];
@@ -140,7 +139,6 @@ fn undo_chunks(
         validate_chunk(chunk)?;
         
         chunk.line2 = chunk.line1 + chunk.lines_remove.lines().count();
-        info!("lines remove count: {}", chunk.lines_remove.lines().count());
 
         let mut lines_orig_new = apply_chunk_to_text_fuzzy(idx.clone(), &lines_orig, &chunk, 0)?;
         lines_orig_new = lines_orig_new.iter_mut().enumerate().map(|(idx, l)|{
