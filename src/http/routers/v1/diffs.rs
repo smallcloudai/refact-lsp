@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use hashbrown::HashMap;
@@ -7,7 +6,6 @@ use serde::Deserialize;
 use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
-use itertools::Itertools;
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 use tokio::sync::RwLock as ARwLock;
@@ -52,41 +50,9 @@ pub struct DiffLine {
     pub line_n: usize,
     pub text: String,
     pub overwritten_by_id: Option<usize>,
-    pub matches: Vec<usize>,
 }
 
-impl DiffLine {
-    pub fn new(line_n: usize, text: String) -> Self {
-        DiffLine {
-            line_n,
-            text,
-            overwritten_by_id: None,
-            matches: vec![]
-        }
-    }
-}
-
-async fn get_file_text(global_context: Arc<ARwLock<GlobalContext>>, file_path: &String) -> Result<(PathBuf, String), ScratchError>{
-    let candidates: Vec<String> = crate::files_correction::correct_to_nearest_filename(
-        global_context.clone(),
-        file_path,
-        false,
-        5,
-    ).await;
-    if candidates.is_empty() {
-        return Err(ScratchError::new(StatusCode::NOT_FOUND, format!("file {:?} not found in index", file_path)));
-    }
-    if candidates.len() > 1 {
-        return Err(ScratchError::new(StatusCode::NOT_FOUND, format!("file {:?} correction was ambiguous. Correction results: {:?}", file_path, candidates)));
-    }
-    let cpath = crate::files_correction::canonical_path(candidates.get(0).unwrap());
-    let file_text = read_file_from_disk(&cpath).await.map_err(|e|{
-        ScratchError::new(StatusCode::NOT_FOUND, format!("couldn't read file: {:?}. Error: {}", file_path, e))
-    }).map(|x|x.to_string())?;
-    Ok((cpath, file_text))
-}
-
-async fn write_to_file(path: &PathBuf, text: &str) -> Result<(), ScratchError> {
+async fn write_to_file(path: &String, text: &str) -> Result<(), ScratchError> {
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -103,40 +69,33 @@ async fn write_to_file(path: &PathBuf, text: &str) -> Result<(), ScratchError> {
     Ok(())
 }
 
-fn find_streaks(hashsets: Vec<HashSet<usize>>, streaks: &mut Vec<HashSet<usize>>, streak_size: usize) {
-    let mut res: Vec<HashSet<usize>> = vec![];
-    info!("find streaks for hashsets: {:?}", hashsets);
-    if hashsets.len() > 1 {
-        for (h1, h2) in hashsets.iter().cloned().tuple_windows() {
-            let h1 = if res.is_empty() { h1 } else { res.last().unwrap().clone() };
-            let h2 = h2.iter().filter(|x| **x > 0).map(|x| x.clone()).collect::<HashSet<usize>>();
-            info!("h1: {:?}; h2: {:?}", h1, h2);
-            let i = h1.intersection(&h2.iter().map(|x| x - 1).collect::<HashSet<_>>()).cloned().collect::<HashSet<_>>();
-            if res.is_empty() {
-                res.push(i.clone());
-            }
-            res.push(i.iter().map(|x| x + 1).collect());
-        }
-    } else {
-        res.push(hashsets.iter().next().unwrap().clone());
-    }
-    info!("res: {:?}", res);
-    info!("streak size: {:?}", streak_size);
+fn find_chunk_streaks(chunk_lines: &Vec<DiffLine>, orig_lines: Vec<&DiffLine>) -> Result<Vec<Vec<usize>>, String> {
+    let chunk_len = chunk_lines.len();
+    let orig_len = orig_lines.len();
 
-    let mut possible_streaks: usize = 0;
-    for w in res.windows(streak_size).map(|w|w.to_vec()) {
-        if w.iter().all(|s|s.len() == 1) {
-            streaks.push(w.iter().map(|x|x.iter().next().unwrap().clone()).collect::<HashSet<usize>>());
+    if chunk_len == 0 || orig_len < chunk_len {
+        return Err("Invalid input: chunk_lines is empty or orig_lines is smaller than chunk_lines".to_string());
+    }
+
+    let mut matches = vec![];
+    for i in 0..=(orig_len - chunk_len) {
+        let mut match_found = true;
+
+        for j in 0..chunk_len {
+            if orig_lines[i + j].text != chunk_lines[j].text {
+                match_found = false;
+                break;
+            }
         }
-        if !w.iter().any(|s|s.is_empty()) {
-            possible_streaks += 1;
+        if match_found {
+            let positions = (i..i + chunk_len).map(|index| orig_lines[index].line_n).collect::<Vec<usize>>();
+            matches.push(positions);
         }
     }
-    if possible_streaks > 1 {
-        find_streaks(res, streaks, streak_size);
-    } else {
-        return;
+    if matches.is_empty() {
+        return Err("Chunk text not found in original text".to_string());
     }
+    Ok(matches)
 }
 
 fn apply_chunk_to_text_fuzzy(
@@ -144,51 +103,32 @@ fn apply_chunk_to_text_fuzzy(
     chunk: &DiffApplyChunk,
     fuzzy_n: usize,
 ) -> Result<(Vec<DiffLine>, Vec<DiffLine>, Vec<DiffLine>), ScratchError> {
-    let mut chunk_lines_orig = chunk.text_orig.lines().map(|l| DiffLine::new(0, l.to_string())).collect::<Vec<_>>();
-    let mut chunk_lines = chunk.text.lines().map(|l| DiffLine{ line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk.id), matches: vec![]}).collect::<Vec<_>>();
+    let chunk_lines_orig: Vec<_> = chunk.text_orig.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
+    let chunk_lines: Vec<_> = chunk.text.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk.id)}).collect();
 
-    let lines_orig_filtered = lines_orig.iter().filter(|l|l.overwritten_by_id.is_none()).collect::<Vec<_>>();
-    for l in chunk_lines_orig.iter_mut() {
-        l.matches = lines_orig_filtered[(chunk.line1 as i32 - 1 - fuzzy_n as i32).max(0) as usize..(chunk.line2 as i32 - 1 + fuzzy_n as i32).min(lines_orig_filtered.len() as i32) as usize].iter()
-            .filter(|ol| l.text == ol.text)
-            .map(|ol| ol.line_n)
-            .collect();
+    let lines_orig_filtered: Vec<_> = lines_orig.iter().filter(|l| l.overwritten_by_id.is_none()).collect();
+    let search_in_window: Vec<_> = lines_orig_filtered[(chunk.line1 as i32 - 1 - fuzzy_n as i32).max(0) as usize..(chunk.line2 as i32 - 1 + fuzzy_n as i32).min(lines_orig_filtered.len() as i32) as usize].to_vec();
 
-        if l.matches.is_empty() {
-            return Err(ScratchError::new(StatusCode::BAD_REQUEST, "No matches found".to_string()));
-        }
-    }
+    let streaks = find_chunk_streaks(&chunk_lines_orig, search_in_window);
+    let streak = streaks.map_err(|e| ScratchError::new(StatusCode::BAD_REQUEST, format!("No streaks found: {}", e)))?[0].clone();
 
-    let hashsets = chunk_lines_orig.iter().map(|l| l.matches.iter().cloned().collect::<HashSet<_>>()).collect::<Vec<_>>();
-    let mut streaks = vec![];
-    find_streaks(hashsets, &mut streaks, chunk_lines_orig.len());
-
-    let mut streak = match streaks.get(0) {
-        Some(s) => s.into_iter().cloned().collect::<Vec<_>>(),
-        None => return Err(ScratchError::new(StatusCode::BAD_REQUEST, "No streaks found".to_string()))
-    };
-    streak.sort();
     info!("streak: {:?}", streak);
-
-    let start = *streak.first().unwrap();
+    
     let mut new_lines = vec![];
     let mut replaced_lines = vec![];
-    let mut prev_line_n = 0;
+    let mut insert = false;
     for l in lines_orig.iter() {
-        if l.overwritten_by_id.is_none() && !streak.contains(&l.line_n) {
-            prev_line_n = l.line_n;
+        if streak.ends_with(&[l.line_n]) {
+            insert = true;
         }
         if !streak.contains(&l.line_n) {
             new_lines.push(l.clone());
-        }
-        if streak.contains(&l.line_n) {
+        } else {
             replaced_lines.push(l.clone());
         }
-        if prev_line_n + 1 == start {
-            for c in chunk_lines.iter_mut() {
-                c.line_n = prev_line_n;
-            }
+        if insert {
             new_lines.extend(chunk_lines.clone());
+            insert = false;
         }
     }
     Ok((new_lines, replaced_lines, chunk_lines))
@@ -198,7 +138,7 @@ fn apply_chunks(
     chunks: &mut Vec<DiffApplyChunk>,
     file_text: &String
 ) -> Result<(Vec<DiffLine>, HashMap<usize, (Vec<DiffLine>, Vec<DiffLine>)>), ScratchError> {
-    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine::new(line_n + 1, l.to_string())).collect::<Vec<_>>();
+    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
 
     let mut mods = HashMap::new();
     for chunk in chunks.iter_mut() {
@@ -220,11 +160,13 @@ pub async fn handle_v1_diff_apply(
     let mut post = serde_json::from_slice::<DiffApplyPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let (cpath, file_text) = get_file_text(global_context.clone(), &post.file_name).await?;
+    let file_text = read_file_from_disk(&PathBuf::from(&post.file_name)).await.map_err(|e|{
+        ScratchError::new(StatusCode::NOT_FOUND, format!("couldn't read file: {:?}. Error: {}", post.file_name, e))
+    }).map(|x|x.to_string())?;
 
     let (new_lines, mods) = apply_chunks(&mut post.chunks, &file_text)?;
     let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
-    write_to_file(&cpath, &new_text).await?;
+    write_to_file(&post.file_name, &new_text).await?;
 
     // let cx = global_context.read().await;
     // cx.diffs_state.files.lock().unwrap().insert(post.file_name.clone(), result);
