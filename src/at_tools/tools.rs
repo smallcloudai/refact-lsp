@@ -28,9 +28,7 @@ pub async fn at_tools_merged(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String
         // ("symbols_at".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_ast_lookup_symbols::AttAstLookupSymbols{}) as Box<dyn AtTool + Send>))),
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
-        ("doc_sources_list".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_list::AttDocSourcesList{}) as Box<dyn AtTool + Send>))),
-        ("doc_sources_add".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_add::AttDocSourcesAdd{}) as Box<dyn AtTool + Send>))),
-        ("doc_sources_remove".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_remove::AttDocSourcesRemove{}) as Box<dyn AtTool + Send>))),
+        ("doc_sources".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources::AttDocSources{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let tconfig_maybe = crate::toolbox::toolbox_config::load_customization(gcx.clone()).await;
@@ -102,28 +100,17 @@ tools:
     parameters_required:
       - "symbol"
 
-  - name: "doc_sources_list"
-    description: "Tool to list all of the documentation sources"
-    parameters: []
-    parameters_required: []
-
-  - name: "doc_sources_add"
-    description: "Adds a source to the list of documentation sources"
+  - name: "doc_sources"
+    description: "Tool to interact with documentation sources"
     parameters:
+      - name: "action"
+        type: "string"
+        description: "Either 'list', 'add', or 'remove'"
       - name: "source"
         type: "string"
-        description: "A local folder or http(s) url"
+        description: "A local folder or http(s) url. Required when action is not 'list'."
     parameters_required:
-      - "source"
-
-  - name: "doc_sources_remove"
-    description: "Remove a source from the list of documentation sources"
-    parameters:
-      - name: "source"
-        type: "string"
-        description: "A local folder or http(s) url"
-    parameters_required:
-      - "source"
+      - "action"
 "####;
 
 // - name: "remember_how_to_use_tools"
