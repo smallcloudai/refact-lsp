@@ -37,6 +37,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         ("doc_sources_list".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_list::AttDocSourcesList{}) as Box<dyn AtTool + Send>))),
         ("doc_sources_add".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_add::AttDocSourcesAdd{}) as Box<dyn AtTool + Send>))),
         ("doc_sources_remove".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources_remove::AttDocSourcesRemove{}) as Box<dyn AtTool + Send>))),
+        ("doc_sources".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_doc_sources::AttDocSources{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -183,28 +184,17 @@ const NOT_READY_TOOLS: &str = r####"
         description: "Path to the specific file to diff (optional)."
     parameters_required:
 
-  - name: "doc_sources_list"
-    description: "Tool to list all of the documentation sources"
-    parameters: []
-    parameters_required: []
-
-  - name: "doc_sources_add"
-    description: "Adds a source to the list of documentation sources"
+  - name: "doc_sources"
+    description: "Tool to interact with documentation sources"
     parameters:
+      - name: "action"
+        type: "string"
+        description: "Either 'list', 'add', or 'remove'"
       - name: "source"
         type: "string"
-        description: "A local folder or http(s) url"
+        description: "A local folder or http(s) url. Required when action is not 'list'."
     parameters_required:
-      - "source"
-
-  - name: "doc_sources_remove"
-    description: "Remove a source from the list of documentation sources"
-    parameters:
-      - name: "source"
-        type: "string"
-        description: "A local folder or http(s) url"
-    parameters_required:
-      - "source"
+      - "action"
 "####;
 
 

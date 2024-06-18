@@ -21,7 +21,7 @@ use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 
-pub struct AttDocSourcesAdd;
+pub struct AttDocSources;
 
 fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
     let url_without_http = url.split("://").nth(1).unwrap();
@@ -125,59 +125,123 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
     Ok(sources)
 }
 
+async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) -> Result<Vec<ContextEnum>, String> {
+    let sources = ccx
+        .global_context
+        .read()
+        .await
+        .documents_state
+        .documentation_files
+        .lock()
+        .await
+        .join(",");
+
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: format!("[{sources}]"),
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
+}
+
+async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = match args.get("source") {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
+        None => return Err("Missing source argument for doc_sources_add".to_string()),
+    };
+
+    // if the source is an url, download the page and convert it to markdown
+    if source.starts_with("http://") || source.starts_with("https://") {
+        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 40));
+        let results = vec![ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: "Started background task to add website to documentation, this may take a few minutes...".to_string(),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+        })];
+        Ok(results)
+    } else {
+        let abs_source_path = PathBuf::from(source.as_str());
+        if fs::canonicalize(abs_source_path).is_err() {
+            return Err(format!("File or directory '{}' doesn't exist", source));
+        }
+
+        let gcx = ccx.global_context.write().await;
+        let mut files = gcx.documents_state.documentation_files.lock().await;
+        let vec_db_module = {
+            *gcx.documents_state.cache_dirty.lock().await = true;
+            gcx.vec_db.clone()
+        };
+
+        if !files.contains(&source) {
+            files.push(source.clone());
+        }
+        let document = Document::new(&PathBuf::from(source.as_str()));
+        match *vec_db_module.lock().await {
+            Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
+            None => {}
+        };
+
+        let results = vec![ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: "Successfully added source to documentation list.".to_string(),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+        })];
+        Ok(results)
+    }
+}
+async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = match args.get("source") {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
+        None => return Err("Missing source argument for doc_sources_remove".to_string()),
+    };
+
+    let gc = ccx.global_context
+        .write()
+        .await;
+
+    let mut files = gc
+        .documents_state
+        .documentation_files
+        .lock()
+        .await;
+
+    let Some(i) = files.iter().position(|x| *x == source) else {
+        return Err(format!("Unable to find '{}' in the documentation list", source));
+    };
+    files.remove(i);
+
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: "Succesfully removed source from the documentation list.".to_string(),
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
+}
+
 #[async_trait]
-impl AtTool for AttDocSourcesAdd {
+impl AtTool for AttDocSources {
     async fn execute(
         &self,
         ccx: &mut AtCommandsContext,
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<Vec<ContextEnum>, String> {
-        let source = match args.get("source") {
+        let action = match args.get("action") {
             Some(Value::String(s)) => s.clone(),
-            Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
-            None => return Err("Missing source argument for doc_sources_add".to_string()),
+            Some(v) => return Err(format!("argument `action` is not a string: {:?}", v)),
+            None => return Err("Missing `action` argument for doc_sources".to_string()),
         };
-
-        // if the source is an url, download the page and convert it to markdown
-        if source.starts_with("http://") || source.starts_with("https://") {
-            task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 40));
-            let results = vec![ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content: "Started background task to add website to documentation, this may take a few minutes...".to_string(),
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-            })];
-            Ok(results)
-        } else {
-            let abs_source_path = PathBuf::from(source.as_str());
-            if fs::canonicalize(abs_source_path).is_err() {
-                return Err(format!("File or directory '{}' doesn't exist", source));
-            }
-
-            let gcx = ccx.global_context.write().await;
-            let mut files = gcx.documents_state.documentation_files.lock().await;
-            let vec_db_module = {
-                *gcx.documents_state.cache_dirty.lock().await = true;
-                gcx.vec_db.clone()
-            };
-
-            if !files.contains(&source) {
-                files.push(source.clone());
-            }
-            let document = Document::new(&PathBuf::from(source.as_str()));
-            match *vec_db_module.lock().await {
-                Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
-                None => {}
-            };
-
-            let results = vec![ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content: "Successfully added source to documentation list.".to_string(),
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-            })];
-            Ok(results)
+        match action.as_str() {
+            "list" => doc_sources_list(ccx, tool_call_id).await,
+            "add" => doc_sources_add(ccx, tool_call_id, args).await,
+            "remove" => doc_sources_remove(ccx, tool_call_id, args).await,
+            _ => Err(format!("Unknown action `{}`", action))
         }
     }
 }
