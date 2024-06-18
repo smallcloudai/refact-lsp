@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hashbrown::HashSet;
-use log::info;
+use itertools::Itertools;
 use select::predicate::Name;
 use serde_json::Value;
 use tokio::task;
@@ -22,6 +22,19 @@ use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 
 pub struct AttDocSourcesAdd;
+
+fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
+    let url_without_http = url.split("://").nth(1).unwrap();
+    let (site_name, mut site_path) = url_without_http.split_once("/")?;
+    if site_path == "" {
+        site_path = "index";
+    }
+    if site_path.ends_with("/") {
+        site_path = &site_path[..site_path.len() - 1];
+    }
+    let file_name = format!("{}.md", site_path.replace("/", "_"));
+    Some((site_name, file_name))
+}
 
 async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<Vec<String>, String> {
     let mut visited_pages = HashSet::new();
@@ -51,7 +64,10 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .map_err(|_| "Unable to convert html to text".to_string())?;
 
             // create file
-            let file_path = format!("./.refact/{}/parsed.md", url.split("://").nth(1).unwrap());
+            let Some((dir_name, file_name)) = get_directory_and_file_from_url(&url) else {
+                continue; // skip this url
+            };
+            let file_path = format!("./.refact/docs/{dir_name}/{file_name}");
             let directory = Path::new(&file_path).parent().unwrap();
             fs::create_dir_all(directory)
                 .map_err(|e| format!("Unable to create directory {:?} {directory:?}: {e:?}", env::current_dir()))?;
