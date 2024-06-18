@@ -31,9 +31,7 @@ impl AtTool for AttFile {
                 results.extend(vec_context_file_to_context_tools(vec![res]));
                 text
             },
-            Err(e) => {
-                e
-            }
+            Err(e) => e
         };
 
         results.push(ContextEnum::ChatMessage(ChatMessage {
