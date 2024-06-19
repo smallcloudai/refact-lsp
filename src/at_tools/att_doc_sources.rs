@@ -9,7 +9,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hashbrown::HashSet;
 use itertools::Itertools;
+use log::{info, warn};
 use select::predicate::Name;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task;
 use tokio::sync::RwLock as ARwLock;
@@ -22,6 +24,14 @@ use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 
 pub struct AttDocSources;
+
+#[derive(Serialize, Deserialize)]
+struct DocOrigin {
+    url: String,
+    max_depth: usize,
+    max_pages: usize,
+    pages: HashMap<String, String>,
+}
 
 fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
     let url_without_http = url.split("://").nth(1).unwrap();
@@ -40,6 +50,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
     let mut sources = vec![];
+    let mut pages = HashMap::default();
     let url = Url::parse(&url_str).map_err(|_| format!("Invalid url '{url_str}'"))?;
     let base_url = Url::parse(&url[..Position::BeforePath])
         .map_err(|_| format!("Unable to find base url of '{url_str}'"))?;
@@ -75,6 +86,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .map_err(|_| format!("Unable to create file {file_path}"))?;
             file.write_all(text.as_bytes())
                 .map_err(|_| format!("Unable to write to file {file_path}"))?;
+            pages.insert(url, file_path.clone());
 
             // vectorize file
             let gcx = gcx.write().await;
@@ -122,6 +134,25 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
         swap(&mut queue, &mut new_urls);
     }
 
+    let (directory, _) = get_directory_and_file_from_url(&url_str).unwrap();
+
+    let origin = DocOrigin {
+        url: url_str.clone(),
+        max_depth: depth,
+        max_pages,
+        pages,
+    };
+
+    if let Ok(origin_json) = serde_json::to_string(&origin) {
+        let file_path = format!("./.refact/docs/{directory}/origin.json");
+        let mut file = File::create(&file_path)
+            .map_err(|_| format!("Unable to create file {file_path}"))?;
+        file.write_all(origin_json.as_bytes())
+            .map_err(|_| format!("Unable to write to file {file_path}"))?;
+    } else {
+        warn!("Unable to convert DocOrigin to json");
+    }
+
     Ok(sources)
 }
 
@@ -154,7 +185,7 @@ async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, arg
 
     // if the source is an url, download the page and convert it to markdown
     if source.starts_with("http://") || source.starts_with("https://") {
-        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 40));
+        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 3));
         let results = vec![ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
             content: "Started background task to add website to documentation, this may take a few minutes...".to_string(),
