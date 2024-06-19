@@ -1,4 +1,5 @@
 import json
+import random
 import requests
 
 from pathlib import Path
@@ -149,54 +150,55 @@ text_after_apply = """
     // my end4
 """[1:-1]
 
+payload = {
+    "content": [
+        {
+            "file_name": str(test_file),
+            "file_action": "default",
+            "line1": 1,
+            "line2": 4,
+            "lines_remove": orig0,
+            "lines_add": i0,
+        },
+        {
+            "file_name": str(test_file),
+            "file_action": "default",
+            "line1": 9,
+            "line2": 10,
+            "lines_remove": orig1,
+            "lines_add": i1,
+        },
+        {
+            "file_name": str(test_file),
+            "file_action": "default",
+            "line1": 20,
+            "line2": 25,
+            "lines_remove": orig2,
+            "lines_add": i2,
+        },
+        {
+            "file_name": str(test_file),
+            "file_action": "default",
+            "line1": 30,
+            "line2": 40,
+            "lines_remove": orig3,
+            "lines_add": i3,
+        },
+        {
+            "file_name": str(test_file),
+            "file_action": "default",
+            "line1": 42,
+            "line2": 43,
+            "lines_remove": orig4,
+            "lines_add": i4,
+        },
+    ]
+}
+
 
 def diff_apply():
     url = "http://localhost:8001/v1/diff-apply"
-
-    payload = {
-        "content": [
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 1,
-                "line2": 4,
-                "lines_remove": orig0,
-                "lines_add": i0,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 9,
-                "line2": 10,
-                "lines_remove": orig1,
-                "lines_add": i1,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 20,
-                "line2": 25,
-                "lines_remove": orig2,
-                "lines_add": i2,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 30,
-                "line2": 40,
-                "lines_remove": orig3,
-                "lines_add": i3,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 42,
-                "line2": 43,
-                "lines_remove": orig4,
-                "lines_add": i4,
-            },
-        ]
-    }
+    random.shuffle(payload["content"])
     response = requests.post(url, data=json.dumps(payload))
     print(f"DIFF APPLY REQUEST: {response.status_code}: {response.text}")
     assert response.status_code == 200
@@ -204,51 +206,7 @@ def diff_apply():
 
 def diff_undo():
     url = "http://localhost:8001/v1/diff-undo"
-
-    payload = {
-        "content": [
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 1,
-                "line2": 1,
-                "lines_remove": i0,
-                "lines_add": orig0,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 9,
-                "line2": 1,
-                "lines_remove": i1,
-                "lines_add": orig1,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 20,
-                "line2": 1,
-                "lines_remove": i2,
-                "lines_add": orig2,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 30,
-                "line2": 1,
-                "lines_remove": i3,
-                "lines_add": orig3,
-            },
-            {
-                "file_name": str(test_file),
-                "file_action": "default",
-                "line1": 42,
-                "line2": 1,
-                "lines_remove": i4,
-                "lines_add": orig4,
-            },
-        ]
-    }
+    random.shuffle(payload["content"])
     response = requests.post(url, data=json.dumps(payload))
     print(f"DIFF UNDO REQUEST: {response.status_code}: {response.text}")
     assert response.status_code == 200
