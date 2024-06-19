@@ -8,5 +8,5 @@ mod att_file;
 mod att_file_search;
 mod att_note_to_self;
 mod att_workspace;
-mod att_doc_sources;
+pub mod att_doc_sources;
 pub mod execute_att;
