@@ -26,11 +26,11 @@ use crate::global_context::GlobalContext;
 pub struct AttDocSources;
 
 #[derive(Serialize, Deserialize)]
-struct DocOrigin {
-    url: String,
-    max_depth: usize,
-    max_pages: usize,
-    pages: HashMap<String, String>,
+pub struct DocOrigin {
+    pub url: String,
+    pub max_depth: usize,
+    pub max_pages: usize,
+    pub pages: HashMap<String, String>,
 }
 
 fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {

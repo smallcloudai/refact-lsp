@@ -1,68 +1,79 @@
-use std::io::Write;
 use std::env;
+use std::io::Write;
 use std::panic;
 
+use backtrace;
 use tokio::task::JoinHandle;
 use tracing::{info, Level};
 use tracing_appender;
-use backtrace;
 
 use crate::background_tasks::start_background_tasks;
 use crate::lsp::spawn_lsp_task;
 use crate::telemetry::{basic_transmit, snippets_transmit};
 
-mod version;
-mod global_context;
-mod caps;
-mod call_validation;
-mod scratchpads;
-mod scratchpad_abstract;
-mod forward_to_hf_endpoint;
-mod forward_to_openai_endpoint;
-mod cached_tokenizers;
-mod restream;
-mod custom_error;
-mod completion_cache;
-mod telemetry;
-mod lsp;
-mod http;
-mod background_tasks;
-mod known_models;
-mod dashboard;
-mod files_in_workspace;
-mod files_in_jsonl;
-mod files_correction;
-mod file_filter;
-mod vecdb;
-mod fetch_embedding;
+mod ast;
 mod at_commands;
 mod at_tools;
-mod nicer_logs;
-mod toolbox;
-mod ast;
+mod background_tasks;
+mod cached_tokenizers;
+mod call_validation;
+mod caps;
+mod completion_cache;
+mod custom_error;
+mod dashboard;
 mod diffs;
+mod documentation_files;
+mod fetch_embedding;
+mod file_filter;
+mod files_correction;
+mod files_in_jsonl;
+mod files_in_workspace;
+mod forward_to_hf_endpoint;
+mod forward_to_openai_endpoint;
+mod global_context;
+mod http;
 mod knowledge;
+mod known_models;
+mod lsp;
+mod nicer_logs;
+mod restream;
+mod scratchpad_abstract;
+mod scratchpads;
+mod telemetry;
+mod toolbox;
+mod vecdb;
+mod version;
 
 #[tokio::main]
 async fn main() {
     let cpu_num = std::thread::available_parallelism().unwrap().get();
-    rayon::ThreadPoolBuilder::new().num_threads(cpu_num / 2).build_global().unwrap();
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(cpu_num / 2)
+        .build_global()
+        .unwrap();
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
     let cache_dir = home_dir.join(".cache/refact");
-    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone()).await;
+    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) =
+        global_context::create_global_context(cache_dir.clone()).await;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
         tracing_appender::non_blocking(std::io::stderr())
     } else {
         let _ = write!(std::io::stderr(), "This rust binary keeps logs as files, rotated daily. Try\ntail -f {}/logs/\nor use --logs-stderr for debugging.\n\n", cache_dir.display());
-        tracing_appender::non_blocking(tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(tracing_appender::rolling::Rotation::DAILY)
-            .filename_prefix("rustbinary")
-            .max_log_files(30)
-            .build(cache_dir.join("logs")).unwrap()
+        tracing_appender::non_blocking(
+            tracing_appender::rolling::RollingFileAppender::builder()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("rustbinary")
+                .max_log_files(30)
+                .build(cache_dir.join("logs"))
+                .unwrap(),
         )
     };
     let _tracing = tracing_subscriber::fmt()
-        .with_max_level(if cmdline.verbose { Level::DEBUG } else { Level::INFO })
+        .with_max_level(if cmdline.verbose {
+            Level::DEBUG
+        } else {
+            Level::INFO
+        })
         .with_writer(logs_writer)
         .with_target(true)
         .with_line_number(true)
@@ -82,19 +93,30 @@ async fn main() {
         info!("cache dir: {}", cache_dir.display());
         let mut api_key_at: usize = usize::MAX;
         for (arg_n, arg_v) in env::args().enumerate() {
-            info!("cmdline[{}]: {:?}", arg_n, if arg_n != api_key_at { arg_v.as_str() } else { "***" } );
-            if arg_v == "--api-key" { api_key_at = arg_n + 1; }
+            info!(
+                "cmdline[{}]: {:?}",
+                arg_n,
+                if arg_n != api_key_at {
+                    arg_v.as_str()
+                } else {
+                    "***"
+                }
+            );
+            if arg_v == "--api-key" {
+                api_key_at = arg_n + 1;
+            }
         }
     }
     files_in_workspace::enqueue_all_files_from_workspace_folders(gcx.clone(), true, false).await;
     files_in_jsonl::enqueue_all_docs_from_jsonl_but_read_first(gcx.clone(), true, false).await;
+    documentation_files::enqueue_all_files_from_workspace_folders(gcx.clone()).await;
 
     let mut background_tasks = start_background_tasks(gcx.clone()).await;
     // vector db will spontaneously start if the downloaded caps and command line parameters are right
 
     let should_start_http = cmdline.http_port != 0;
-    let should_start_lsp = (cmdline.lsp_port == 0 && cmdline.lsp_stdin_stdout == 1) ||
-        (cmdline.lsp_port != 0 && cmdline.lsp_stdin_stdout == 0);
+    let should_start_lsp = (cmdline.lsp_port == 0 && cmdline.lsp_stdin_stdout == 1)
+        || (cmdline.lsp_port != 0 && cmdline.lsp_stdin_stdout == 0);
 
     // not really needed, but it's nice to have an error message sooner if there's one
     let _caps = crate::global_context::try_load_caps_quickly_if_not_present(gcx.clone(), 0).await;
