@@ -185,7 +185,7 @@ async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, arg
 
     // if the source is an url, download the page and convert it to markdown
     if source.starts_with("http://") || source.starts_with("https://") {
-        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 3));
+        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 40));
         let results = vec![ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
             content: "Started background task to add website to documentation, this may take a few minutes...".to_string(),
