@@ -58,6 +58,14 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
     queue.push(url_str.to_string());
     visited_pages.insert(url_str.to_string());
 
+    {
+        let gcx = gcx.write().await;
+        let mut doc_sources = gcx.documents_state.documentation_sources.lock().await;
+        if !doc_sources.contains(&url_str) {
+            doc_sources.push(url_str.clone());
+        }
+    }
+
     for iteration in 0..=depth {
         let mut new_urls = vec![];
         let is_last_iteration = iteration == depth;
@@ -80,6 +88,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
             };
             let file_path = format!("./.refact/docs/{dir_name}/{file_name}");
             let directory = Path::new(&file_path).parent().unwrap();
+            sources.push(file_path.clone());
             fs::create_dir_all(directory)
                 .map_err(|e| format!("Unable to create directory {:?} {directory:?}: {e:?}", env::current_dir()))?;
             let mut file = File::create(&file_path)
@@ -90,15 +99,10 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
 
             // vectorize file
             let gcx = gcx.write().await;
-            let mut files = gcx.documents_state.documentation_files.lock().await;
             let vec_db_module = {
                 *gcx.documents_state.cache_dirty.lock().await = true;
                 gcx.vec_db.clone()
             };
-            sources.push(file_path.clone());
-            if !files.contains(&file_path) {
-                files.push(file_path.clone());
-            }
             let document = Document::new(&PathBuf::from(file_path.as_str()));
             match *vec_db_module.lock().await {
                 Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
@@ -162,7 +166,7 @@ async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) ->
         .read()
         .await
         .documents_state
-        .documentation_files
+        .documentation_sources
         .lock()
         .await
         .join(",");
@@ -200,7 +204,7 @@ async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, arg
         }
 
         let gcx = ccx.global_context.write().await;
-        let mut files = gcx.documents_state.documentation_files.lock().await;
+        let mut files = gcx.documents_state.documentation_sources.lock().await;
         let vec_db_module = {
             *gcx.documents_state.cache_dirty.lock().await = true;
             gcx.vec_db.clone()
@@ -237,7 +241,7 @@ async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, 
 
     let mut files = gc
         .documents_state
-        .documentation_files
+        .documentation_sources
         .lock()
         .await;
 
