@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use crate::ast::ast_module::AstModule;
 use crate::vecdb;
 use crate::global_context::GlobalContext;
-use crate::snippets_transmit;
+use crate::telemetry::snippets_transmit;
 use crate::telemetry::basic_transmit;
 
 pub struct BackgroundTasksHolder {

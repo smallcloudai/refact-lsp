@@ -51,7 +51,7 @@ unsafe impl Sync for AstIndex {}
 
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum RequestSymbolType {
+pub enum RequestSymbolType {
     Declaration,
     Usage,
     All,

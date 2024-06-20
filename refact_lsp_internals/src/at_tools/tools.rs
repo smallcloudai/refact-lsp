@@ -40,7 +40,7 @@ pub async fn at_tools_merged(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String
                 Arc::new(AMutex::new(Box::new(crate::at_tools::att_execute_cmd::AttExecuteCommand {
                     command: cust.command,
                     timeout: cust.timeout,
-                    postprocess: cust.postprocess,
+                    // postprocess: cust.postprocess,
                 }) as Box<dyn AtTool + Send>)));
         }
     }

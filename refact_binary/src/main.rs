@@ -2,43 +2,19 @@ use std::io::Write;
 use std::env;
 use std::panic;
 
+use tokio;
 use tokio::task::JoinHandle;
 use tracing::{info, Level};
 use tracing_appender;
 use backtrace;
+use refact_lsp_internals::http;
 
-use crate::background_tasks::start_background_tasks;
-use crate::lsp::spawn_lsp_task;
-use crate::telemetry::{basic_transmit, snippets_transmit};
-
-mod version;
-mod global_context;
-mod caps;
-mod call_validation;
-mod scratchpads;
-mod scratchpad_abstract;
-mod forward_to_hf_endpoint;
-mod forward_to_openai_endpoint;
-mod cached_tokenizers;
-mod restream;
-mod custom_error;
-mod completion_cache;
-mod telemetry;
-mod lsp;
-mod http;
-mod background_tasks;
-mod known_models;
-mod dashboard;
-mod files_in_workspace;
-mod files_in_jsonl;
-mod files_correction;
-mod vecdb;
-mod fetch_embedding;
-mod at_commands;
-mod at_tools;
-mod nicer_logs;
-mod toolbox;
-mod ast;
+use refact_lsp_internals::background_tasks::start_background_tasks;
+use refact_lsp_internals::lsp::spawn_lsp_task;
+use refact_lsp_internals::telemetry::basic_transmit;
+use refact_lsp_internals::global_context;
+use refact_lsp_internals::files_in_workspace;
+use refact_lsp_internals::files_in_jsonl;
 
 
 #[tokio::main]
