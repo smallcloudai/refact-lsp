@@ -8,8 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hashbrown::HashSet;
-use itertools::Itertools;
-use log::{info, warn};
+use log::warn;
 use select::predicate::Name;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -249,6 +248,13 @@ async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, 
         return Err(format!("Unable to find '{}' in the documentation list", source));
     };
     files.remove(i);
+
+    if source.starts_with("http://") || source.starts_with("https://") {
+        if let Some((dir, _)) = get_directory_and_file_from_url(&source) {
+            let dir = format!("./.refact/docs/{dir}");
+            fs::remove_dir_all(&dir).map_err(|err| format!("Error while deleting directory '{dir}': {err}"))?;
+        }
+    }
 
     let results = vec![ContextEnum::ChatMessage(ChatMessage {
         role: "tool".to_string(),
