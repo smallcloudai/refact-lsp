@@ -252,7 +252,7 @@ async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, 
 
     let results = vec![ContextEnum::ChatMessage(ChatMessage {
         role: "tool".to_string(),
-        content: "Succesfully removed source from the documentation list.".to_string(),
+        content: "Successfully removed source from the documentation list.".to_string(),
         tool_calls: None,
         tool_call_id: tool_call_id.clone(),
     })];
