@@ -6,7 +6,7 @@ use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::at_tools::tools::{AtTool, at_tools_merged};
-use crate::call_validation::{ContextFile, ContextEnum};
+use crate::call_validation::{ContextFile, ContextEnum, ChatMessage};
 use crate::global_context::GlobalContext;
 
 use crate::at_commands::at_workspace::AtWorkspace;
@@ -16,6 +16,7 @@ use crate::at_commands::at_ast_reference::AtAstReference;
 use crate::at_commands::at_ast_lookup_symbols::AtAstLookupSymbols;
 use crate::at_commands::at_file_search::AtFileSearch;
 use crate::at_commands::at_local_notes_to_self::AtLocalNotesToSelf;
+use crate::at_commands::at_diff::AtDiff;
 use crate::at_commands::execute_at::AtCommandMember;
 
 
@@ -63,6 +64,7 @@ pub async fn at_commands_dict(_gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<Stri
         ("@references".to_string(), Arc::new(AMutex::new(Box::new(AtAstReference::new()) as Box<dyn AtCommand + Send>))),
         ("@symbols-at".to_string(), Arc::new(AMutex::new(Box::new(AtAstLookupSymbols::new()) as Box<dyn AtCommand + Send>))),
         ("@local-notes-to-self".to_string(), Arc::new(AMutex::new(Box::new(AtLocalNotesToSelf::new()) as Box<dyn AtCommand + Send>))),
+        ("@diff".to_string(), Arc::new(AMutex::new(Box::new(AtDiff::new()) as Box<dyn AtCommand + Send>))),
     ]);
 
     // Don't need custom at-commands?
@@ -95,9 +97,9 @@ pub fn filter_only_context_file_from_context_tool(tools: &Vec<ContextEnum>) -> V
         }).collect::<Vec<ContextFile>>()
 }
 
-// pub fn filter_only_chat_messages_from_context_tool(tools: &Vec<ContextEnum>) -> Vec<ChatMessage> {
-//     tools.iter()
-//        .filter_map(|x| {
-//             if let ContextEnum::ChatMessage(data) = x { Some(data.clone()) } else { None }
-//         }).collect::<Vec<ChatMessage>>()
-// }
+pub fn filter_only_chat_messages_from_context_tool(tools: &Vec<ContextEnum>) -> Vec<ChatMessage> {
+    tools.iter()
+       .filter_map(|x| {
+            if let ContextEnum::ChatMessage(data) = x { Some(data.clone()) } else { None }
+        }).collect::<Vec<ChatMessage>>()
+}

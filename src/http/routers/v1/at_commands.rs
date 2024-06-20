@@ -12,7 +12,7 @@ use tokenizers::Tokenizer;
 use tracing::info;
 
 use crate::cached_tokenizers;
-use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_commands::at_commands::{AtCommandsContext, filter_only_chat_messages_from_context_tool};
 use crate::at_commands::execute_at::{execute_at_commands_in_query, parse_words_from_line};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
@@ -132,7 +132,7 @@ pub async fn handle_v1_command_preview(
         top_n,
     ).await;
     let mut preview: Vec<ChatMessage> = vec![];
-    if processed.len() > 0 {
+    if !processed.is_empty() {
         let message = ChatMessage {
             role: "context_file".to_string(),
             content: serde_json::to_string(&processed).unwrap(),
@@ -141,6 +141,18 @@ pub async fn handle_v1_command_preview(
         };
         preview.push(message.clone());
     }
+    
+    let chat_messages = filter_only_chat_messages_from_context_tool(&messages_for_postprocessing);
+    if !chat_messages.is_empty() {
+        let message = ChatMessage {
+            role: "context_file".to_string(),
+            content: serde_json::to_string(&chat_messages).unwrap(),
+            tool_calls: None,
+            tool_call_id: "".to_string(),
+        };
+        preview.push(message.clone());
+    }
+    
     let mut highlights = vec![];
     for h in vec_highlights {
         highlights.push(Highlight {
