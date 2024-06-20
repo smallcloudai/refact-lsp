@@ -165,7 +165,7 @@ impl AtParam for AtParamFilePath {
     fn param_completion_valid(&self) -> bool {true}
 }
 
-async fn get_project_paths(ccx: &AtCommandsContext) -> Vec<PathBuf> {
+pub async fn get_project_paths(ccx: &AtCommandsContext) -> Vec<PathBuf> {
     let cx = ccx.global_context.read().await;
     let workspace_folders = cx.documents_state.workspace_folders.lock().unwrap();
     workspace_folders.iter().cloned().collect::<Vec<_>>()
@@ -175,49 +175,14 @@ pub async fn context_file_from_file_path(
     ccx: &mut AtCommandsContext,
     candidates: Vec<String>,
     file_path: String,
-    from_tool_call: bool,
 ) -> Result<ContextFile, String> {
-    let project_paths = get_project_paths(ccx).await;
-
-    async fn get_file_text(ccx: &mut AtCommandsContext, file_path: &String, candidates: Vec<String>, from_tool_call: bool, project_paths: &Vec<PathBuf>) -> Result<(String, String), String> {
-        let mut f_path = PathBuf::from(file_path);
-        if candidates.is_empty() {
-            if from_tool_call && f_path.is_absolute() {
-                if !project_paths.iter().any(|x|x.starts_with(&f_path)) {
-                    return Err(format!("Attempted to read file: {:?}\n\nHowever it cannot be found within the project directories:\n\n{:?}\n\nProvide an absolute path that starts with one of the project directories or that is a relative.", f_path, project_paths));
-                }
-            }
-            if f_path.is_relative() {
-                let options = project_paths.iter().map(|x|x.join(&f_path)).filter(|x|x.is_file()).collect::<Vec<_>>();
-                if from_tool_call && options.len() > 1 {
-                    return Err(format!("relative path: {:?} is ambiguous.\n\nIt can be interpreted as:\n{:?}\n\nProvide an absolute path instead.", f_path, options));
-                }
-                if options.is_empty() {
-                    return Err(format!("The path: {:?} is relative and cannot be found.\nProvide an absolute path instead.", f_path));
-                } else {
-                    f_path = options[0].clone();
-                }
-            }
-        }
-        get_file_text_from_memory_or_disk(ccx.global_context.clone(), &f_path).await.map(|x|(f_path.to_string_lossy().to_string(), x))
-    }
-
-    if from_tool_call && candidates.len() > 1 {
-        let mut s = format!("The path: {:?} is ambiguous.\nThere are files with similar names:", file_path);
-        for candidate in candidates.iter() {
-            s.push_str("\n");
-            s.push_str(&candidate);
-        }
-        return Err(s);
-    }
-
     let mut file_path_from_c = candidates.get(0).map(|x|x.clone()).unwrap_or(file_path.clone());
     let mut line1 = 0;
     let mut line2 = 0;
     let colon_kind_mb = colon_lines_range_from_arg(&mut file_path_from_c);
     let gradient_type = gradient_type_from_range_kind(&colon_kind_mb);
 
-    let (file_name, file_content) = get_file_text(ccx, &file_path_from_c, candidates, from_tool_call, &project_paths).await?;
+    let file_content = get_file_text_from_memory_or_disk(ccx.global_context.clone(), &PathBuf::from(&file_path_from_c)).await?;
 
     if let Some(colon) = &colon_kind_mb {
         line1 = colon.line1;
@@ -228,7 +193,7 @@ pub async fn context_file_from_file_path(
     }
 
     Ok(ContextFile {
-        file_name,
+        file_name: file_path_from_c,
         file_content,
         line1,
         line2,
@@ -239,25 +204,16 @@ pub async fn context_file_from_file_path(
     })
 }
 
-pub async fn execute_at_file(
-    ccx: &mut AtCommandsContext,
-    file_path: String,
-    from_tool_call: bool,
-) -> Result<ContextFile, String> {
-    let mut candidates = at_file_repair_candidates(&file_path, ccx, false).await;
-
-    if from_tool_call {
-        candidates = at_file_repair_candidates(&file_path, ccx, false).await;
-        return context_file_from_file_path(ccx, candidates, file_path, true).await;
-    }
-
-    match context_file_from_file_path(ccx, candidates, file_path.clone(), false).await {
+pub async fn execute_at_file(ccx: &mut AtCommandsContext, file_path: String) -> Result<ContextFile, String> {
+    let candidates = at_file_repair_candidates(&file_path, ccx, false).await;
+    
+    match context_file_from_file_path(ccx, candidates, file_path.clone()).await {
         Ok(x) => { return Ok(x) },
         Err(e) => { info!("non-fuzzy at file has failed to get file_path: {:?}", e); }
     }
 
     let candidates_fuzzy = at_file_repair_candidates(&file_path, ccx, true).await;
-    context_file_from_file_path(ccx, candidates_fuzzy, file_path, false).await
+    context_file_from_file_path(ccx, candidates_fuzzy, file_path).await
 }
 
 #[async_trait]
@@ -282,7 +238,7 @@ impl AtCommand for AtFile {
             return Err(format!("file_path is incorrect: {:?}. Reason: {:?}", file_path.text, file_path.reason));
         }
 
-        let context_file = execute_at_file(ccx, file_path.text.clone(), false).await?;
+        let context_file = execute_at_file(ccx, file_path.text.clone()).await?;
         info!("{:?}", context_file);
         let text = text_on_clip(&context_file, false);
         Ok((vec_context_file_to_context_tools(vec![context_file]), text))
