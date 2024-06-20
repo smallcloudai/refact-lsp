@@ -101,7 +101,7 @@ pub struct DocumentsState {
     pub workspace_files: Arc<StdMutex<Vec<PathBuf>>>,
     pub last_accessed_file: Arc<StdMutex<Option<PathBuf>>>,
     pub jsonl_files: Arc<StdMutex<Vec<PathBuf>>>,
-    pub documentation_files: Arc<AMutex<Vec<String>>>,
+    pub documentation_sources: Arc<AMutex<Vec<String>>>,
     // document_map on windows: c%3A/Users/user\Documents/file.ext
     // query on windows: C:/Users/user/Documents/file.ext
     pub memory_document_map: HashMap<PathBuf, Arc<ARwLock<Document>>>,   // if a file is open in IDE, and it's outside workspace dirs, it will be in this map and not in workspace_files
@@ -141,7 +141,7 @@ impl DocumentsState {
             workspace_files: Arc::new(StdMutex::new(Vec::new())),
             last_accessed_file: Arc::new(StdMutex::new(None)),
             jsonl_files: Arc::new(StdMutex::new(Vec::new())),
-            documentation_files: Arc::new(AMutex::new(Vec::new())),
+            documentation_sources: Arc::new(AMutex::new(Vec::new())),
             memory_document_map: HashMap::new(),
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
             cache_correction: Arc::new(HashMap::<String, HashSet<String>>::new()),

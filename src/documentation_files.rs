@@ -4,11 +4,12 @@ use tokio::sync::{RwLock as ARwLock};
 use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
+use itertools::Itertools;
 use log::{error, info, warn};
 use crate::at_tools::att_doc_sources::DocOrigin;
 use crate::files_in_workspace::Document;
 
-pub async fn enqueue_all_files_from_workspace_folders(gcx: Arc<ARwLock<GlobalContext>>) {
+pub async fn enqueue_all_documentation_files(gcx: Arc<ARwLock<GlobalContext>>) {
     let Ok(paths) = fs::read_dir("./.refact/docs") else {
         warn!("No ./.refact/docs directory");
         return;
@@ -32,21 +33,19 @@ pub async fn enqueue_all_files_from_workspace_folders(gcx: Arc<ARwLock<GlobalCon
             continue;
         };
 
-        for file_path in doc_origin.pages.values() {
-            let gcx = gcx.write().await;
-            let mut files = gcx.documents_state.documentation_files.lock().await;
-            let vec_db_module = {
-                *gcx.documents_state.cache_dirty.lock().await = true;
-                gcx.vec_db.clone()
-            };
-            if !files.contains(&file_path) {
-                files.push(file_path.clone());
-            }
-            let document = Document::new(&PathBuf::from(file_path.as_str()));
-            match *vec_db_module.lock().await {
-                Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
-                None => {}
-            };
+        let documents = doc_origin.pages.values().map(|file_path| Document::new(&PathBuf::from(file_path))).collect_vec();
+        let gcx = gcx.write().await;
+        let vec_db_module = {
+            *gcx.documents_state.cache_dirty.lock().await = true;
+            gcx.vec_db.clone()
+        };
+        match *vec_db_module.lock().await {
+            Some(ref mut db) => db.vectorizer_enqueue_files(&documents, false).await,
+            None => {}
+        };
+        let mut sources = gcx.documents_state.documentation_sources.lock().await;
+        if !sources.contains(&doc_origin.url) {
+            sources.push(doc_origin.url.clone());
         }
     }
 }
