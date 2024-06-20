@@ -6,7 +6,7 @@ use tokenizers::Tokenizer;
 use tracing::{info, warn};
 use tokio::sync::RwLock as ARwLock;
 
-use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_chat_messages_from_context_tool, filter_only_context_file_from_context_tool};
+use crate::at_commands::at_commands::{AtCommandsContext, AtParam, chat_messages_to_context_file, filter_only_chat_messages_from_context_tool, filter_only_context_file_from_context_tool};
 use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::scratchpads::chat_utils_rag::{count_tokens, HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2};
@@ -100,7 +100,7 @@ pub async fn run_at_commands(
 
         let chat_messages = filter_only_chat_messages_from_context_tool(&messages_exec_output);
         if !chat_messages.is_empty() {
-            let json_vec = chat_messages.iter().map(|p| { json!(p)}).collect::<Vec<Value>>();
+            let json_vec = chat_messages_to_context_file(chat_messages).iter().map(|p| { json!(p)}).collect::<Vec<_>>();
             if!json_vec.is_empty() {
                 let message = ChatMessage::new(
                     "context_file".to_string(),

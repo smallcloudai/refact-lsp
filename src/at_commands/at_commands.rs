@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
+use uuid::Uuid;
 
 use crate::at_tools::tools::{AtTool, at_tools_merged};
 use crate::call_validation::{ContextFile, ContextEnum, ChatMessage};
@@ -102,4 +103,17 @@ pub fn filter_only_chat_messages_from_context_tool(tools: &Vec<ContextEnum>) -> 
        .filter_map(|x| {
             if let ContextEnum::ChatMessage(data) = x { Some(data.clone()) } else { None }
         }).collect::<Vec<ChatMessage>>()
+}
+
+pub fn chat_messages_to_context_file(x: Vec<ChatMessage>) -> Vec<ContextFile> {
+    x.into_iter().map(|i|ContextFile {
+        file_name: i.role,
+        file_content: i.content.clone(),
+        line1: 0,
+        line2: 0,
+        symbol: Uuid::default(),
+        gradient_type: -1,
+        usefulness: 100.,
+        is_body_important: false
+    }).collect::<Vec<_>>()
 }

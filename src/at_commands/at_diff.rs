@@ -120,10 +120,9 @@ impl AtCommand for AtDiff {
             },
         };
         let (stdout, stderr) = output_mb?;
-        info!("stdout: {}\nstderr: {}\n", stdout, stderr);
         
         let chat_message = ChatMessage::new(
-            "assistant".to_string(),
+            "@diff".to_string(),
             format!("{}{}", stdout, stderr),
         );
 
