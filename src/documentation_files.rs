@@ -5,7 +5,7 @@ use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{error, warn};
 use crate::at_tools::att_doc_sources::DocOrigin;
 use crate::files_in_workspace::Document;
 
