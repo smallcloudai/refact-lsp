@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use crate::at_commands::at_ast_definition::results2message;
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::at_tools::tools::AtTool;
+use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::ast::ast_index::RequestSymbolType;
 
@@ -15,7 +15,7 @@ use crate::ast::ast_index::RequestSymbolType;
 pub struct AttAstReference;
 
 #[async_trait]
-impl AtTool for AttAstReference {
+impl Tool for AttAstReference {
     async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         info!("execute @references {:?}", args);
         let mut symbol = match args.get("symbol") {
