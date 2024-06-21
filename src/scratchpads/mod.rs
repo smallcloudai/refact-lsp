@@ -7,6 +7,7 @@ use crate::ast::ast_module::AstModule;
 pub mod completion_single_file_fim;
 pub mod chat_generic;
 pub mod chat_llama2;
+pub mod chat_deepseek_coder_v2;
 pub mod chat_passthrough;
 pub mod chat_utils_deltadelta;
 pub mod chat_utils_limit_history;
@@ -67,6 +68,9 @@ pub async fn create_chat_scratchpad(
     } else if scratchpad_name == "CHAT-LLAMA2" {
         let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
         result = Box::new(chat_llama2::ChatLlama2::new(tokenizer_arc, post, global_context.clone(), allow_at));
+    } else if scratchpad_name == "CHAT-DEEPSEEK-CODER-V2" {
+        let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
+        result = Box::new(chat_deepseek_coder_v2::ChatDeepSeekCoderV2::new(tokenizer_arc, post, global_context.clone(), allow_at));
     } else if scratchpad_name == "PASSTHROUGH" {
         let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
         result = Box::new(chat_passthrough::ChatPassthrough::new(tokenizer_arc, post, global_context.clone(), allow_at, supports_tools));

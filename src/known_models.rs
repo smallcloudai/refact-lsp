@@ -78,7 +78,8 @@ pub const KNOWN_MODELS: &str = r####"
             "similar_models": [
                 "deepseek-coder/5.7b/mqa-base",
                 "deepseek-coder/1.3b/vllm",
-                "deepseek-coder/5.7b/vllm"
+                "deepseek-coder/5.7b/vllm",
+                "deepseek-coder-v2/16b/instruct"
             ]
         },
         "stable/3b/code": {
@@ -266,6 +267,14 @@ pub const KNOWN_MODELS: &str = r####"
                 "deepseek-coder/6.7b/instruct-finetune",
                 "deepseek-coder/6.7b/instruct-finetune/vllm"
             ]
+        },
+        "deepseek-coder-v2/16b/instruct": {
+            "n_ctx": 16384,
+            "supports_scratchpads": {
+                "CHAT-DEEPSEEK-CODER-V2": {
+                    "default_system_message": "You are a programming assistant. Use english to communicate with user."
+                }
+            }
         }
     },
     "tokenizer_rewrite_path": {
