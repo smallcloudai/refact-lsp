@@ -66,13 +66,13 @@ pub async fn run_at_commands(
             messages_exec_output.extend(res);
         }
 
-        for exec_result in messages_exec_output.iter() {
-            // at commands exec() can produce both role="user" and role="assistant" messages
-            if let ContextEnum::ChatMessage(raw_msg) = exec_result {
-                rebuilt_messages.push(raw_msg.clone());
-                stream_back_to_user.push_in_json(json!(raw_msg));
-            }
-        }
+        // for exec_result in messages_exec_output.iter() {
+        //     // at commands exec() can produce both role="user" and role="assistant" messages
+        //     if let ContextEnum::ChatMessage(raw_msg) = exec_result {
+        //         rebuilt_messages.push(raw_msg.clone());
+        //         stream_back_to_user.push_in_json(json!(raw_msg));
+        //     }
+        // }
 
         // TODO: reduce context_limit by tokens(messages_exec_output)
         let t0 = std::time::Instant::now();
@@ -97,7 +97,7 @@ pub async fn run_at_commands(
             }
         }
         info!("postprocess_at_results2 {:.3}s", t0.elapsed().as_secs_f32());
-
+        // TODO: postprocess chat_messages as well
         let chat_messages = filter_only_chat_messages_from_context_tool(&messages_exec_output);
         if !chat_messages.is_empty() {
             let json_vec = chat_messages_to_context_file(chat_messages).iter().map(|p| { json!(p)}).collect::<Vec<_>>();
@@ -194,7 +194,7 @@ pub async fn execute_at_commands_in_query(
     (context_enums, highlight_members)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AtCommandMember {
     pub kind: String,
     pub text: String,
@@ -211,11 +211,10 @@ impl AtCommandMember {
 }
 
 pub fn parse_words_from_line(line: &String) -> Vec<(String, usize, usize)> {
-    // TODO: make regex better
-    let word_regex = Regex::new(r#"(@?[^ !?@\n]*)"#).expect("Invalid regex");
+    let word_regex = Regex::new(r#"(@?[^ !?@\n]+|\n|@)"#).expect("Invalid regex");
     let mut results = vec![];
     for cap in word_regex.captures_iter(line) {
-        if let Some(matched) = cap.get(1) {
+        if let Some(matched) = cap.get(0) {
             results.push((matched.as_str().to_string(), matched.start(), matched.end()));
         }
     }

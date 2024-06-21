@@ -10,4 +10,4 @@ pub mod at_params;
 pub mod execute_at;
 pub mod at_local_notes_to_self;
 pub mod at_local_cmdline;
-mod at_diff;
+pub mod at_diff;

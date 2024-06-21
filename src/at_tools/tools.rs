@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde_json::Value;
 use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 use tokio::sync::RwLock as ARwLock;
@@ -13,7 +12,7 @@ use crate::global_context::GlobalContext;
 
 #[async_trait]
 pub trait AtTool: Send + Sync {
-    async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>;
+    async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, serde_json::Value>) -> Result<Vec<ContextEnum>, String>;
     fn depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
 }
 
@@ -28,6 +27,7 @@ pub async fn at_tools_merged(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String
         // ("symbols_at".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_ast_lookup_symbols::AttAstLookupSymbols{}) as Box<dyn AtTool + Send>))),
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
+        ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn AtTool + Send>))),
     ]);
 
     let tconfig_maybe = crate::toolbox::toolbox_config::load_customization(gcx.clone()).await;
@@ -98,6 +98,21 @@ tools:
         description: "The exact name of a function, method, class, type alias. No spaces allowed."
     parameters_required:
       - "symbol"
+      
+  - name: "diff"
+    description: "Perform a diff operation. Can be used to get git diff for a project (no arguments), git diff for a specific file (file_path), or diff between two files. (file1, file2)"
+    parameters:
+      - name: "file_path"
+        type: "string"
+        description: "Path to the specific file to diff (optional)."
+      - name: "file1"
+        type: "string"
+        description: "Path to the first file for diff (optional)."
+      - name: "file2"
+        type: "string"
+        description: "Path to the second file for diff (optional)."
+    parameters_required:
+
 "####;
 
 // - name: "remember_how_to_use_tools"

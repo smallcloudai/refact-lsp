@@ -23,7 +23,7 @@ impl AtDiff {
     }
 }
 
-async fn execute_git_diff(project_dir: &str, args: &[&str]) -> Result<(String, String), String> {
+pub async fn execute_git_diff(project_dir: &str, args: &[&str]) -> Result<(String, String), String> {
     let output = match args.is_empty() { 
         true => {
             Command::new("git")
@@ -47,7 +47,7 @@ async fn execute_git_diff(project_dir: &str, args: &[&str]) -> Result<(String, S
     Ok((stdout, stderr))
 }
 
-async fn execute_diff(file1: &str, file2: &str) -> Result<(String, String), String> {
+pub async fn execute_diff(file1: &str, file2: &str) -> Result<(String, String), String> {
     let output = Command::new("diff")
         .arg(file1)
         .arg(file2)
@@ -60,13 +60,13 @@ async fn execute_diff(file1: &str, file2: &str) -> Result<(String, String), Stri
 }
 
 // TODO we'll have the same one in at_file.rs, import 
-async fn get_project_paths(ccx: &AtCommandsContext) -> Vec<PathBuf> {
+pub async fn get_project_paths(ccx: &AtCommandsContext) -> Vec<PathBuf> {
     let cx = ccx.global_context.read().await;
     let workspace_folders = cx.documents_state.workspace_folders.lock().unwrap();
     workspace_folders.iter().cloned().collect::<Vec<_>>()
 }
 
-fn text_on_clip(args: &Vec<AtCommandMember>) -> String {
+pub fn text_on_clip(args: &Vec<AtCommandMember>) -> String {
     let text = match args.len() { 
         0 => "executed: git diff".to_string(),
         1 => format!("executed: git diff {}", args[0].text),
@@ -83,6 +83,7 @@ impl AtCommand for AtDiff {
     }
 
     async fn execute(&self, ccx: &mut AtCommandsContext, cmd: &mut AtCommandMember, args: &mut Vec<AtCommandMember>) -> Result<(Vec<ContextEnum>, String), String> {
+        // TODO: take the project path user interacted more recently with
         let project_path = match get_project_paths(ccx).await.get(0) {
             Some(path) => path.to_str().unwrap().to_string(),
             None => {
@@ -92,7 +93,7 @@ impl AtCommand for AtDiff {
             }
         };
         info!("project_path: {}", project_path);
-        let output_mb = match args.len() {
+        let output_mb = match args.iter().take_while(|arg| arg.text != "\n").take(2).count() {
             0 => {
                 // No arguments: git diff for all tracked files
                 args.clear();
