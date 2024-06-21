@@ -1,5 +1,5 @@
 import aiohttp, os, termcolor, copy, json
-from typing import Optional, List, Any, Tuple, Dict, Literal, Set
+from typing import Optional, List, Any, Dict, Literal, Set
 from pydantic import BaseModel
 
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 
 class FunctionDict(BaseModel):
-    arguments: str
+    arguments: str  # sometimes it's not a string but Dict[str, Any]
     name: str
 
 
