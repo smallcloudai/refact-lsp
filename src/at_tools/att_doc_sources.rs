@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hashbrown::HashSet;
+use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use log::warn;
 use select::predicate::Name;
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,84 @@ fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
     Some((site_name, file_name))
 }
 
+#[derive(Clone, Copy)]
+struct CustomTextConversion;
+
+impl TextDecorator for CustomTextConversion {
+    type Annotation = ();
+
+    fn decorate_link_start(&mut self, _url: &str) -> (String, Self::Annotation) {
+        ("[".to_string(), ())
+    }
+
+    fn decorate_link_end(&mut self) -> String {
+        "]".to_string()
+    }
+
+    fn decorate_em_start(&self) -> (String, Self::Annotation) {
+        ("*".to_string(), ())
+    }
+
+    fn decorate_em_end(&self) -> String {
+        "*".to_string()
+    }
+
+    fn decorate_strong_start(&self) -> (String, Self::Annotation) {
+        ("**".to_string(), ())
+    }
+
+    fn decorate_strong_end(&self) -> String {
+        "**".to_string()
+    }
+
+    fn decorate_strikeout_start(&self) -> (String, Self::Annotation) {
+        ("".to_string(), ())
+    }
+
+    fn decorate_strikeout_end(&self) -> String {
+        "".to_string()
+    }
+
+    fn decorate_code_start(&self) -> (String, Self::Annotation) {
+        ("`".to_string(), ())
+    }
+
+    fn decorate_code_end(&self) -> String {
+        "`".to_string()
+    }
+
+    fn decorate_preformat_first(&self) -> Self::Annotation {}
+    fn decorate_preformat_cont(&self) -> Self::Annotation {}
+
+    fn decorate_image(&mut self, _src: &str, title: &str) -> (String, Self::Annotation) {
+        (format!("[{}]", title), ())
+    }
+
+    fn header_prefix(&self, level: usize) -> String {
+        "#".repeat(level) + " "
+    }
+
+    fn quote_prefix(&self) -> String {
+        "> ".to_string()
+    }
+
+    fn unordered_item_prefix(&self) -> String {
+        "* ".to_string()
+    }
+
+    fn ordered_item_prefix(&self, i: i64) -> String {
+        format!("{}. ", i)
+    }
+
+    fn make_subblock_decorator(&self) -> Self {
+        *self
+    }
+
+    fn finalise(&mut self, _: Vec<String>) -> Vec<TaggedLine<()>> {
+        vec![]
+    }
+}
+
 async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<Vec<String>, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
@@ -77,7 +156,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .await
                 .map_err(|_| "Unable to convert page to text".to_string())?;
 
-            let text = html2text::config::plain()
+            let text = html2text::config::with_decorator(CustomTextConversion)
                 .string_from_read(&html.as_bytes()[..], 200)
                 .map_err(|_| "Unable to convert html to text".to_string())?;
 
