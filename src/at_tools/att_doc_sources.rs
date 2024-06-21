@@ -20,6 +20,7 @@ use url::{Position, Url};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::AtTool;
 use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::documentation_files::get_docs_dir;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 
@@ -33,7 +34,7 @@ pub struct DocOrigin {
     pub pages: HashMap<String, String>,
 }
 
-fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
+fn get_directory_and_file_from_url(url: &str) -> Option<(PathBuf, String)> {
     let url_without_http = url.split("://").nth(1).unwrap();
     let (site_name, mut site_path) = url_without_http.split_once("/")?;
     if site_path == "" {
@@ -43,7 +44,9 @@ fn get_directory_and_file_from_url(url: &str) -> Option<(&str, String)> {
         site_path = &site_path[..site_path.len() - 1];
     }
     let file_name = format!("{}.md", site_path.replace("/", "_"));
-    Some((site_name, file_name))
+    let mut site_dir = get_docs_dir();
+    site_dir.push(site_name);
+    Some((site_dir, file_name))
 }
 
 #[derive(Clone, Copy)]
@@ -124,10 +127,9 @@ impl TextDecorator for CustomTextConversion {
     }
 }
 
-async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<Vec<String>, String> {
+async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<DocOrigin, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
-    let mut sources = vec![];
     let mut pages = HashMap::default();
     let url = Url::parse(&url_str).map_err(|_| format!("Invalid url '{url_str}'"))?;
     let base_url = Url::parse(&url[..Position::BeforePath])
@@ -168,19 +170,19 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .map_err(|_| "Unable to convert html to text".to_string())?;
 
             // create file
-            let Some((dir_name, file_name)) = get_directory_and_file_from_url(&url) else {
+            let Some((dir_path, file_name)) = get_directory_and_file_from_url(&url) else {
                 continue; // skip this url
             };
-            let file_path = format!("./.refact/docs/{dir_name}/{file_name}");
+            let mut file_path = dir_path.clone();
+            file_path.push(file_name);
             let directory = Path::new(&file_path).parent().unwrap();
-            sources.push(file_path.clone());
             fs::create_dir_all(directory)
                 .map_err(|e| format!("Unable to create directory {:?} {directory:?}: {e:?}", env::current_dir()))?;
             let mut file = File::create(&file_path)
-                .map_err(|_| format!("Unable to create file {file_path}"))?;
+                .map_err(|_| format!("Unable to create file {}", file_path.display()))?;
             file.write_all(text.as_bytes())
-                .map_err(|_| format!("Unable to write to file {file_path}"))?;
-            pages.insert(url, file_path.clone());
+                .map_err(|_| format!("Unable to write to file {}", file_path.display()))?;
+            pages.insert(url, format!("{}", file_path.display()));
 
             // vectorize file
             let gcx = gcx.write().await;
@@ -188,7 +190,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 *gcx.documents_state.cache_dirty.lock().await = true;
                 gcx.vec_db.clone()
             };
-            let document = Document::new(&PathBuf::from(file_path.as_str()));
+            let document = Document::new(&file_path);
             match *vec_db_module.lock().await {
                 Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
                 None => {}
@@ -233,16 +235,17 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
     };
 
     if let Ok(origin_json) = serde_json::to_string(&origin) {
-        let file_path = format!("./.refact/docs/{directory}/origin.json");
+        let mut file_path = directory.clone();
+        file_path.push("origin.json");
         let mut file = File::create(&file_path)
-            .map_err(|_| format!("Unable to create file {file_path}"))?;
+            .map_err(|_| format!("Unable to create file {}", file_path.display()))?;
         file.write_all(origin_json.as_bytes())
-            .map_err(|_| format!("Unable to write to file {file_path}"))?;
+            .map_err(|_| format!("Unable to write to file {}", file_path.display()))?;
     } else {
         warn!("Unable to convert DocOrigin to json");
     }
 
-    Ok(sources)
+    Ok(origin)
 }
 
 async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) -> Result<Vec<ContextEnum>, String> {
@@ -330,8 +333,7 @@ async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, 
 
     if source.starts_with("http://") || source.starts_with("https://") {
         if let Some((dir, _)) = get_directory_and_file_from_url(&source) {
-            let dir = format!("./.refact/docs/{dir}");
-            fs::remove_dir_all(&dir).map_err(|err| format!("Error while deleting directory '{dir}': {err}"))?;
+            fs::remove_dir_all(&dir).map_err(|err| format!("Error while deleting directory '{}': {err}", dir.display()))?;
         }
     }
 
