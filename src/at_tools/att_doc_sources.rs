@@ -361,7 +361,7 @@ impl AtTool for AttDocSources {
             "list" => doc_sources_list(ccx, tool_call_id).await,
             "add" => doc_sources_add(ccx, tool_call_id, args).await,
             "remove" => doc_sources_remove(ccx, tool_call_id, args).await,
-            _ => Err(format!("Unknown action `{}`", action))
+            _ => Err(format!("Unknown argument action `{}`. Action must be one of 'add', 'remove', 'list'", action))
         }
     }
 }
