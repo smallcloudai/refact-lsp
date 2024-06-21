@@ -149,9 +149,16 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
         let is_last_iteration = iteration == depth;
 
         for url in queue {
-            let html = reqwest::get(url.clone())
+            let response = reqwest::get(url.clone())
                 .await
-                .map_err(|_| format!("Unable to connect to '{url}'"))?
+                .map_err(|_| format!("Unable to connect to '{url}'"))?;
+
+            if !response.status().is_success() {
+                warn!("Error when connecting to '{url}': {}", response.status());
+                continue;
+            }
+
+            let html = response
                 .text()
                 .await
                 .map_err(|_| "Unable to convert page to text".to_string())?;
