@@ -246,15 +246,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
 }
 
 async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) -> Result<Vec<ContextEnum>, String> {
-    let sources = ccx
-        .global_context
-        .read()
-        .await
-        .documents_state
-        .documentation_sources
-        .lock()
-        .await
-        .join(",");
+    let sources = ccx.global_context.read().await.documents_state.documentation_sources.lock().await.join(",");
 
     let results = vec![ContextEnum::ChatMessage(ChatMessage {
         role: "tool".to_string(),
@@ -313,6 +305,7 @@ async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, arg
         Ok(results)
     }
 }
+
 async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
     let source = match args.get("source") {
         Some(Value::String(s)) => s.clone(),
