@@ -89,10 +89,15 @@ pub async fn run_tools(
                 if let ContextEnum::ContextFile(ref cf) = msg {
                     for_postprocessing.push(cf.clone());
                 }
-                if let ContextEnum::ChatMessage(ref m) = msg {
+                else if let ContextEnum::ChatMessage(ref m) = msg {
                     if m.role != "tool" {
                         chat_messages.push(m.clone());
                     }
+                } 
+                else if let ContextEnum::DiffChunk(ref d) = msg {
+                    chat_messages.push(ChatMessage::new(
+                        "diff".to_string(), json!(d).to_string(),
+                    ));
                 }
             }
             assert!(have_answer);

@@ -100,17 +100,11 @@ tools:
       - "symbol"
       
   - name: "diff"
-    description: "Perform a diff operation. Can be used to get git diff for a project (no arguments), git diff for a specific file (file_path), or diff between two files. (file1, file2)"
+    description: "Perform a diff operation. Can be used to get git diff for a project (no arguments) or git diff for a specific file (file_path)"
     parameters:
       - name: "file_path"
         type: "string"
         description: "Path to the specific file to diff (optional)."
-      - name: "file1"
-        type: "string"
-        description: "Path to the first file for diff (optional)."
-      - name: "file2"
-        type: "string"
-        description: "Path to the second file for diff (optional)."
     parameters_required:
 
 "####;

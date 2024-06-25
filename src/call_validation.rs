@@ -219,6 +219,7 @@ pub struct ContextMemory {
 pub enum ContextEnum {
     ContextFile(ContextFile),
     ChatMessage(ChatMessage),
+    DiffChunk(DiffChunk),
 }
 
 fn default_gradient_type_value() -> i32 {
@@ -286,7 +287,7 @@ pub struct ChatPost {
     pub chat_id: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct DiffChunk {
     pub file_name: String,
     pub file_action: String,

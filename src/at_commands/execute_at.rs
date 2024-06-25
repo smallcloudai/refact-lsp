@@ -66,13 +66,20 @@ pub async fn run_at_commands(
             messages_exec_output.extend(res);
         }
 
-        // for exec_result in messages_exec_output.iter() {
-        //     // at commands exec() can produce both role="user" and role="assistant" messages
-        //     if let ContextEnum::ChatMessage(raw_msg) = exec_result {
-        //         rebuilt_messages.push(raw_msg.clone());
-        //         stream_back_to_user.push_in_json(json!(raw_msg));
-        //     }
-        // }
+        for exec_result in messages_exec_output.iter() {
+            // at commands exec() can produce both role="user" and role="assistant" messages
+            if let ContextEnum::ChatMessage(raw_msg) = exec_result {
+                rebuilt_messages.push(raw_msg.clone());
+                stream_back_to_user.push_in_json(json!(raw_msg));
+            }
+            if let ContextEnum::DiffChunk(d) = exec_result {
+                let raw_msg = ChatMessage::new(
+                    "diff".to_string(), json!(d).to_string()
+                );
+                rebuilt_messages.push(raw_msg.clone());
+                stream_back_to_user.push_in_json(json!(raw_msg));
+            }
+        }
 
         // TODO: reduce context_limit by tokens(messages_exec_output)
         let t0 = std::time::Instant::now();
@@ -97,19 +104,6 @@ pub async fn run_at_commands(
             }
         }
         info!("postprocess_at_results2 {:.3}s", t0.elapsed().as_secs_f32());
-        // TODO: postprocess chat_messages as well
-        let chat_messages = filter_only_chat_messages_from_context_tool(&messages_exec_output);
-        if !chat_messages.is_empty() {
-            let json_vec = chat_messages_to_context_file(chat_messages).iter().map(|p| { json!(p)}).collect::<Vec<_>>();
-            if!json_vec.is_empty() {
-                let message = ChatMessage::new(
-                    "context_file".to_string(),
-                    serde_json::to_string(&json_vec).unwrap_or("".to_string()),
-                );
-                rebuilt_messages.push(message.clone());
-                stream_back_to_user.push_in_json(json!(message));
-            }
-        }
 
         if content.trim().len() > 0 {
             // stream back to the user, with at-commands replaced

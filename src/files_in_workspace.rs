@@ -99,6 +99,7 @@ impl Document {
 pub struct DocumentsState {
     pub workspace_folders: Arc<StdMutex<Vec<PathBuf>>>,
     pub workspace_files: Arc<StdMutex<Vec<PathBuf>>>,
+    pub last_accessed_file: Arc<StdMutex<Option<PathBuf>>>,
     pub jsonl_files: Arc<StdMutex<Vec<PathBuf>>>,
     // document_map on windows: c%3A/Users/user\Documents/file.ext
     // query on windows: C:/Users/user/Documents/file.ext
@@ -136,6 +137,7 @@ impl DocumentsState {
         Self {
             workspace_folders: Arc::new(StdMutex::new(workspace_dirs)),
             workspace_files: Arc::new(StdMutex::new(Vec::new())),
+            last_accessed_file: Arc::new(StdMutex::new(None)),
             jsonl_files: Arc::new(StdMutex::new(Vec::new())),
             memory_document_map: HashMap::new(),
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
@@ -407,6 +409,7 @@ pub async fn on_did_open(
     if mark_dirty {
         (*dirty_arc.lock().await) = true;
     }
+    *gcx.read().await.documents_state.last_accessed_file.lock().unwrap() = Some(cpath.clone());
 }
 
 pub async fn on_did_change(
