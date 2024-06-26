@@ -247,6 +247,18 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
     }
 }
 
+pub fn detect_vcs_in_dir(path: &PathBuf) -> Option<String> {
+    if path.join(".git").exists() && which("git").is_ok() {
+        Some("git".to_string())
+    } else if path.join(".hg").exists() && which("hg").is_ok() {
+        Some("hg".to_string())
+    } else if path.join(".svn").exists() && which("svn").is_ok() {
+        Some("svn".to_string())
+    } else {
+        None
+    }
+}
+
 async fn ls_files_under_version_control_recursive(path: PathBuf) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = vec![];
     let mut candidates: Vec<PathBuf> = vec![path];

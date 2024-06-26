@@ -9,6 +9,7 @@ use tokio::process::Command;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::execute_at::AtCommandMember;
 use crate::call_validation::{ContextEnum, DiffChunk};
+use crate::files_in_workspace::detect_vcs_in_dir;
 
 
 pub struct AtDiff {
@@ -21,37 +22,22 @@ impl AtDiff {
     }
 }
 
-async fn execute_diff(vcs: &str, project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
-    fn process_diff_line(line: &str, current_chunk: &mut DiffChunk) {
-        if line.starts_with('-') {
-            current_chunk.lines_remove.push_str(&line[1..]);
-            current_chunk.lines_remove.push('\n');
-        } else if line.starts_with('+') {
-            current_chunk.lines_add.push_str(&line[1..]);
-            current_chunk.lines_add.push('\n');
-        } else if line.starts_with(' ') {
-            current_chunk.lines_remove.push_str(&line[1..]);
-            current_chunk.lines_remove.push('\n');
-            current_chunk.lines_add.push_str(&line[1..]);
-            current_chunk.lines_add.push('\n');
-        }
+fn process_diff_line(line: &str, current_chunk: &mut DiffChunk) {
+    if line.starts_with('-') {
+        current_chunk.lines_remove.push_str(&line[1..]);
+        current_chunk.lines_remove.push('\n');
+    } else if line.starts_with('+') {
+        current_chunk.lines_add.push_str(&line[1..]);
+        current_chunk.lines_add.push('\n');
+    } else if line.starts_with(' ') {
+        current_chunk.lines_remove.push_str(&line[1..]);
+        current_chunk.lines_remove.push('\n');
+        current_chunk.lines_add.push_str(&line[1..]);
+        current_chunk.lines_add.push('\n');
     }
+}
 
-    let output = Command::new(vcs)
-        .arg("diff")
-        .args(args)
-        .current_dir(PathBuf::from(project_dir))
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !stderr.is_empty() {
-        return Err(stderr);
-    }
-
+fn process_diff_stdout(stdout: &str) -> Vec<DiffChunk> {
     let mut diff_chunks = Vec::new();
     let mut current_chunk = DiffChunk::default();
     let mut file_name = String::new();
@@ -95,19 +81,50 @@ async fn execute_diff(vcs: &str, project_dir: &str, args: &[&str]) -> Result<Vec
     if in_diff_block && (!current_chunk.lines_remove.is_empty() || !current_chunk.lines_add.is_empty()) {
         diff_chunks.push(current_chunk);
     }
-    Ok(diff_chunks)
+    diff_chunks
 }
 
-pub async fn execute_git_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_diff(vcs: &str, project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+    let output = Command::new(vcs)
+        .arg("diff")
+        .args(args)
+        .current_dir(PathBuf::from(project_dir))
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !stderr.is_empty() {
+        return Err(stderr);
+    }
+    Ok(process_diff_stdout(&stdout))
+}
+
+async fn execute_git_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
     execute_diff("git", project_dir, args).await
 }
 
-pub async fn execute_svn_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_svn_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
     execute_diff("svn", project_dir, args).await
 }
 
-pub async fn execute_hg_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_hg_diff(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
     execute_diff("hg", project_dir, args).await
+}
+
+pub async fn execute_diff_for_vcs(project_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+    if let Some(res) = detect_vcs_in_dir(&PathBuf::from(project_dir)) {
+        match res.as_str() {
+            "git" => execute_git_diff(project_dir, args).await,
+            "svn" => execute_svn_diff(project_dir, args).await,
+            "hg" => execute_hg_diff(project_dir, args).await,
+            _ => Err("No VCS found".to_string())
+        }
+    } else {
+        return Err("No VCS found".to_string())
+    }
 }
 
 // TODO we'll have the same one in at_file.rs, import 
@@ -137,11 +154,11 @@ pub async fn last_accessed_project(ccx: &mut AtCommandsContext) -> Result<String
                 return Ok(p_path.to_string_lossy().to_string());
             }
         }
-        warn!("last accessed file: {:?} is out of any of project paths available:\n{}", l_used_file, p_paths.into_iter().map(|x|x.to_string_lossy().to_string()).collect::<Vec<_>>().join("\n"));
+        warn!("last accessed file: {:?} is out of any of project paths available:\n{}", l_used_file, p_paths.iter().map(|x|x.to_string_lossy().to_string()).collect::<Vec<_>>().join("\n"));
     } else {
         warn!("no last accessed file found");
     }
-    todo!();
+    Ok(p_paths[0].to_string_lossy().to_string())
 }
 
 #[async_trait]
@@ -151,28 +168,19 @@ impl AtCommand for AtDiff {
     }
 
     async fn execute(&self, ccx: &mut AtCommandsContext, cmd: &mut AtCommandMember, args: &mut Vec<AtCommandMember>) -> Result<(Vec<ContextEnum>, String), String> {
-        // TODO: take the project path user interacted more recently with
-        let project_path = match get_project_paths(ccx).await.get(0) {
-            Some(path) => path.to_str().unwrap().to_string(),
-            None => {
-                cmd.ok = false; cmd.reason = Some("Project path is empty".to_string());
-                args.clear();
-                return Err("Project path is empty".to_string());
-            }
-        };
-        info!("project_path: {}", project_path);
+        let project_path = last_accessed_project(ccx).await?;
         let diff_chunks = match args.iter().take_while(|arg| arg.text != "\n").take(2).count() {
             0 => {
                 // No arguments: git diff for all tracked files
                 args.clear();
-                execute_git_diff(&project_path, &[]).await.map_err(|e|format!("Couldn't execute git diff.\nError: {}", e))
+                execute_diff_for_vcs(&project_path, &[]).await.map_err(|e|format!("Couldn't execute git diff.\nError: {}", e))
             },
             1 => {
                 // TODO: if file_path is rel, complete it
                 // 1 argument: git diff for a specific file
                 args.truncate(1);
                 let file_path = &args[0].text;
-                execute_git_diff(&project_path, &[file_path]).await.map_err(|e|format!("Couldn't execute git diff {}.\nError: {}", file_path, e))
+                execute_diff_for_vcs(&project_path, &[file_path]).await.map_err(|e|format!("Couldn't execute git diff {}.\nError: {}", file_path, e))
             },
             _ => {
                 cmd.ok = false; cmd.reason = Some("Invalid number of arguments".to_string());
@@ -187,5 +195,99 @@ impl AtCommand for AtDiff {
 
     fn depends_on(&self) -> Vec<String> {
         vec![]
+    }
+}
+
+async fn execute_diff_with_revs(vcs: &str, project_dir: &str, rev1: &str, rev2: &str, file: &str) -> Result<Vec<DiffChunk>, String> {
+    let mut command = Command::new(vcs);
+    match vcs {
+        "git" => {
+            command.arg("diff").arg(format!("{}..{}", rev1, rev2));
+        },
+        "hg" => {
+            command.arg("diff").arg("-r").arg(rev1).arg("-r").arg(rev2);
+        },
+        "svn" => {
+            command.arg("diff").arg("-r").arg(format!("{}:{}", rev1, rev2));
+        },
+        _ => {
+            return Err(format!("Unsupported VCS: {}", vcs));
+        }
+    }
+
+    if !file.is_empty() {
+        command.arg("--").arg(file);
+    }
+
+    let output = command
+        .current_dir(PathBuf::from(project_dir))
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !stderr.is_empty() {
+        return Err(stderr);
+    }
+    Ok(process_diff_stdout(&stdout))
+}
+
+pub struct AtDiffRev {
+    pub params: Vec<Arc<AMutex<dyn AtParam>>>,
+}
+
+impl AtDiffRev {
+    pub fn new() -> Self {
+        AtDiffRev { params: vec![] }
+    }
+}
+
+#[async_trait]
+impl AtCommand for AtDiffRev {
+    fn params(&self) -> &Vec<Arc<AMutex<dyn AtParam>>> {
+        &self.params
+    }
+
+    async fn execute(&self, ccx: &mut AtCommandsContext, cmd: &mut AtCommandMember, args: &mut Vec<AtCommandMember>) -> Result<(Vec<ContextEnum>, String), String> {
+        if args.len() < 3 {
+            cmd.ok = false; cmd.reason = Some("Invalid number of arguments".to_string());
+            args.clear();
+            return Err("Invalid number of arguments".to_string());
+        }
+
+        let project_path = last_accessed_project(ccx).await?;
+
+        let rev1 = args[0].clone();
+        let rev2 = args[1].clone();
+        let file_path = args[2].clone();
+        // TODO: validate params, complete file_path
+        args.truncate(3);
+        
+        let vcs = determine_vcs(&project_path).await?;
+
+        let diff_chunks = execute_diff_with_revs(&vcs, &project_path, &rev1.text, &rev2.text, &file_path.text).await?;
+
+        info!("executed @diff-rev {:?}", args);
+        Ok((diff_chunks.into_iter().map(ContextEnum::DiffChunk).collect(), text_on_clip(args)))
+    }
+
+    fn depends_on(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+async fn determine_vcs(project_path: &str) -> Result<String, String> {
+    let project_path = PathBuf::from(project_path);
+
+    if project_path.join(".git").exists() {
+        Ok("git".to_string())
+    } else if project_path.join(".hg").exists() {
+        Ok("hg".to_string())
+    } else if project_path.join(".svn").exists() {
+        Ok("svn".to_string())
+    } else {
+        Err("Unsupported VCS or VCS not found".to_string())
     }
 }
