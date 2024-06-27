@@ -43,7 +43,7 @@ async fn write_to_file(path: &String, text: &str) -> Result<(), ScratchError> {
     Ok(())
 }
 
-fn find_chunk_matches(chunk_lines_remove: &Vec<DiffLine>, orig_lines: Vec<&DiffLine>) -> Result<Vec<Vec<usize>>, String> {
+fn find_chunk_matches(chunk_lines_remove: &Vec<DiffLine>, orig_lines: &Vec<&DiffLine>) -> Result<Vec<Vec<usize>>, String> {
     let chunk_len = chunk_lines_remove.len();
     let orig_len = orig_lines.len();
 
@@ -80,9 +80,9 @@ fn apply_chunk_to_text_fuzzy(
 ) -> Result<Vec<DiffLine>, String> {
     let chunk_lines_remove: Vec<_> = chunk.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
     let chunk_lines_add: Vec<_> = chunk.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk_id)}).collect();
+    let mut new_lines = vec![];
     
     if chunk_lines_remove.is_empty() {
-        let mut new_lines = vec![];
         new_lines.extend(lines_orig[..chunk.line1 - 1].iter().cloned().collect::<Vec<_>>());
         new_lines.extend(chunk_lines_add.iter().cloned().collect::<Vec<_>>());
         new_lines.extend(lines_orig[chunk.line1 - 1..].iter().cloned().collect::<Vec<_>>());
@@ -91,11 +91,10 @@ fn apply_chunk_to_text_fuzzy(
     
     let search_in_window: Vec<_> = lines_orig.iter()
         .filter(|l|l.overwritten_by_id.is_none() && l.line_n >= (chunk.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
-    
-    let matches = find_chunk_matches(&chunk_lines_remove, search_in_window);
+    let matches = find_chunk_matches(&chunk_lines_remove, &search_in_window);
+    // TODO: there might be a better way then taking the first match found
     let best_match = matches.map_err(|e| format!("No streaks found: {}", e))?[0].clone();
     
-    let mut new_lines = vec![];
     for l in lines_orig.iter() {
         if best_match.ends_with(&[l.line_n]) {
             new_lines.extend(chunk_lines_add.clone());
@@ -146,7 +145,6 @@ fn undo_chunks(
             l.line_n = idx + 1;
             return l.clone();
         }).collect::<Vec<_>>();
-        // info!("lines_orig_new: \n\n{}\n\n", lines_orig_new.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n"));
         lines_orig = lines_orig_new;
     }
     Ok(lines_orig)
@@ -206,4 +204,64 @@ pub async fn handle_v1_diff_undo(
         .status(StatusCode::OK)
         .body(Body::from("OK"))
         .unwrap())
+}
+
+async fn are_diffs_applied(chunks: &Vec<DiffChunk>) -> Result<Vec<&str>, String> {
+    let chunks_enumed = chunks.iter().enumerate().map(|(idx, c)|(idx, c)).collect::<Vec<_>>();
+
+    let mut chunk_groups = HashMap::new();
+    for (c_idx, c) in chunks_enumed {
+        chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push((c_idx, c));
+    }
+
+    let mut results = vec![];
+    for (file_name, chunks) in chunk_groups.iter_mut() {
+        chunks.sort_by_key(|(_, c)| c.line1);
+        
+        let file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
+            format!("couldn't read file: {:?}. Error: {}", file_name, e)
+        }).map(|x| x.to_string())?;
+
+        let lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
+
+        for (c_idx, c) in chunks {
+            let chunk_lines_remove: Vec<_> = c.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
+            let chunk_lines_add: Vec<_> = c.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(*c_idx)}).collect();
+
+            let fuzzy_n = 5; // TODO: remove me
+            let search_in_window: Vec<_> = lines_orig.iter()
+                .filter(|l|l.overwritten_by_id.is_none() && l.line_n >= (c.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (c.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
+
+            let matches_add = find_chunk_matches(&chunk_lines_add, &search_in_window);
+            let matches_remove = find_chunk_matches(&chunk_lines_remove, &search_in_window);
+            
+            if matches_add.is_ok() {
+                results.push((c_idx, "true"));
+            }
+            else if matches_remove.is_ok() {
+                results.push((c_idx, "false"));
+            } else {
+                results.push((c_idx, "unknown"));
+            }
+        }
+    }
+    results.sort_by_key(|(c_idx, _)|**c_idx);
+    
+    Ok(results.iter().map(|(_, r)| *r).collect::<Vec<_>>())
+}
+
+pub async fn handle_v1_is_diff_applied(
+    Extension(_global_context): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let post = serde_json::from_slice::<DiffPost>(&body_bytes)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    
+    let results = are_diffs_applied(&post.content).await
+      .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
+    
+    Ok(Response::builder()
+      .status(StatusCode::OK)
+     .body(Body::from(serde_json::to_string(&results).unwrap()))
+     .unwrap())
 }
