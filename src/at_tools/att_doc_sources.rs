@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use log::warn;
-use select::predicate::Name;
+use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task;
@@ -127,6 +127,19 @@ impl TextDecorator for CustomTextConversion {
     }
 }
 
+fn find_content(html: String) -> String {
+    let document = select::document::Document::from(html.as_str());
+
+    let content_ids = vec!["content", "I_content"];
+    for id in content_ids {
+        if let Some(node) = document.find(Attr("id", id)).next() {
+            return node.html();
+        }
+    }
+
+    html
+}
+
 async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<DocOrigin, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
@@ -164,6 +177,8 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .text()
                 .await
                 .map_err(|_| "Unable to convert page to text".to_string())?;
+
+            let html = find_content(html);
 
             let text = html2text::config::with_decorator(CustomTextConversion)
                 .string_from_read(&html.as_bytes()[..], 200)
