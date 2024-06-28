@@ -130,7 +130,7 @@ impl TextDecorator for CustomTextConversion {
 fn find_content(html: String) -> String {
     let document = select::document::Document::from(html.as_str());
 
-    let content_ids = vec!["content", "I_content"];
+    let content_ids = vec!["content", "I_content", "main-content", "main_content", "CONTENT"];
     for id in content_ids {
         if let Some(node) = document.find(Attr("id", id)).next() {
             return node.html();
