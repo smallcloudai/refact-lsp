@@ -29,6 +29,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         ("patch".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_patch::ToolPatch{}) as Box<dyn Tool + Send>))),
+        ("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttKnowledge{}) as Box<dyn Tool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -131,6 +132,16 @@ tools:
     parameters_required:
       - "path"
       - "todo"
+
+  - name: "knowledge"
+    description: "What kind of knowledge you will need to accomplish this task?"
+    parameters:
+      - name: "im_going_to_do"
+        type: "string"
+        description: "Put your intent there: 'debug file1.cpp', 'install project1', 'gather info about MyClass'"
+    parameters_required:
+      - "im_going_to_do"
+
 "####;
 
 // - "op"
