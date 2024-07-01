@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ use hashbrown::HashMap;
 use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
+use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 use tokio::sync::RwLock as ARwLock;
@@ -20,7 +22,7 @@ use crate::global_context::GlobalContext;
 const MAX_FUZZY_N: usize = 10;
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct DiffLine {
     line_n: usize,
     text: String,
@@ -89,23 +91,21 @@ fn apply_chunk_to_text_fuzzy(
         return Ok((0, new_lines));
     }
     
-    info!("lines_orig: \n\n{}\n\n", lines_orig.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
-    
     let mut fuzzy_n_used = 0;
-    for fuzzy_n in 0..MAX_FUZZY_N {
+    for fuzzy_n in 0..=MAX_FUZZY_N {
+        let search_from = (chunk.line1 as i32 - fuzzy_n as i32).max(0) as usize;
+        let search_till = (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize;
         let search_in_window: Vec<_> = lines_orig.iter()
-            .filter(|l| l.overwritten_by_id.is_none() && l.line_n >= (chunk.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
-        info!("search in window: \n\n{}\n\n", search_in_window.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
-        let matches = find_chunk_matches(&chunk_lines_remove, &search_in_window);
-        // TODO: there might be a better way then taking the first match found
+            .filter(|l| l.overwritten_by_id.is_none() && l.line_n >= search_from && l.line_n <= search_till).collect();
         
+        let matches = find_chunk_matches(&chunk_lines_remove, &search_in_window);
+
         let best_match = match matches {
-            Ok(m) => { 
+            Ok(m) => {
                 fuzzy_n_used = fuzzy_n;
-                m[0].clone() 
+                m[0].clone()
             },
             Err(e) => {
-                let e = format!("No streaks found: {}", e);
                 if fuzzy_n >= MAX_FUZZY_N {
                     return Err(e)
                 }
@@ -137,162 +137,166 @@ fn validate_chunk(chunk: &DiffChunk) -> Result<(), String> {
 }
 
 fn apply_chunks(
-    chunks: &mut Vec<(usize, DiffChunk)>,
+    chunks: &mut Vec<DiffChunk>,
     file_text: &String
-) -> Result<(Vec<(usize, usize)>, Vec<DiffLine>), String> {
-    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
-    info!("apply_chunks lines_orig: \n\n{}\n\n", lines_orig.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
-    
-    let mut results_fuzzy_ns = vec![];
-    for (c_idx, chunk) in chunks.iter_mut() {
+) -> Result<(HashMap<usize, usize>, Vec<DiffLine>), String> {
+    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), ..Default::default()}).collect::<Vec<_>>();
+    // info!("apply_chunks lines_orig: \n\n{}\n\n", lines_orig.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
+
+    let mut results_fuzzy_ns = HashMap::new();
+    for chunk in chunks.iter_mut() {
+        if !chunk.apply { continue; }
+        
         validate_chunk(chunk)?;
 
-        let (fuzzy_n_used, lines_orig_new) = apply_chunk_to_text_fuzzy(*c_idx, &lines_orig, &chunk)?;
+        let (fuzzy_n_used, lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk)?;
         lines_orig = lines_orig_new;
-        results_fuzzy_ns.push((fuzzy_n_used, *c_idx));
+        results_fuzzy_ns.insert(chunk.chunk_id, fuzzy_n_used);
     }
     Ok((results_fuzzy_ns, lines_orig))
 }
 
 fn undo_chunks(
-    chunks: &mut Vec<(usize, DiffChunk)>,
+    chunks: &mut Vec<DiffChunk>,
     file_text: &String
-) -> Result<(Vec<(usize, usize)>, Vec<DiffLine>), String> {
-    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
+) -> Result<(HashMap<usize, usize>, Vec<DiffLine>), String> {
+    let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), ..Default::default()}).collect::<Vec<_>>();
 
-    let mut results_fuzzy_ns = vec![];
-    for (c_idx, chunk) in chunks.iter_mut() {
+    let mut results_fuzzy_ns = HashMap::new();
+    for chunk in chunks.iter_mut() {
+        if !chunk.apply { continue; }
+
         validate_chunk(chunk)?;
         mem::swap(&mut chunk.lines_remove, &mut chunk.lines_add);
         
         chunk.line2 = chunk.line1 + chunk.lines_remove.lines().count();
 
-        let (fuzzy_n_used, mut lines_orig_new) = apply_chunk_to_text_fuzzy(*c_idx, &lines_orig, &chunk)?;
+        let (fuzzy_n_used, mut lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk)?;
         lines_orig_new = lines_orig_new.iter_mut().enumerate().map(|(idx, l)|{
             l.line_n = idx + 1;
             return l.clone();
         }).collect::<Vec<_>>();
-        results_fuzzy_ns.push((fuzzy_n_used, *c_idx));
+        results_fuzzy_ns.insert(chunk.chunk_id, fuzzy_n_used);
         lines_orig = lines_orig_new;
     }
     Ok((results_fuzzy_ns, lines_orig))
 }
 
-async fn patch(chunks: &Vec<DiffChunk>, undo: bool) -> Result<Vec<usize>, String> {
+async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<HashMap<usize, usize>, String> {
     let mut chunk_groups = HashMap::new();
-    for (c_idx, c) in chunks.iter().cloned().enumerate() {
-        chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push((c_idx, c));
+    for c in chunks.iter().cloned() {
+        chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
     }
-    let mut results = vec![];
-    for (file_name, chunks) in chunk_groups.iter_mut() {
-        chunks.sort_by_key(|(_c_idx, c)| c.line1);
+    let mut chunk_undo_groups = HashMap::new();
+    for mut c in chunks_undo.iter().cloned() {
+        c.apply = true;
+        chunk_undo_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
+    }
+    
+    let mut results = HashMap::new();
+    for (file_name, chunks_group) in chunk_groups.iter_mut() {
+        chunks_group.sort_by_key(|c| c.line1);
         
-        let file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
+        let mut file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
             format!("couldn't read file: {:?}. Error: {}", file_name, e)
         }).map(|x| x.to_string())?;
         
-        let (fuzzy_ns, new_lines) = if undo {
-            undo_chunks(chunks, &file_text).map_err(|e| e.to_string())?
-        } else {
-            apply_chunks(chunks, &file_text).map_err(|e| e.to_string())?
-        };
+        if let Some(mut chunks_undo_group) = chunk_undo_groups.get(file_name).cloned() {
+            let (_, new_lines) = undo_chunks(&mut chunks_undo_group, &file_text).map_err(|e| e.to_string())?;
+            file_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+        }
+
+        let (fuzzy_ns, new_lines) = apply_chunks(chunks_group, &file_text).map_err(|e| e.to_string())?;
         results.extend(fuzzy_ns);
-        
+
         let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
         write_to_file(&file_name, &new_text).await.map_err(|e| e.to_string())?;
     }
-    results.sort_by_key(|(_fuzzy_n, c_idx)| *c_idx);
-    Ok(results.iter().map(|(fuzzy_n, _)|*fuzzy_n).collect::<Vec<_>>())
+    Ok(results)
+}
+
+#[derive(Serialize)]
+struct DiffResponseItem {
+    chunk_id: usize,
+    fuzzy_n_used: usize,
 }
 
 pub async fn handle_v1_diff_apply(
-    Extension(_global_context): Extension<Arc<ARwLock<GlobalContext>>>,
+    Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<DiffPost>(&body_bytes)
+    let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
     
-    let results = patch(&post.content, false).await
+    let mut chunks_undo = vec![];
+    let applied_state = diff_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+    // undo all chunks that are already applied to file, then re-apply them all + new chunks from post
+    chunks_undo.extend(post.content.iter().filter(|x|applied_state.contains(&x.chunk_id)).cloned());
+    post.content.iter_mut().for_each(|x| {
+        if applied_state.contains(&x.chunk_id) {
+            x.apply = true;
+        }
+    });
+    
+    let results = patch(&post.content, &chunks_undo).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
-    
+
+    let new_state = chunks_undo.iter().map(|x|x.chunk_id).chain(results.keys().cloned()).collect::<HashSet<_>>();
+    info!("new_state: {:?}", new_state);
+    global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state.into_iter().collect::<Vec<_>>());
+
+    let response_items: Vec<DiffResponseItem> = results.into_iter()
+        .map(|(chunk_id, fuzzy_n_used)| DiffResponseItem {
+            chunk_id, fuzzy_n_used,
+        })
+        .collect();
+
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(serde_json::to_string(&results).unwrap()))
+        .body(Body::from(serde_json::to_string(&response_items).unwrap()))
         .unwrap())
 }
 
 pub async fn handle_v1_diff_undo(
-    Extension(_global_context): Extension<Arc<ARwLock<GlobalContext>>>,
+    Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<DiffPost>(&body_bytes)
+    let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+
+    let apply_ids_from_post = post.content.iter().map(|x|x.chunk_id).collect::<Vec<_>>();
     
-    let results = patch(&post.content, true).await
+    let old_state = global_context.read().await.documents_state.diffs_applied_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+    // undo all chunks that are already applied to a file, then, apply them all, excluding the ones from post
+    let undo_chunks = post.content.iter().filter(|x|old_state.contains(&x.chunk_id)).cloned().collect::<Vec<_>>();
+    post.content.iter_mut().for_each(|x| {
+        if old_state.contains(&x.chunk_id) {
+            x.apply = true;
+        }
+        if apply_ids_from_post.contains(&x.chunk_id) {
+            x.apply = false;
+        }
+    });
+    
+    
+    let results = patch(&post.content, &undo_chunks).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
+    let results_vec = results.keys().collect::<Vec<_>>();
+    info!("old_state: {:?}", old_state);
+    let new_state = old_state.iter().filter(|x|!results_vec.contains(&x)).cloned().collect::<Vec<_>>();
+    info!("new_state: {:?}", new_state);
+    global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state);
+
+    let response_items: Vec<DiffResponseItem> = results.into_iter()
+        .map(|(chunk_id, fuzzy_n_used)| DiffResponseItem {
+            chunk_id, fuzzy_n_used,
+        })
+        .collect();
+    
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(serde_json::to_string(&results).unwrap()))
+        .body(Body::from(serde_json::to_string(&response_items).unwrap()))
         .unwrap())
-}
-
-async fn are_diffs_applied(chunks: &Vec<DiffChunk>) -> Result<Vec<&str>, String> {
-    let chunks_enumed = chunks.iter().enumerate().map(|(idx, c)|(idx, c)).collect::<Vec<_>>();
-
-    let mut chunk_groups = HashMap::new();
-    for (c_idx, c) in chunks_enumed {
-        chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push((c_idx, c));
-    }
-
-    let mut results = vec![];
-    for (file_name, chunks) in chunk_groups.iter_mut() {
-        chunks.sort_by_key(|(_, c)| c.line1);
-        
-        let file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
-            format!("couldn't read file: {:?}. Error: {}", file_name, e)
-        }).map(|x| x.to_string())?;
-
-        let lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), overwritten_by_id: None}).collect::<Vec<_>>();
-
-        for (c_idx, c) in chunks {
-            let chunk_lines_remove: Vec<_> = c.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
-            let chunk_lines_add: Vec<_> = c.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(*c_idx)}).collect();
-
-            let fuzzy_n = 5; // TODO: remove me
-            let search_in_window: Vec<_> = lines_orig.iter()
-                .filter(|l|l.overwritten_by_id.is_none() && l.line_n >= (c.line1 as i32 - fuzzy_n as i32) as usize && l.line_n <= (c.line2 as i32 - 1 + fuzzy_n as i32) as usize).collect();
-
-            let matches_add = find_chunk_matches(&chunk_lines_add, &search_in_window);
-            let matches_remove = find_chunk_matches(&chunk_lines_remove, &search_in_window);
-            
-            if matches_add.is_ok() {
-                results.push((c_idx, "true"));
-            }
-            else if matches_remove.is_ok() {
-                results.push((c_idx, "false"));
-            } else {
-                results.push((c_idx, "unknown"));
-            }
-        }
-    }
-    results.sort_by_key(|(c_idx, _)|**c_idx);
-    
-    Ok(results.iter().map(|(_, r)| *r).collect::<Vec<_>>())
-}
-
-pub async fn handle_v1_is_diff_applied(
-    Extension(_global_context): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<DiffPost>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    
-    let results = are_diffs_applied(&post.content).await
-      .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
-    
-    Ok(Response::builder()
-      .status(StatusCode::OK)
-     .body(Body::from(serde_json::to_string(&results).unwrap()))
-     .unwrap())
 }

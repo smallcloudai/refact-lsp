@@ -109,6 +109,8 @@ pub struct DocumentsState {
     pub fs_watcher: Arc<ARwLock<RecommendedWatcher>>,
     pub total_reset: bool,
     pub total_reset_ts: std::time::SystemTime,
+    // (chat_id, message_id), <chunk_id>
+    pub diffs_applied_state: HashMap<(String, String), Vec<usize>>
 }
 
 async fn overwrite_or_create_document(
@@ -144,6 +146,7 @@ impl DocumentsState {
             fs_watcher: Arc::new(ARwLock::new(watcher)),
             total_reset: false,
             total_reset_ts: std::time::SystemTime::now(),
+            diffs_applied_state: HashMap::new(),
         }
     }
 
