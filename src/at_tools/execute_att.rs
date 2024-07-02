@@ -43,6 +43,9 @@ pub async fn run_tools(
 
     let mut context_messages: Vec<ChatMessage> = original_messages.iter().map(|m| m.clone()).collect();
     let mut for_postprocessing: Vec<ContextFile> = vec![];
+    // TODO: postprocess chat_messages as well
+    let mut chat_messages = vec![];
+    let mut diff_chunk_messages = vec![];
 
     for t_call in ass_msg.tool_calls.as_ref().unwrap_or(&vec![]).iter() {
         if let Some(cmd) = at_tools.get(&t_call.function.name) {
@@ -87,6 +90,14 @@ pub async fn run_tools(
                 if let ContextEnum::ContextFile(ref cf) = msg {
                     for_postprocessing.push(cf.clone());
                 }
+                else if let ContextEnum::ChatMessage(ref m) = msg {
+                    if m.role != "tool" {
+                        chat_messages.push(m.clone());
+                    }
+                } 
+                else if let ContextEnum::DiffChunk(ref d) = msg {
+                    diff_chunk_messages.push(d.clone());
+                }
             }
             assert!(have_answer);
         } else {
@@ -113,9 +124,7 @@ pub async fn run_tools(
     ).await;
 
     if !context_file.is_empty() {
-        let json_vec = context_file.iter().map(|p| {
-            json!(p)
-        }).collect::<Vec<Value>>();
+        let json_vec = context_file.iter().map(|p| { json!(p) }).collect::<Vec<Value>>();
 
         let message = ChatMessage::new(
             "context_file".to_string(),
@@ -125,6 +134,22 @@ pub async fn run_tools(
         context_messages.push(message.clone());
         stream_back_to_user.push_in_json(json!(message));
     }
+    
+    if !diff_chunk_messages.is_empty() {
+        let json_vec = diff_chunk_messages.iter().map(|p| { json!(p) }).collect::<Vec<Value>>();
+        let message = ChatMessage::new(
+            "diff".to_string(),
+            serde_json::to_string(&json_vec).unwrap_or("".to_string()),
+        );
+        context_messages.push(message.clone());
+        stream_back_to_user.push_in_json(json!(message));
+    }
+    
+    // for m in chat_messages {
+    //     context_messages.push(m.clone());
+    //     stream_back_to_user.push_in_json(json!(m));
+    // }
+
 
     (context_messages, true)
 }

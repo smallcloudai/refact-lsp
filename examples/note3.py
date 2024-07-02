@@ -91,7 +91,7 @@ async def do_all():
     for step_n in range(DEPTH):
         print("-"*40 + " step %d " % step_n + "-"*40)
         N = 1
-        tools_turn_on = {"remember_how_to_use_tools"} if args.note else {"definition", "references", "compile", "memorize", "file"}
+        tools_turn_on = {"remember_how_to_use_tools"} if args.note else {"definition", "references", "compile", "memorize", "file", "diff"}
         tools = await chat_client.tools_fetch_and_filter(base_url="http://127.0.0.1:8001/v1", tools_turn_on=tools_turn_on)
         assistant_choices = await chat_client.ask_using_http(
             "http://127.0.0.1:8001/v1",
