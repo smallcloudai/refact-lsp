@@ -7,11 +7,10 @@ use hashbrown::HashMap;
 use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 use tokio::sync::RwLock as ARwLock;
-use tracing::info;
 
 use crate::call_validation::{DiffChunk, DiffPost};
 use crate::custom_error::ScratchError;
@@ -243,7 +242,6 @@ pub async fn handle_v1_diff_apply(
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     let new_state = chunks_undo.iter().map(|x|x.chunk_id).chain(results.keys().cloned()).collect::<HashSet<_>>();
-    info!("new_state: {:?}", new_state);
     global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state.into_iter().collect::<Vec<_>>());
 
     let response_items: Vec<DiffResponseItem> = results.into_iter()
@@ -265,9 +263,13 @@ pub async fn handle_v1_diff_undo(
     let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let apply_ids_from_post = post.content.iter().map(|x|x.chunk_id).collect::<Vec<_>>();
-    
+    let apply_ids_from_post = post.content.iter().filter(|x|x.apply).map(|x|x.chunk_id).collect::<Vec<_>>();
     let old_state = global_context.read().await.documents_state.diffs_applied_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+    
+    if !apply_ids_from_post.iter().all(|x|old_state.contains(x)) {
+        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "some chunks are not listed as applied. consult /diff-applied-chunks".to_string()));
+    }
+    
     // undo all chunks that are already applied to a file, then, apply them all, excluding the ones from post
     let undo_chunks = post.content.iter().filter(|x|old_state.contains(&x.chunk_id)).cloned().collect::<Vec<_>>();
     post.content.iter_mut().for_each(|x| {
@@ -279,14 +281,11 @@ pub async fn handle_v1_diff_undo(
         }
     });
     
-    
     let results = patch(&post.content, &undo_chunks).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     let results_vec = results.keys().collect::<Vec<_>>();
-    info!("old_state: {:?}", old_state);
     let new_state = old_state.iter().filter(|x|!results_vec.contains(&x)).cloned().collect::<Vec<_>>();
-    info!("new_state: {:?}", new_state);
     global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state);
 
     let response_items: Vec<DiffResponseItem> = results.into_iter()
@@ -298,5 +297,39 @@ pub async fn handle_v1_diff_undo(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(serde_json::to_string(&response_items).unwrap()))
+        .unwrap())
+}
+
+#[derive(Deserialize)]
+struct DiffAppliedStatePost {
+    chat_id: String,
+    message_id: String,
+}
+
+#[derive(Serialize)]
+struct DiffAppliedStateResponse {
+    applied_chunks: Vec<usize>,
+}
+
+pub async fn handle_v1_diff_applied_chunks(
+    Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let post = serde_json::from_slice::<DiffAppliedStatePost>(&body_bytes)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    
+    let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
+
+    let applied_chunks = diff_state.get(&(post.chat_id, post.message_id))
+        .cloned()
+        .unwrap_or_default();
+
+    let response = DiffAppliedStateResponse {
+        applied_chunks,
+    };
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(serde_json::to_string(&response).unwrap()))
         .unwrap())
 }
