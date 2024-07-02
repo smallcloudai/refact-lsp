@@ -181,7 +181,7 @@ fn undo_chunks(
     Ok((results_fuzzy_ns, lines_orig))
 }
 
-async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<HashMap<usize, usize>, String> {
+async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<(HashMap<String, String>, HashMap<usize, usize>), String> {
     let mut chunk_groups = HashMap::new();
     for c in chunks.iter().cloned() {
         chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
@@ -193,6 +193,8 @@ async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<
     }
 
     let mut results = HashMap::new();
+    let mut texts_after_patch = HashMap::new();
+
     for (file_name, chunks_group) in chunk_groups.iter_mut() {
         chunks_group.sort_by_key(|c| c.line1);
 
@@ -209,10 +211,11 @@ async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<
         results.extend(fuzzy_ns);
 
         let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
-        write_to_file(&file_name, &new_text).await.map_err(|e| e.to_string())?;
+        texts_after_patch.insert(file_name.clone(), new_text);
     }
-    Ok(results)
+    Ok((texts_after_patch, results))
 }
+
 
 #[derive(Serialize)]
 struct DiffResponseItem {
@@ -238,8 +241,12 @@ pub async fn handle_v1_diff_apply(
         }
     });
 
-    let results = patch(&post.content, &chunks_undo).await
+    let (texts_after_patch, results) = patch(&post.content, &chunks_undo).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
+    
+    for (file_name, new_text) in texts_after_patch.iter() {
+        write_to_file(file_name, new_text).await?;
+    }
 
     let new_state = chunks_undo.iter().map(|x|x.chunk_id).chain(results.keys().cloned()).collect::<HashSet<_>>();
     global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state.into_iter().collect::<Vec<_>>());
@@ -282,8 +289,12 @@ pub async fn handle_v1_diff_undo(
         }
     });
     
-    let results = patch(&post.content, &undo_chunks).await
+    let (texts_after_patch, results) = patch(&post.content, &undo_chunks).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
+
+    for (file_name, new_text) in texts_after_patch.iter() {
+        write_to_file(file_name, new_text).await?;
+    }
 
     let new_state = old_state.iter().filter(|x|!apply_ids_from_post.contains(&x)).cloned().collect::<Vec<_>>();
     global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state);

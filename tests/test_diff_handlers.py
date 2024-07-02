@@ -225,18 +225,18 @@ def diff_undo():
 
 
 def test():
-    # with test_file.open("w") as f:
-    #     f.write(file_text)
+    with test_file.open("w") as f:
+        f.write(file_text)
 
     diff_apply()
 
-    # # assert text_after_apply == test_file.read_text()
-    # print(colored("APPLY PASSED", "green"))
-    # 
-    # diff_undo()
-    # 
-    # # assert file_text == test_file.read_text()
-    # print(colored("UNDO PASSED", "green"))
+    assert text_after_apply == test_file.read_text()
+    print(colored("APPLY PASSED", "green"))
+
+    diff_undo()
+
+    assert file_text == test_file.read_text()
+    print(colored("UNDO PASSED", "green"))
 
 
 def main():
