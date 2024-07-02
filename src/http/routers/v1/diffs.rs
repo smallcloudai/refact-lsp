@@ -82,21 +82,21 @@ fn apply_chunk_to_text_fuzzy(
     let chunk_lines_remove: Vec<_> = chunk.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
     let chunk_lines_add: Vec<_> = chunk.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk_id)}).collect();
     let mut new_lines = vec![];
-    
+
     if chunk_lines_remove.is_empty() {
         new_lines.extend(lines_orig[..chunk.line1 - 1].iter().cloned().collect::<Vec<_>>());
         new_lines.extend(chunk_lines_add.iter().cloned().collect::<Vec<_>>());
         new_lines.extend(lines_orig[chunk.line1 - 1..].iter().cloned().collect::<Vec<_>>());
         return Ok((0, new_lines));
     }
-    
+
     let mut fuzzy_n_used = 0;
     for fuzzy_n in 0..=MAX_FUZZY_N {
         let search_from = (chunk.line1 as i32 - fuzzy_n as i32).max(0) as usize;
         let search_till = (chunk.line2 as i32 - 1 + fuzzy_n as i32) as usize;
         let search_in_window: Vec<_> = lines_orig.iter()
             .filter(|l| l.overwritten_by_id.is_none() && l.line_n >= search_from && l.line_n <= search_till).collect();
-        
+
         let matches = find_chunk_matches(&chunk_lines_remove, &search_in_window);
 
         let best_match = match matches {
@@ -145,7 +145,7 @@ fn apply_chunks(
     let mut results_fuzzy_ns = HashMap::new();
     for chunk in chunks.iter_mut() {
         if !chunk.apply { continue; }
-        
+
         validate_chunk(chunk)?;
 
         let (fuzzy_n_used, lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk)?;
@@ -191,15 +191,15 @@ async fn patch(chunks: &Vec<DiffChunk>, chunks_undo: &Vec<DiffChunk>) -> Result<
         c.apply = true;
         chunk_undo_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
     }
-    
+
     let mut results = HashMap::new();
     for (file_name, chunks_group) in chunk_groups.iter_mut() {
         chunks_group.sort_by_key(|c| c.line1);
-        
+
         let mut file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
             format!("couldn't read file: {:?}. Error: {}", file_name, e)
         }).map(|x| x.to_string())?;
-        
+
         if let Some(mut chunks_undo_group) = chunk_undo_groups.get(file_name).cloned() {
             let (_, new_lines) = undo_chunks(&mut chunks_undo_group, &file_text).map_err(|e| e.to_string())?;
             file_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
@@ -227,7 +227,7 @@ pub async fn handle_v1_diff_apply(
     let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
-    
+
     let mut chunks_undo = vec![];
     let applied_state = diff_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
     // undo all chunks that are already applied to file, then re-apply them all + new chunks from post
@@ -237,7 +237,7 @@ pub async fn handle_v1_diff_apply(
             x.apply = true;
         }
     });
-    
+
     let results = patch(&post.content, &chunks_undo).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
@@ -265,6 +265,7 @@ pub async fn handle_v1_diff_undo(
 
     let apply_ids_from_post = post.content.iter().filter(|x|x.apply).map(|x|x.chunk_id).collect::<Vec<_>>();
     let old_state = global_context.read().await.documents_state.diffs_applied_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+
     
     if !apply_ids_from_post.iter().all(|x|old_state.contains(x)) {
         return Err(ScratchError::new(StatusCode::BAD_REQUEST, "some chunks are not listed as applied. consult /diff-applied-chunks".to_string()));
@@ -284,8 +285,7 @@ pub async fn handle_v1_diff_undo(
     let results = patch(&post.content, &undo_chunks).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
-    let results_vec = results.keys().collect::<Vec<_>>();
-    let new_state = old_state.iter().filter(|x|!results_vec.contains(&x)).cloned().collect::<Vec<_>>();
+    let new_state = old_state.iter().filter(|x|!apply_ids_from_post.contains(&x)).cloned().collect::<Vec<_>>();
     global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state);
 
     let response_items: Vec<DiffResponseItem> = results.into_iter()
@@ -293,7 +293,7 @@ pub async fn handle_v1_diff_undo(
             chunk_id, fuzzy_n_used,
         })
         .collect();
-    
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(serde_json::to_string(&response_items).unwrap()))

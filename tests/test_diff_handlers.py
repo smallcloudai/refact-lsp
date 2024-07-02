@@ -171,7 +171,7 @@ payload = {
             "line2": 10,
             "lines_remove": orig1,
             "lines_add": i1,
-            "apply": False,
+            "apply": True,
             "chunk_id": 2,
         },
         {
@@ -181,7 +181,7 @@ payload = {
             "line2": 25,
             "lines_remove": orig2,
             "lines_add": i2,
-            "apply": False,
+            "apply": True,
             "chunk_id": 3,
         },
         {
@@ -191,7 +191,7 @@ payload = {
             "line2": 40,
             "lines_remove": orig3,
             "lines_add": i3,
-            "apply": False,
+            "apply": True,
             "chunk_id": 4,
         },
         {
@@ -201,7 +201,7 @@ payload = {
             "line2": 43,
             "lines_remove": orig4,
             "lines_add": i4,
-            "apply": False,
+            "apply": True,
             "chunk_id": 5,
         },
     ]
@@ -228,12 +228,12 @@ def test():
     # with test_file.open("w") as f:
     #     f.write(file_text)
 
-    # diff_apply()
+    diff_apply()
 
     # # assert text_after_apply == test_file.read_text()
     # print(colored("APPLY PASSED", "green"))
     # 
-    diff_undo()
+    # diff_undo()
     # 
     # # assert file_text == test_file.read_text()
     # print(colored("UNDO PASSED", "green"))

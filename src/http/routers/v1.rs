@@ -94,5 +94,5 @@ pub fn make_v1_router() -> Router {
     
         .route("/diff-apply", telemetry_post!(handle_v1_diff_apply))
         .route("/diff-undo", telemetry_post!(handle_v1_diff_undo))
-        .route("/diff-applied-chunks", telemetry_get!(handle_v1_diff_applied_chunks))
+        .route("/diff-applied-chunks", telemetry_post!(handle_v1_diff_applied_chunks))
 }
