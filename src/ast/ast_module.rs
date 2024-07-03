@@ -82,7 +82,10 @@ impl AstModule {
             self.ast_index_service.lock().await.ast_indexer_enqueue_files(AstEvent::add_docs(chunk.to_vec()), force).await;
         }
         if documents.is_empty() {
-            self.status.lock().await.state = "done".to_string();
+            self.ast_index_service.lock().await.ast_indexer_enqueue_files(
+                AstEvent { docs: vec![], typ: AstEventType::AddDummy, posted_ts: std::time::SystemTime::now() },
+                force,
+            ).await;
         }
     }
 
