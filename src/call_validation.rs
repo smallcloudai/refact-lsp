@@ -1,5 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::hash::Hash;
 use axum::http::StatusCode;
 use ropey::Rope;
 use uuid::Uuid;
@@ -287,7 +288,7 @@ pub struct ChatPost {
     pub chat_id: String,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Hash)]
 pub struct DiffChunk {
     pub file_name: String,
     pub file_action: String,
@@ -295,15 +296,9 @@ pub struct DiffChunk {
     pub line2: usize,
     pub lines_remove: String,
     pub lines_add: String,
-    #[serde(default, skip_serializing)]
-    pub apply: bool,
-    #[serde(skip_serializing)]
+    // for internal use
+    #[serde(skip_serializing, default)]
     pub chunk_id: usize,
-}
-
-#[derive(Deserialize)]
-pub struct DiffPost {
-    pub chat_id: String,
-    pub message_id: String,
-    pub content: Vec<DiffChunk>,
+    #[serde(skip_serializing, default)]
+    pub apply: bool,
 }

@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use hashbrown::HashMap;
 use std::sync::Arc;
 
 use axum::Extension;
@@ -7,7 +8,7 @@ use hyper::Body;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock as ARwLock;
 
-use crate::call_validation::DiffPost;
+use crate::call_validation::DiffChunk;
 use crate::custom_error::ScratchError;
 use crate::diffs::{patch, write_to_file};
 use crate::global_context::GlobalContext;
@@ -16,10 +17,55 @@ use crate::global_context::GlobalContext;
 const MAX_FUZZY_N: usize = 10;
 
 
+#[derive(Deserialize)]
+pub struct DiffPost {
+    pub apply: Vec<bool>,
+    pub chunks: Vec<DiffChunk>,
+    #[serde(skip_serializing, default)]
+    pub id: u64
+}
+
+impl DiffPost {
+    pub fn set_id(&mut self) {
+        let mut hasher = DefaultHasher::new();
+        self.chunks.hash(&mut hasher);
+        self.id = hasher.finish();
+    }
+}
+
 #[derive(Serialize)]
 struct DiffResponseItem {
     chunk_id: usize,
     fuzzy_n_used: usize,
+}
+
+#[derive(Serialize)]
+struct HandleDiffResponse {
+    fuzzy_results: Vec<DiffResponseItem>,
+    state: Vec<usize>,
+}
+
+fn results_into_state_vector(results: &HashMap<usize, Option<usize>>, total: usize) -> Vec<usize> {
+    let mut state_vector = vec![0; total];
+    for (k, v) in results {
+        if *k < total {
+            state_vector[*k] = if v.is_some() { 1 } else { 2 };
+        }
+    }
+    state_vector
+}
+
+fn validate_post(post: &DiffPost) -> Result<(), ScratchError> {
+    if post.chunks.is_empty() {
+        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "`chunks` shouldn't be empty".to_string()));
+    }
+    if post.chunks.len() != post.apply.len() {
+        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "`chunks` and `apply` arrays are not of the same length".to_string()));
+    }
+    if post.apply.iter().all(|&x|x == false) {
+        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "`apply` array should contain at least one `true` value".to_string()));
+    }
+    Ok(())
 }
 
 pub async fn handle_v1_diff_apply(
@@ -28,37 +74,51 @@ pub async fn handle_v1_diff_apply(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
+    post.set_id();
 
-    let mut chunks_undo = vec![];
-    let applied_state = diff_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+    validate_post(&post)?;
+
+    for ((c_idx, c), a) in post.chunks.iter_mut().enumerate().zip(post.apply.iter()) {
+        c.chunk_id = c_idx;
+        c.apply = *a;
+    }
+
+    let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
+    let applied_state = diff_state.get(&post.id).map(|x|x.clone()).unwrap_or_default();
     // undo all chunks that are already applied to file, then re-apply them all + new chunks from post
-    chunks_undo.extend(post.content.iter().filter(|x|applied_state.contains(&x.chunk_id)).cloned());
-    post.content.iter_mut().for_each(|x| {
-        if applied_state.contains(&x.chunk_id) {
+    let chunks_undo = post.chunks.iter().filter(|x|applied_state.get(x.chunk_id) == Some(&1)).cloned().collect::<Vec<_>>();
+    
+    post.chunks.iter_mut().for_each(|x| {
+        if applied_state.get(x.chunk_id) == Some(&1) {
             x.apply = true;
         }
     });
 
-    let (texts_after_patch, results) = patch(&post.content, &chunks_undo, MAX_FUZZY_N).await
+    let (texts_after_patch, results) = patch(&post.chunks, &chunks_undo, MAX_FUZZY_N).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
     
     for (file_name, new_text) in texts_after_patch.iter() {
         write_to_file(file_name, new_text).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
     }
 
-    let new_state = chunks_undo.iter().map(|x|x.chunk_id).chain(results.keys().cloned()).collect::<HashSet<_>>();
-    global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state.into_iter().collect::<Vec<_>>());
-
-    let response_items: Vec<DiffResponseItem> = results.into_iter()
+    let new_state = results_into_state_vector(&results, post.chunks.len());
+    global_context.write().await.documents_state.diffs_applied_state.insert(post.id, new_state.clone());
+    
+    let fuzzy_results: Vec<DiffResponseItem> = results.iter().filter(|x|x.1.is_some())
         .map(|(chunk_id, fuzzy_n_used)| DiffResponseItem {
-            chunk_id, fuzzy_n_used,
+            chunk_id: chunk_id.clone(),
+            fuzzy_n_used: fuzzy_n_used.unwrap()
         })
         .collect();
+    
+    let response = HandleDiffResponse {
+        fuzzy_results,
+        state: new_state,
+    };
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(serde_json::to_string(&response_items).unwrap()))
+        .body(Body::from(serde_json::to_string_pretty(&response).unwrap()))
         .unwrap())
 }
 
@@ -68,19 +128,24 @@ pub async fn handle_v1_diff_undo(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let mut post = serde_json::from_slice::<DiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    post.set_id();
 
-    let apply_ids_from_post = post.content.iter().filter(|x|x.apply).map(|x|x.chunk_id).collect::<Vec<_>>();
-    let old_state = global_context.read().await.documents_state.diffs_applied_state.get(&(post.chat_id.clone(), post.message_id.clone())).map(|x|x.clone()).unwrap_or_default();
+    validate_post(&post)?;
 
-    
-    if !apply_ids_from_post.iter().all(|x|old_state.contains(x)) {
-        return Err(ScratchError::new(StatusCode::BAD_REQUEST, "some chunks are not listed as applied. consult /diff-applied-chunks".to_string()));
+    for ((c_idx, c), a) in post.chunks.iter_mut().enumerate().zip(post.apply.iter()) {
+        c.chunk_id = c_idx;
+        c.apply = *a;
     }
+
+    let apply_ids_from_post = post.chunks.iter().filter(|x|x.apply).map(|x|x.chunk_id).collect::<Vec<_>>();
+    
+    let applied_state = global_context.read().await.documents_state.diffs_applied_state.get(&post.id).map(|x|x.clone()).unwrap_or_default();
     
     // undo all chunks that are already applied to a file, then, apply them all, excluding the ones from post
-    let undo_chunks = post.content.iter().filter(|x|old_state.contains(&x.chunk_id)).cloned().collect::<Vec<_>>();
-    post.content.iter_mut().for_each(|x| {
-        if old_state.contains(&x.chunk_id) {
+    let undo_chunks = post.chunks.iter().filter(|x|applied_state.get(x.chunk_id) == Some(&1)).cloned().collect::<Vec<_>>();
+    
+    post.chunks.iter_mut().for_each(|x| {
+        if applied_state.get(x.chunk_id) == Some(&1) {
             x.apply = true;
         }
         if apply_ids_from_post.contains(&x.chunk_id) {
@@ -88,54 +153,72 @@ pub async fn handle_v1_diff_undo(
         }
     });
     
-    let (texts_after_patch, results) = patch(&post.content, &undo_chunks, MAX_FUZZY_N).await
+    let (texts_after_patch, results) = patch(&post.chunks, &undo_chunks, MAX_FUZZY_N).await
         .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     for (file_name, new_text) in texts_after_patch.iter() {
         write_to_file(file_name, new_text).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
     }
 
-    let new_state = old_state.iter().filter(|x|!apply_ids_from_post.contains(&x)).cloned().collect::<Vec<_>>();
-    global_context.write().await.documents_state.diffs_applied_state.insert((post.chat_id, post.message_id), new_state);
+    let new_state = results_into_state_vector(&results, post.chunks.len());
+    global_context.write().await.documents_state.diffs_applied_state.insert(post.id, new_state.clone());
 
-    let response_items: Vec<DiffResponseItem> = results.into_iter()
+    let fuzzy_results: Vec<DiffResponseItem> = results.iter().filter(|x|x.1.is_some())
         .map(|(chunk_id, fuzzy_n_used)| DiffResponseItem {
-            chunk_id, fuzzy_n_used,
+            chunk_id: chunk_id.clone(),
+            fuzzy_n_used: fuzzy_n_used.unwrap()
         })
         .collect();
 
+    let response = HandleDiffResponse {
+        fuzzy_results,
+        state: new_state,
+    };
+    
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(serde_json::to_string(&response_items).unwrap()))
+        .body(Body::from(serde_json::to_string_pretty(&response).unwrap()))
         .unwrap())
 }
 
 #[derive(Deserialize)]
 struct DiffAppliedStatePost {
-    chat_id: String,
-    message_id: String,
+    pub chunks: Vec<DiffChunk>,
+    #[serde(skip_serializing, default)]
+    pub id: u64
+}
+
+impl DiffAppliedStatePost {
+    pub fn set_id(&mut self) {
+        let mut hasher = DefaultHasher::new();
+        self.chunks.hash(&mut hasher);
+        self.id = hasher.finish();
+    }
 }
 
 #[derive(Serialize)]
 struct DiffAppliedStateResponse {
-    applied_chunks: Vec<usize>,
+    id: u64,
+    state: Vec<usize>,
 }
 
 pub async fn handle_v1_diff_applied_chunks(
     Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<DiffAppliedStatePost>(&body_bytes)
+    let mut post = serde_json::from_slice::<DiffAppliedStatePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    post.set_id();
     
     let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
 
-    let applied_chunks = diff_state.get(&(post.chat_id, post.message_id))
+    let state = diff_state.get(&post.id)
         .cloned()
         .unwrap_or_default();
 
     let response = DiffAppliedStateResponse {
-        applied_chunks,
+        id: post.id,
+        state,
     };
 
     Ok(Response::builder()

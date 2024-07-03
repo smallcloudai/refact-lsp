@@ -110,7 +110,7 @@ pub struct DocumentsState {
     pub total_reset: bool,
     pub total_reset_ts: std::time::SystemTime,
     // (chat_id, message_id), <chunk_id>
-    pub diffs_applied_state: HashMap<(String, String), Vec<usize>>
+    pub diffs_applied_state: HashMap<u64, Vec<usize>>
 }
 
 async fn overwrite_or_create_document(

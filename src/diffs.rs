@@ -67,7 +67,7 @@ fn apply_chunk_to_text_fuzzy(
     lines_orig: &Vec<DiffLine>,
     chunk: &DiffChunk,
     max_fuzzy_n: usize,
-) -> Result<(usize, Vec<DiffLine>), String> {
+) -> (Option<usize>, Vec<DiffLine>) {
     let chunk_lines_remove: Vec<_> = chunk.lines_remove.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: None}).collect();
     let chunk_lines_add: Vec<_> = chunk.lines_add.lines().map(|l| DiffLine { line_n: 0, text: l.to_string(), overwritten_by_id: Some(chunk_id)}).collect();
     let mut new_lines = vec![];
@@ -76,7 +76,7 @@ fn apply_chunk_to_text_fuzzy(
         new_lines.extend(lines_orig[..chunk.line1 - 1].iter().cloned().collect::<Vec<_>>());
         new_lines.extend(chunk_lines_add.iter().cloned().collect::<Vec<_>>());
         new_lines.extend(lines_orig[chunk.line1 - 1..].iter().cloned().collect::<Vec<_>>());
-        return Ok((0, new_lines));
+        return (Some(0), new_lines);
     }
 
     let mut fuzzy_n_used = 0;
@@ -93,9 +93,9 @@ fn apply_chunk_to_text_fuzzy(
                 fuzzy_n_used = fuzzy_n;
                 m[0].clone()
             },
-            Err(e) => {
+            Err(_) => {
                 if fuzzy_n >= max_fuzzy_n {
-                    return Err(e)
+                    return (None, new_lines);
                 }
                 continue;
             }
@@ -112,9 +112,9 @@ fn apply_chunk_to_text_fuzzy(
         break;
     }
     if new_lines.is_empty() {
-        return Err("No streaks found".to_string());
+        return (None, new_lines)
     }
-    Ok((fuzzy_n_used, new_lines))
+    (Some(fuzzy_n_used), new_lines)
 }
 
 fn validate_chunk(chunk: &DiffChunk) -> Result<(), String> {
@@ -128,7 +128,7 @@ fn apply_chunks(
     chunks: &mut Vec<DiffChunk>,
     file_text: &String,
     max_fuzzy_n: usize,
-) -> Result<(HashMap<usize, usize>, Vec<DiffLine>), String> {
+) -> Result<(HashMap<usize, Option<usize>>, Vec<DiffLine>), String> {
     let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), ..Default::default()}).collect::<Vec<_>>();
     // info!("apply_chunks lines_orig: \n\n{}\n\n", lines_orig.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join("\n"));
 
@@ -138,8 +138,10 @@ fn apply_chunks(
 
         validate_chunk(chunk)?;
 
-        let (fuzzy_n_used, lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk, max_fuzzy_n)?;
-        lines_orig = lines_orig_new;
+        let (fuzzy_n_used, lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk, max_fuzzy_n);
+        if fuzzy_n_used.is_some() {
+            lines_orig = lines_orig_new;
+        }
         results_fuzzy_ns.insert(chunk.chunk_id, fuzzy_n_used);
     }
     Ok((results_fuzzy_ns, lines_orig))
@@ -149,7 +151,7 @@ fn undo_chunks(
     chunks: &mut Vec<DiffChunk>,
     file_text: &String,
     max_fuzzy_n: usize,
-) -> Result<(HashMap<usize, usize>, Vec<DiffLine>), String> {
+) -> Result<(HashMap<usize, Option<usize>>, Vec<DiffLine>), String> {
     let mut lines_orig = file_text.lines().enumerate().map(|(line_n, l)| DiffLine { line_n: line_n + 1, text: l.to_string(), ..Default::default()}).collect::<Vec<_>>();
 
     let mut results_fuzzy_ns = HashMap::new();
@@ -161,13 +163,15 @@ fn undo_chunks(
 
         chunk.line2 = chunk.line1 + chunk.lines_remove.lines().count();
 
-        let (fuzzy_n_used, mut lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk, max_fuzzy_n)?;
-        lines_orig_new = lines_orig_new.iter_mut().enumerate().map(|(idx, l)|{
-            l.line_n = idx + 1;
-            return l.clone();
-        }).collect::<Vec<_>>();
+        let (fuzzy_n_used, mut lines_orig_new) = apply_chunk_to_text_fuzzy(chunk.chunk_id, &lines_orig, &chunk, max_fuzzy_n);
+        if fuzzy_n_used.is_some() {
+            lines_orig_new = lines_orig_new.iter_mut().enumerate().map(|(idx, l)| {
+                l.line_n = idx + 1;
+                return l.clone();
+            }).collect::<Vec<_>>();
+            lines_orig = lines_orig_new;
+        }
         results_fuzzy_ns.insert(chunk.chunk_id, fuzzy_n_used);
-        lines_orig = lines_orig_new;
     }
     Ok((results_fuzzy_ns, lines_orig))
 }
@@ -176,7 +180,7 @@ pub async fn patch(
     chunks: &Vec<DiffChunk>, 
     chunks_undo: &Vec<DiffChunk>,
     max_fuzzy_n: usize,
-) -> Result<(HashMap<String, String>, HashMap<usize, usize>), String> {
+) -> Result<(HashMap<String, String>, HashMap<usize, Option<usize>>), String> {
     let mut chunk_groups = HashMap::new();
     for c in chunks.iter().cloned() {
         chunk_groups.entry(c.file_name.clone()).or_insert(Vec::new()).push(c);
