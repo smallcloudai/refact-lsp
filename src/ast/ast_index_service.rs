@@ -192,7 +192,11 @@ async fn ast_indexer_thread(
                 locked_status.files_total = files_total;
                 locked_status.ast_index_files_total = ast_index_files_total;
                 locked_status.ast_index_symbols_total = ast_index_symbols_total;
-                locked_status.state = "parsing".to_string();
+                locked_status.state = if left_docs_count > 0 {
+                    "parsing".to_string()
+                } else {
+                    "done".to_string()
+                }
             }
             let gcx = match gcx_weak.upgrade() {
                 Some(x) => x,
