@@ -1,5 +1,7 @@
 import json
 import random
+from copy import copy
+
 import requests
 
 from pathlib import Path
@@ -11,234 +13,199 @@ test_file = current_dir / "test_file.rs.temp"
 
 
 file_text = """
-pub async fn execute_at_file(ccx: &mut AtCommandsContext, file_path: String) -> Result<ContextFile, String> {
-    let candidates = parameter_repair_candidates(&file_path, ccx).await;
-    if candidates.is_empty() {
-// my end0
-        info!("parameter {:?} is uncorrectable :/", &file_path);
-        return Err(format!("parameter {:?} is uncorrectable :/", &file_path));
-    }
-    // my start1
-    let mut file_path = candidates.get(0).unwrap().clone();
-    // my end1
-    let mut line1 = 0;
-    let mut line2 = 0;
+class Frog:
+    def __init__(self, x, y, vx, vy):
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
 
-    let colon_kind_mb = colon_lines_range_from_arg(&mut file_path);
+    def bounce_off_banks(self, pond_width, pond_height):
+        if self.x < 0:
+            self.vx = np.abs(self.vx)
+        elif self.x > pond_width:
+            self.vx = -np.abs(self.vx)
+        if self.y < 0:
+            self.vy = np.abs(self.vy)
+        elif self.y > pond_height:
+            self.vy = -np.abs(self.vy)
 
-    let gradient_type = gradient_type_from_range_kind(&colon_kind_mb);
-
-    let cpath = crate::files_correction::canonical_path(&file_path);
-    // my start2
-    let file_text = get_file_text_from_memory_or_disk(ccx.global_context.clone(), &cpath).await?;
-    if let Some(colon) = &colon_kind_mb {
-        line1 = colon.line1;
-        line2 = colon.line2;
-    }
-    // my end2
-    if line1 == 0 && line2 == 0 {
-        line2 = file_text.lines().count()
-    }
-    // my start3
-    Ok(ContextFile {
-        file_name: file_path.clone(),
-        file_content: file_text,
-        line1,
-        line2,
-        symbol: Uuid::default(),
-        gradient_type,
-        usefulness: 100.0,
-        is_body_important: false
-    })
-    // my end3
-    // my start4
-}
-    // my end4
+    def jump(self, pond_width, pond_height):
+        self.x += self.vx * DT
+        self.y += self.vy * DT
+        self.bounce_off_banks(pond_width, pond_height)
+        self.x = np.clip(self.x, 0, pond_width)
+        self.y = np.clip(self.y, 0, pond_height)
 """[1:-1]
 
-i0 = """
-// insert0
-"""[1:]
 
-orig0 = """
-pub async fn execute_at_file(ccx: &mut AtCommandsContext, file_path: String) -> Result<ContextFile, String> {
-    let candidates = parameter_repair_candidates(&file_path, ccx).await;
-    if candidates.is_empty() {
-"""[1:]
+def diff_apply(payload):
+    url = "http://localhost:8001/v1/diff-apply"
+    response = requests.post(url, data=json.dumps(payload))
+    assert response.status_code == 200
+    return json.loads(response.text)
 
 
-i1 = ""
-
-orig1 = """
-    let mut file_path = candidates.get(0).unwrap().clone();
-"""[1:]
-
-i2 = """
-// insert2
-// insert2
-// insert2
-"""[1:]
-
-orig2 = """
-    let file_text = get_file_text_from_memory_or_disk(ccx.global_context.clone(), &cpath).await?;
-    if let Some(colon) = &colon_kind_mb {
-        line1 = colon.line1;
-        line2 = colon.line2;
-    }
-"""[1:]
+def diff_undo(payload):
+    url = "http://localhost:8001/v1/diff-undo"
+    response = requests.post(url, data=json.dumps(payload))
+    assert response.status_code == 200
+    return json.loads(response.text)
 
 
-i3 = """
-// insert3
-// insert3
-// insert3
-// insert3
-"""[1:]
-
-orig3 = """
-    Ok(ContextFile {
-        file_name: file_path.clone(),
-        file_content: file_text,
-        line1,
-        line2,
-        symbol: Uuid::default(),
-        gradient_type,
-        usefulness: 100.0,
-        is_body_important: false
-    })
-"""[1:]
-
-i4 = "//insert4\n"
-
-orig4 = """
-}
-"""[1:]
-
-
-text_after_apply = """
-// insert0
-// my end0
-        info!("parameter {:?} is uncorrectable :/", &file_path);
-        return Err(format!("parameter {:?} is uncorrectable :/", &file_path));
-    }
-    // my start1
-    // my end1
-    let mut line1 = 0;
-    let mut line2 = 0;
-
-    let colon_kind_mb = colon_lines_range_from_arg(&mut file_path);
-
-    let gradient_type = gradient_type_from_range_kind(&colon_kind_mb);
-
-    let cpath = crate::files_correction::canonical_path(&file_path);
-    // my start2
-// insert2
-// insert2
-// insert2
-    // my end2
-    if line1 == 0 && line2 == 0 {
-        line2 = file_text.lines().count()
-    }
-    // my start3
-// insert3
-// insert3
-// insert3
-// insert3
-    // my end3
-    // my start4
-//insert4
-    // my end4
-"""[1:-1]
-
-payload = {
-    "apply": [True, True, True, True, True],
+payload1 = {
+    "apply": [True, True, True, True],
     "chunks": [
         {
             "file_name": str(test_file),
             "file_action": "edit",
             "line1": 1,
             "line2": 4,
-            "lines_remove": orig0,
-            "lines_add": i0
+            "lines_remove": "\n".join(list(file_text.splitlines())[:6]),
+            "lines_add": "# chunk0\n# chunk0\n"
         },
         {
             "file_name": str(test_file),
             "file_action": "edit",
-            "line1": 9,
-            "line2": 10,
-            "lines_remove": orig1,
-            "lines_add": i1
+            "line1": 8,
+            "line2": 17,
+            "lines_remove": "\n".join(list(file_text.splitlines())[7:16]),
+            "lines_add": "# chunk1\n# chunk1\n"
         },
         {
             "file_name": str(test_file),
             "file_action": "edit",
-            "line1": 20,
-            "line2": 25,
-            "lines_remove": orig2,
-            "lines_add": i2
+            "line1": 18,
+            "line2": 20,
+            "lines_remove": "\n".join(list(file_text.splitlines())[17:23]),
+            "lines_add": "# chunk2\n# chunk2\n"
         },
         {
             "file_name": str(test_file),
             "file_action": "edit",
-            "line1": 30,
-            "line2": 40,
-            "lines_remove": orig3,
-            "lines_add": i3
-        },
-        {
-            "file_name": str(test_file),
-            "file_action": "edit",
-            "line1": 42,
-            "line2": 43,
-            "lines_remove": orig4,
-            "lines_add": i4
+            "line1": 18,
+            "line2": 20,
+            "lines_remove": "some random text",
+            "lines_add": "# chunk3\n# chunk3\n"
         },
     ]
 }
 
 
-def diff_apply():
-    url = "http://localhost:8001/v1/diff-apply"
-    response = requests.post(url, data=json.dumps(payload))
-    print(f"DIFF APPLY REQUEST: {response.status_code}: {response.text}")
-    assert response.status_code == 200
+def test1():
+    # applying all chunks all-together and then un-applying them all by once
+
+    must_look_like = "# chunk0\n# chunk0\n\n# chunk1\n# chunk1\n\n# chunk2\n# chunk2"
+    payload = copy(payload1)
+
+    with test_file.open("w") as f:
+        f.write(file_text)
+
+    resp = diff_apply(payload)
+
+    assert resp["state"] == [1, 1, 1, 2]
+    fuzzy_results = resp["fuzzy_results"]
+    fuzzy_results.sort(key=lambda x: x['chunk_id'])
+    assert [f["fuzzy_n_used"] for f in fuzzy_results] == [3, 0, 4]
+
+    assert test_file.read_text() == must_look_like
+
+    resp = diff_undo(payload)
+
+    assert resp['state'] == [0, 0, 0, 0]
+    assert resp['fuzzy_results'] == []
+
+    assert test_file.read_text() == file_text
+
+    print(colored("test1 PASSED", "green"))
 
 
-def diff_undo():
-    url = "http://localhost:8001/v1/diff-undo"
-    response = requests.post(url, data=json.dumps(payload))
-    print(f"DIFF UNDO REQUEST: {response.status_code}: {response.text}")
-    assert response.status_code == 200
+def test2():
+    # applying and un-applying chunks one by one
+
+    payload = copy(payload1)
+
+    for i in range(len(payload["chunks"])):
+        vec = [i == j for j in range(len(payload["chunks"]))]
+        payload["apply"] = vec
+
+        with test_file.open("w") as f:
+            f.write(file_text)
+
+        resp = diff_apply(payload)
+        if i != 3:
+            assert resp["state"] == vec
+        else:
+            assert resp["state"] == [0, 0, 0, 2]
+
+        resp = diff_undo(payload)
+        assert resp['state'] == [0, 0, 0, 0]
+        assert test_file.read_text() == file_text
+
+    print(colored("test2 PASSED", "green"))
 
 
-def diff_applied_chunks():
-    url = "http://localhost:8001/v1/diff-applied-chunks"
-    p = payload
-    del p['apply']
-    response = requests.post(url, data=json.dumps(p))
-    print(f"DIFF APPLIED CHUNKS: {response.status_code}: {response.text}")
-    assert response.status_code == 200
+def test3():
+    # applying all and un-applying one by one
+
+    payload = copy(payload1)
+
+    with test_file.open("w") as f:
+        f.write(file_text)
+
+    resp = diff_apply(payload)
+    assert resp["state"] == [1, 1, 1, 2]
+
+    must_look_like = "# chunk0\n# chunk0\n\n# chunk1\n# chunk1\n\n# chunk2\n# chunk2"
+    assert test_file.read_text() == must_look_like
+
+    # Undo chunks one by one
+    for i in range(len(payload["chunks"])):
+        undo_payload = copy(payload)
+        undo_payload["apply"] = [i == j for j in range(len(payload["chunks"]))]
+
+        diff_undo(undo_payload)
+
+    assert test_file.read_text() == file_text
+
+    print(colored("test3 PASSED", "green"))
 
 
-def test():
-    # diff_applied_chunks()
+def test4():
+    # applying and un-applying a random amount of chunks 100 times
 
-    # with test_file.open("w") as f:
-    #     f.write(file_text)
+    payload = copy(payload1)
+    with test_file.open("w") as f:
+        f.write(file_text)
 
-    # diff_apply()
+    for iter_idx in range(100):
+        chunks_n_to_apply = random.randint(1, len(payload["chunks"]))
+        chunks_ids_to_apply = random.sample(list(range(len(payload['chunks']))), chunks_n_to_apply)
+        chunks_ids_to_apply.sort()
 
-    # assert text_after_apply == test_file.read_text()
-    # print(colored("APPLY PASSED", "green"))
-    #
-    diff_undo()
-    #
-    # assert file_text == test_file.read_text()
-    # print(colored("UNDO PASSED", "green"))
+        vec = [i in chunks_ids_to_apply for i in range(len(payload["chunks"]))]
+        payload["apply"] = vec
+        err_msg = f"iter_idx={iter_idx}, chunks_ids_to_apply={chunks_ids_to_apply}, vec={vec}"
+
+        resp = diff_apply(payload)
+        if 3 not in chunks_ids_to_apply:
+            assert resp["state"] == vec, err_msg
+        else:
+            assert resp["state"] == [*vec[:-1], 2], err_msg
+
+        resp = diff_undo(payload)
+        assert resp['state'] == [0, 0, 0, 0]
+        
+        assert test_file.read_text() == file_text
+
+    print(colored("test4 PASSED", "green"))
 
 
 def main():
-    test()
+    test1()
+    test2()
+    test3()
+    test4()
 
 
 if __name__ == "__main__":
