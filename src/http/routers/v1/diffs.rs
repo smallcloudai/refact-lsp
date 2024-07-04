@@ -1,4 +1,5 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::PathBuf;
 use hashbrown::HashMap;
 use std::sync::Arc;
 
@@ -7,7 +8,8 @@ use axum::http::{Response, StatusCode};
 use hyper::Body;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock as ARwLock;
-
+use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_commands::at_file::{at_file_repair_candidates, file_repair_candidates};
 use crate::call_validation::DiffChunk;
 use crate::custom_error::ScratchError;
 use crate::diffs::{patch, write_to_file};
@@ -68,6 +70,36 @@ fn validate_post(post: &DiffPost) -> Result<(), ScratchError> {
     Ok(())
 }
 
+async fn init_post_chunks(post: &mut DiffPost, global_context: Arc<ARwLock<GlobalContext>>) -> Result<(), ScratchError> {
+    for ((c_idx, c), a) in post.chunks.iter_mut().enumerate().zip(post.apply.iter()) {
+        c.chunk_id = c_idx;
+        c.apply = *a;
+        
+        let file_path = PathBuf::from(&c.file_name);
+        if !file_path.is_file() {
+            let candidates = file_repair_candidates(&c.file_name, global_context.clone(), 5, false).await;
+            let fuzzy_candidates = file_repair_candidates(&c.file_name, global_context.clone(), 5, true).await;
+
+            if candidates.len() > 1 {
+                return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is ambiguous.\nIt could be interpreted as:\n{}", &c.file_name, candidates.join("\n"))));
+            }
+            if candidates.is_empty() {
+                return if !fuzzy_candidates.is_empty() {
+                    Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found.\nHowever, there are similar paths:\n{}", &c.file_name, fuzzy_candidates.join("\n"))))
+                } else {
+                    Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found", &c.file_name)))
+                }
+            }
+            let candidate = candidates.get(0).unwrap();
+            if !PathBuf::from(&candidate).is_file() {
+                return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found.\nHowever, there are similar paths:\n{}", &c.file_name, fuzzy_candidates.join("\n"))));
+            }
+            c.file_name = candidate.clone();
+        }
+    }
+    Ok(())
+}
+
 pub async fn handle_v1_diff_apply(
     Extension(global_context): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
@@ -77,11 +109,7 @@ pub async fn handle_v1_diff_apply(
     post.set_id();
 
     validate_post(&post)?;
-
-    for ((c_idx, c), a) in post.chunks.iter_mut().enumerate().zip(post.apply.iter()) {
-        c.chunk_id = c_idx;
-        c.apply = *a;
-    }
+    init_post_chunks(&mut post, global_context.clone()).await?;
 
     let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
     let applied_state = diff_state.get(&post.id).map(|x|x.clone()).unwrap_or_default();
@@ -131,11 +159,7 @@ pub async fn handle_v1_diff_undo(
     post.set_id();
 
     validate_post(&post)?;
-
-    for ((c_idx, c), a) in post.chunks.iter_mut().enumerate().zip(post.apply.iter()) {
-        c.chunk_id = c_idx;
-        c.apply = *a;
-    }
+    init_post_chunks(&mut post, global_context.clone()).await?;
 
     let apply_ids_from_post = post.chunks.iter().filter(|x|x.apply).map(|x|x.chunk_id).collect::<Vec<_>>();
     
