@@ -197,7 +197,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .map_err(|_| format!("Unable to create file {}", file_path.display()))?;
             file.write_all(text.as_bytes())
                 .map_err(|_| format!("Unable to write to file {}", file_path.display()))?;
-            pages.insert(url, format!("{}", file_path.display()));
+            pages.insert(url.clone(), format!("{}", file_path.display()));
 
             // vectorize file
             let gcx = gcx.write().await;
@@ -216,7 +216,8 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
             }
 
             // find links
-            let base_parser = Url::options().base_url(Some(&base_url));
+            let url = Url::parse(url.as_str()).ok();
+            let base_parser = Url::options().base_url(url.as_ref());
             select::document::Document::from(html.as_str())
                 .find(Name("a"))
                 .filter_map(|n| n.attr("href"))
