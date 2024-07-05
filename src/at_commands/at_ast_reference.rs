@@ -17,7 +17,7 @@ async fn results2message(result: &AstQuerySearchResult) -> Vec<ContextFile> {
     let mut symbols = vec![];
     for res in &result.search_results {
         let file_name = res.symbol_declaration.file_path.to_string_lossy().to_string();
-        let content = res.symbol_declaration.get_content().await.unwrap_or("".to_string());
+        let content = res.symbol_declaration.get_content_from_file().await.unwrap_or("".to_string());
         symbols.push(ContextFile {
             file_name,
             file_content: content,
@@ -50,10 +50,10 @@ pub async fn execute_at_ast_reference(ccx: &mut AtCommandsContext, symbol_path: 
     let ast = ccx.global_context.read().await.ast_module.clone();
     let x = match &ast {
         Some(ast) => {
-            match ast.read().await.search_by_name(
+            match ast.read().await.search_by_fullpath(
                 symbol_path.clone(),
                 RequestSymbolType::Usage,
-                true,
+                false,
                 10
             ).await {
                 Ok(res) => Ok((results2message(&res).await, res.refs_n)),

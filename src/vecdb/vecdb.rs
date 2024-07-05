@@ -17,6 +17,7 @@ use crate::files_in_workspace::Document;
 use crate::vecdb::handler::VecDBHandler;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
 use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants};
+use crate::vecdb::vecdb_cache::VecDBCache;
 
 
 fn vecdb_constants(
@@ -32,6 +33,7 @@ fn vecdb_constants(
         endpoint_embeddings_template: caps_locked.endpoint_embeddings_template.clone(),
         endpoint_embeddings_style: caps_locked.endpoint_embeddings_style.clone(),
         cooldown_secs: 20,
+        splitter_window_size: caps_locked.embedding_n_ctx / 2,
     }
 }
 
@@ -217,13 +219,19 @@ impl VecDb {
         cmdline: CommandLine,
         constants: VecdbConstants,
     ) -> Result<VecDb, String> {
-        let handler = match VecDBHandler::init(cache_dir, &constants.model_name, constants.embedding_size).await {
+        let handler = match VecDBHandler::init(constants.embedding_size).await {
+            Ok(res) => res,
+            Err(err) => { return Err(err) }
+        };
+        let cache = match VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await {
             Ok(res) => res,
             Err(err) => { return Err(err) }
         };
         let vecdb_handler = Arc::new(AMutex::new(handler));
+        let vecdb_cache = Arc::new(AMutex::new(cache));
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
+            vecdb_cache.clone(),
             constants.clone(),
             cmdline.api_key.clone(),
         ).await));
@@ -297,9 +305,6 @@ impl VecdbSearch for VecDb {
             rec.usefulness = 100.0 - 75.0 * ((rec.distance.abs() - dist0) / (dist0 + 0.01)).max(0.0).min(1.0);
             info!("distance {:.3} -> useful {:.1}, found {}:{}-{}", rec.distance, rec.usefulness, last_35_chars, rec.start_line, rec.end_line);
         }
-        let t2 = std::time::Instant::now();
-        handler_locked.update_record_statistic(results.clone()).await;
-        info!("update_record_statistic {:.3}s", t2.elapsed().as_secs_f64());
         Ok(
             SearchResult {
                 query_text: query,

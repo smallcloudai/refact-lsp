@@ -5,7 +5,7 @@ lto = true
 
 [package]
 name = "refact-lsp"
-version = "0.9.1"
+version = "0.9.3"
 edition = "2021"
 build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -47,6 +47,7 @@ uuid = { version = "1", features = ["v4"] }
 lazy_static = "1.4.0"
 html2text = "0.12.5"
 select = "0.6.0"
+indexmap = {version = "1.9.1", features = ["serde-1"]}
 
 regex-automata = { version = "0.1.10", features = ["transducer"] }
 sorted-vec = "0.8.3"

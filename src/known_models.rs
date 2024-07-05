@@ -133,7 +133,8 @@ pub const KNOWN_MODELS: &str = r####"
                 "claude-2.1",
                 "claude-3-haiku",
                 "claude-3-opus",
-                "claude-3-sonnet"
+                "claude-3-sonnet",
+                "claude-3-5-sonnet"
             ]
         },
         "starchat/15b/beta": {
@@ -169,7 +170,10 @@ pub const KNOWN_MODELS: &str = r####"
                     ],
                     "default_system_message": "You are a programming assistant."
                 }
-            }
+            },
+            "similar_models": [
+                "llama3/8b/instruct/vllm"
+            ]
         },
         "llama2/7b": {
             "n_ctx": 4096,
@@ -276,7 +280,9 @@ pub const KNOWN_MODELS: &str = r####"
         "gpt-4-turbo":            "Xenova/gpt-4",
         "gpt-4-turbo-2024-04-09": "Xenova/gpt-4",
         "gpt-4o":                 "Xenova/gpt-4o",
-        "gpt-4o-2024-05-13":      "Xenova/gpt-4o"
+        "gpt-4o-2024-05-13":      "Xenova/gpt-4o",
+        "claude-3-5-sonnet":          "Xenova/claude-tokenizer",
+        "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer"
     }
 }
 "####;

@@ -1,13 +1,52 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use async_trait::async_trait;
 use serde_json::Value;
-use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
-use crate::at_commands::at_file::{execute_at_file, text_on_clip};
+use uuid::Uuid;
+use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_commands::at_file::{at_file_repair_candidates, get_project_paths, text_on_clip};
 use crate::at_tools::tools::AtTool;
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 
 
 pub struct AttFile;
+
+async fn get_file_text(ccx: &mut AtCommandsContext, file_path: &String, candidates: &Vec<String>, project_paths: &Vec<PathBuf>) -> Result<(String, String), String> {
+    let mut f_path = PathBuf::from(file_path);
+
+    if candidates.is_empty() {
+        let similar_files_str = at_file_repair_candidates(&file_path, ccx, true).await.iter().take(10).cloned().collect::<Vec<_>>().join("\n");
+        if f_path.is_absolute() {
+            if !project_paths.iter().any(|x|x.starts_with(&f_path)) {
+                return Err(format!("The file {:?} will not be read as it lies beyond project directories:\n\n{:?}\n\nThere are files with similar names:\n{}", f_path, project_paths, similar_files_str));
+            }
+        }
+        if f_path.is_relative() {
+            let projpath_options = project_paths.iter().map(|x|x.join(&f_path)).filter(|x|x.is_file()).collect::<Vec<_>>();
+            if projpath_options.len() > 1 {
+                let projpath_options_str = projpath_options.iter().map(|x|x.to_string_lossy().to_string()).collect::<Vec<_>>().join("\n");
+                return Err(format!("The path {:?} is ambiguous.\n\nAdding project path, it might be:\n{:?}\n\nAlso, there are similar file names:\n{}", f_path, projpath_options_str, similar_files_str));
+            }
+            if projpath_options.is_empty() {
+                if similar_files_str.is_empty() {
+                    return Err(format!("The path {:?} does not exist. There are no similar names either.", f_path));
+                } else {
+                    return Err(format!("The path {:?} does not exist.\n\nThere are files with similar names however:\n{}", f_path, similar_files_str));
+                }
+            } else {
+                f_path = projpath_options[0].clone();
+            }
+        }
+    }
+
+    if candidates.len() > 1 {
+        return Err(format!("The path {:?} is ambiguous.\n\nIt could be interpreted as:\n{}", file_path, candidates.join("\n")));
+    }
+
+    let corrected = candidates[0].clone();
+    get_file_text_from_memory_or_disk(ccx.global_context.clone(), &PathBuf::from(corrected.clone())).await.map(|x|(corrected, x))
+}
 
 #[async_trait]
 impl AtTool for AttFile {
@@ -17,28 +56,31 @@ impl AtTool for AttFile {
             Some(v) => { return Err(format!("argument `path` is not a string: {:?}", v)) },
             None => { return Err("argument `path` is missing".to_string()) }
         };
-        // TODO: optional line n
-        // let line_n = match args.get("line") {
-        //     Some(Value::Number(n)) if n.is_u64() => Some(n.as_u64().unwrap() as usize),
-        //     Some(v) => return Err(format!("argument `line` is not a valid u64: {:?}", v)),
-        //     None => return Err("line".to_string()),
-        // };
 
         let mut results = vec![];
-        let text = match execute_at_file(ccx, p.clone(), true).await {
-            Ok(res) => {
-                let text = text_on_clip(&res, true);
-                results.extend(vec_context_file_to_context_tools(vec![res]));
-                text
-            },
-            Err(e) => {
-                e
+        let candidates = at_file_repair_candidates(p, ccx, false).await;
+        let content = match get_file_text(ccx, p, &candidates, &get_project_paths(ccx).await).await {
+            Ok((file_name, file_content)) => {
+                let res = ContextFile {
+                    file_name,
+                    file_content: file_content.clone(),
+                    line1: 0,
+                    line2: file_content.lines().count(),
+                    symbol: Uuid::default(),
+                    gradient_type: 0,
+                    usefulness: 100.0,
+                    is_body_important: false
+                };
+                let content = text_on_clip(&res, true);
+                results.push(ContextEnum::ContextFile(res));
+                content
             }
+            Err(e) => e
         };
 
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: text,
+            content,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
         }));

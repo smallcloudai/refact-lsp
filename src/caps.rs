@@ -17,6 +17,7 @@ const CAPS_FILENAME_FALLBACK: &str = "coding_assistant_caps.json";
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelRecord {
+    #[serde(default)]
     pub n_ctx: usize,
     #[serde(default)]
     pub supports_scratchpads: HashMap<String, serde_json::Value>,
@@ -24,6 +25,8 @@ pub struct ModelRecord {
     pub default_scratchpad: String,
     #[serde(default)]
     pub similar_models: Vec<String>,
+    #[serde(default)]
+    pub supports_tools: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,10 +170,10 @@ pub async fn load_caps(
     r1.telemetry_basic_retrieve_my_own = relative_to_full_url(&caps_url, &r1.telemetry_basic_retrieve_my_own)?;
     r1.endpoint_embeddings_template = relative_to_full_url(&caps_url, &r1.endpoint_embeddings_template)?;
     r1.tokenizer_path_template = relative_to_full_url(&caps_url, &r1.tokenizer_path_template)?;
-    if r1.embedding_n_ctx == usize::default() {
+    if r1.embedding_n_ctx == 0 {
         r1.embedding_n_ctx = 512;
     }
-    
+
     info!("caps {} completion models", r1.code_completion_models.len());
     info!("caps default completion model: \"{}\"", r1.code_completion_default_model);
     info!("caps {} chat models", r1.code_chat_models.len());
@@ -202,9 +205,11 @@ fn relative_to_full_url(
 
 fn apply_models_dict_patch(caps: &mut CodeAssistantCaps) {
     fn apply_model_record_patch(rec: &mut ModelRecord, rec_patched: &ModelRecord) {
-        // for now applying just n_ctx
-        if rec_patched.n_ctx != usize::default() {
+        if rec_patched.n_ctx != 0 {
             rec.n_ctx = rec_patched.n_ctx;
+        }
+        if rec_patched.supports_tools {
+            rec.supports_tools = rec_patched.supports_tools;
         }
     }
 
