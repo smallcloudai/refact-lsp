@@ -6,7 +6,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 
 use crate::call_validation::DiffChunk;
-use crate::files_in_workspace::read_file_from_disk;
 
 
 #[derive(Clone, Debug, Default)]
@@ -176,8 +175,8 @@ fn undo_chunks(
     Ok((results_fuzzy_ns, lines_orig))
 }
 
-pub async fn patch(
-    chunks: &Vec<DiffChunk>, 
+pub fn read_files_from_disk_and_patch(
+    chunks: &Vec<DiffChunk>,
     chunks_undo: &Vec<DiffChunk>,
     max_fuzzy_n: usize,
 ) -> Result<(HashMap<String, String>, HashMap<usize, Option<usize>>), String> {
@@ -197,20 +196,82 @@ pub async fn patch(
     for (file_name, chunks_group) in chunk_groups.iter_mut() {
         chunks_group.sort_by_key(|c| c.line1);
 
-        let mut file_text = read_file_from_disk(&PathBuf::from(file_name)).await.map_err(|e| {
-            format!("couldn't read file: {:?}. Error: {}", file_name, e)
-        }).map(|x| x.to_string())?;
+        let mut file_text = crate::files_in_workspace::read_file_from_disk_sync(&PathBuf::from(file_name)).map(|x| x.to_string())?; // XXX: not exit, next file
 
         if let Some(mut chunks_undo_group) = chunk_undo_groups.get(file_name).cloned() {
-            let (_, new_lines) = undo_chunks(&mut chunks_undo_group, &file_text, max_fuzzy_n).map_err(|e| e.to_string())?;
+            let (_, new_lines) = undo_chunks(&mut chunks_undo_group, &file_text, max_fuzzy_n).map_err(|e| e.to_string())?; // XXX: only undo what is necessary
             file_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
         }
 
-        let (fuzzy_ns, new_lines) = apply_chunks(chunks_group, &file_text, max_fuzzy_n).map_err(|e| e.to_string())?;
+        let (fuzzy_ns, new_lines) = apply_chunks(chunks_group, &file_text, max_fuzzy_n).map_err(|e| e.to_string())?;  // XXX: not exit, next chunk
         results.extend(fuzzy_ns);
 
         let new_text = new_lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
         texts_after_patch.insert(file_name.clone(), new_text);
     }
     Ok((texts_after_patch, results))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+
+    const TEST_MAX_FUZZY: usize = 10;
+
+    const FILE1_FN: &str = "/tmp/file1.txt";
+    const FILE1: &str = r#"# line 1
+class Point2d:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return "Point2d(x=%0.2f, y=%0.2f)" % (self.x, self.y)
+"#;
+const FILE2_FN: &str = "/tmp/file2.txt";
+const FILE2: &str = r#"import file1
+x = file1.Point2d(5, 6)
+print(x)
+"#;
+
+    fn delete_file_if_exists(file_name: &str) {
+        if fs::metadata(file_name).is_ok() {
+            fs::remove_file(file_name).expect("Failed to delete file");
+        }
+    }
+
+    fn write_file(file_name: &str, content: &str) {
+        let mut file = fs::File::create(file_name).expect("Failed to create file");
+        file.write_all(content.as_bytes()).expect("Failed to write to file");
+    }
+
+    #[test]
+    fn test_chunks() {
+        // Run this to see println:
+        //     cargo test diffs::tests::test_chunks -- --nocapture
+        let chunk1 = DiffChunk {
+            file_name: "/tmp/file1.txt".to_string(),
+            file_action: "edit".to_string(),
+            line1: 4,
+            line2: 5,
+            lines_remove: "        self.x = x\n        self.y = y\n".to_string(),
+            lines_add: "        self.x, self.y = x, y\n".to_string(),
+            chunk_id: 1,
+            apply: false,
+        };
+
+        let chunks_undo: Vec<DiffChunk> = vec![chunk1.clone()];
+
+        delete_file_if_exists(FILE1_FN);
+        let r1 = read_files_from_disk_and_patch(&vec![chunk1.clone()], &chunks_undo, TEST_MAX_FUZZY);
+        println!("r1: {:?}", r1);
+        assert!(r1.is_err());
+
+        write_file(FILE1_FN, FILE1);
+        let r2 = read_files_from_disk_and_patch(&vec![chunk1.clone()], &chunks_undo, TEST_MAX_FUZZY);
+        println!("r2: {:?}", r2);
+    }
 }
