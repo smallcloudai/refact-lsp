@@ -46,8 +46,8 @@ def diff_apply(payload):
     return json.loads(response.text)
 
 
-def diff_undo(payload):
-    url = "http://localhost:8001/v1/diff-undo"
+def diff_state(payload):
+    url = "http://localhost:8001/v1/diff-state"
     response = requests.post(url, data=json.dumps(payload))
     assert response.status_code == 200
     return json.loads(response.text)
@@ -110,7 +110,8 @@ def test1():
 
     assert test_file.read_text() == must_look_like
 
-    resp = diff_undo(payload)
+    payload["apply"] = [False] * len(payload["chunks"])
+    resp = diff_apply(payload)
 
     assert resp['state'] == [0, 0, 0, 0]
     assert resp['fuzzy_results'] == []
@@ -138,7 +139,8 @@ def test2():
         else:
             assert resp["state"] == [0, 0, 0, 2]
 
-        resp = diff_undo(payload)
+        payload["apply"] = [False] * len(payload["chunks"])
+        resp = diff_apply(payload)
         assert resp['state'] == [0, 0, 0, 0]
         assert test_file.read_text() == file_text
 
@@ -146,32 +148,6 @@ def test2():
 
 
 def test3():
-    # applying all and un-applying one by one
-
-    payload = copy(payload1)
-
-    with test_file.open("w") as f:
-        f.write(file_text)
-
-    resp = diff_apply(payload)
-    assert resp["state"] == [1, 1, 1, 2]
-
-    must_look_like = "# chunk0\n# chunk0\n\n# chunk1\n# chunk1\n\n# chunk2\n# chunk2"
-    assert test_file.read_text() == must_look_like
-
-    # Undo chunks one by one
-    for i in range(len(payload["chunks"])):
-        undo_payload = copy(payload)
-        undo_payload["apply"] = [i == j for j in range(len(payload["chunks"]))]
-
-        diff_undo(undo_payload)
-
-    assert test_file.read_text() == file_text
-
-    print(colored("test3 PASSED", "green"))
-
-
-def test4():
     # applying and un-applying a random amount of chunks 100 times
 
     payload = copy(payload1)
@@ -193,10 +169,21 @@ def test4():
         else:
             assert resp["state"] == [*vec[:-1], 2], err_msg
 
-        resp = diff_undo(payload)
+        payload["apply"] = [False] * len(payload["chunks"])
+        resp = diff_apply(payload)
         assert resp['state'] == [0, 0, 0, 0]
-        
+
         assert test_file.read_text() == file_text
+
+    print(colored("test3 PASSED", "green"))
+
+
+def test4():
+    payload = copy(payload1)
+    del payload["apply"]
+
+    state = diff_state(payload)
+    assert state["can_apply"] == [True, True, True, False]
 
     print(colored("test4 PASSED", "green"))
 
