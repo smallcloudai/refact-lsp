@@ -27,7 +27,7 @@ use crate::http::routers::v1::status::handle_v1_rag_status;
 use crate::http::routers::v1::toolbox::handle_v1_customization;
 use crate::http::routers::v1::toolbox::handle_v1_rewrite_assistant_says_to_at_commands;
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
-use crate::http::routers::v1::diffs::{handle_v1_diff_apply, handle_v1_diff_undo};
+use crate::http::routers::v1::diffs::{handle_v1_diff_applied_chunks, handle_v1_diff_apply, handle_v1_diff_undo};
 use crate::http::utils::telemetry_wrapper;
 
 pub mod code_completion;
@@ -94,4 +94,5 @@ pub fn make_v1_router() -> Router {
     
         .route("/diff-apply", telemetry_post!(handle_v1_diff_apply))
         .route("/diff-undo", telemetry_post!(handle_v1_diff_undo))
+        .route("/diff-applied-chunks", telemetry_post!(handle_v1_diff_applied_chunks))
 }
