@@ -8,6 +8,7 @@ use tracing::{info, error};
 
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
+use crate::at_tools::att_knowledge::MemoriesDatabase;
 use crate::global_context::{CommandLine, GlobalContext};
 use crate::background_tasks::BackgroundTasksHolder;
 
@@ -15,7 +16,7 @@ use crate::fetch_embedding;
 use crate::files_in_workspace::Document;
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_thread::FileVectorizerService;
-use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants};
+use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoSearchResult};
 use crate::vecdb::vdb_cache::VecDBCache;
 
 
@@ -36,8 +37,8 @@ fn vecdb_constants(
     }
 }
 
-#[derive(Debug)]
 pub struct VecDb {
+    pub memdb: Arc<AMutex<crate::at_tools::att_knowledge::MemoriesDatabase>>,
     vecdb_emb_client: Arc<AMutex<reqwest::Client>>,
     vecdb_handler: Arc<AMutex<VecDBHandler>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
@@ -206,23 +207,20 @@ impl VecDb {
         cmdline: CommandLine,
         constants: VecdbConstants,
     ) -> Result<VecDb, String> {
-        let handler = match VecDBHandler::init(constants.embedding_size).await {
-            Ok(res) => res,
-            Err(err) => { return Err(err) }
-        };
-        let cache = match VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await {
-            Ok(res) => res,
-            Err(err) => { return Err(err) }
-        };
+        let handler = VecDBHandler::init(constants.embedding_size).await?;
+        let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
+        let memdb = Arc::new(AMutex::new(MemoriesDatabase::init(cache_dir, &constants).await?));
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),
             constants.clone(),
             cmdline.api_key.clone(),
+            memdb.clone(),
         ).await));
         Ok(VecDb {
+            memdb: memdb.clone(),
             vecdb_emb_client: Arc::new(AMutex::new(reqwest::Client::new())),
             vecdb_handler,
             vectorizer_service,
@@ -239,8 +237,8 @@ impl VecDb {
         return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), gcx.clone(), self.constants.tokenizer.clone()).await;
     }
 
-    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, force: bool) {
-        self.vectorizer_service.lock().await.vectorizer_enqueue_files(documents, force).await;
+    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
+        self.vectorizer_service.lock().await.vectorizer_enqueue_files(documents, process_immediately).await;
     }
 
     pub async fn remove_file(&self, file_path: &PathBuf) {
@@ -252,6 +250,98 @@ impl VecDb {
     }
 }
 
+pub async fn memories_add(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    m_type: &str,
+    m_goal: &str,
+    m_project: &str,
+    m_payload: &str
+) -> Result<String, String> {
+    let (memdb, vectorizer_service) = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        (vec_db.memdb.clone(), vec_db.vectorizer_service.clone())
+    };
+
+    let memid = {
+        let memdb_locked = memdb.lock().await;
+        memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?
+    };
+    vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
+    // TODO: wait until processing is over
+    Ok(memid)
+}
+
+pub async fn memories_erase(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    memid: &str
+) -> Result<usize, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let erased_cnt = memdb_locked.permdb_erase(memid)?;
+    Ok(erased_cnt)
+}
+
+pub async fn memories_update(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    memid: &str,
+    mstat_correct: f64,
+    mstat_useful: f64
+) -> Result<usize, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_useful)?;
+    Ok(updated_cnt)
+}
+
+pub async fn memories_search(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    query: String,
+    top_n: usize,
+) -> Result<MemoSearchResult, String> {
+    let t0 = std::time::Instant::now();
+    let (memdb, vecdb_emb_client, constants, cmdline) = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        (
+            vec_db.memdb.clone(),
+            vec_db.vecdb_emb_client.clone(),
+            vec_db.constants.clone(),
+            vec_db.cmdline.clone(),
+        )
+    };
+
+    let embedding = fetch_embedding::get_embedding_with_retry(
+        vecdb_emb_client,
+        &constants.endpoint_embeddings_style,
+        &constants.model_name,
+        &constants.endpoint_embeddings_template,
+        vec![query.clone()],
+        &cmdline.api_key,
+        5
+    ).await?;
+    if embedding.is_empty() {
+        return Err("memdb_search: empty embedding".to_string());
+    }
+    info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
+
+    let results = match crate::at_tools::att_knowledge::lance_search(memdb, &embedding[0], top_n).await {
+        Ok(res) => res,
+        Err(err) => { return Err(err.to_string()) }
+    };
+
+    Ok(MemoSearchResult {query_text: query, results})
+}
 
 #[async_trait]
 impl VecdbSearch for VecDb {

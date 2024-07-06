@@ -64,8 +64,29 @@ pub struct SplitResult {
     pub symbol_path: String,
 }
 
+// #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Clone)]
+pub struct SimpleTextHashVector {
+    pub window_text: String,
+    pub window_text_hash: String,
+    pub vector: Option<Vec<f32>>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchResult {
     pub query_text: String,
     pub results: Vec<VecdbRecord>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct MemoRecord {
+    pub memid: String,
+    pub thevec: Option<Vec<f32>>,
+    pub distance: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MemoSearchResult {
+    pub query_text: String,
+    pub results: Vec<MemoRecord>,
 }
