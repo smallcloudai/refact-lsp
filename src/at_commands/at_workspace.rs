@@ -31,7 +31,7 @@ impl AtWorkspace {
     }
 }
 
-fn results2message(results: &Vec<vecdb::structs::Record>) -> Vec<ContextFile> {
+fn results2message(results: &Vec<vecdb::structs::VecdbRecord>) -> Vec<ContextFile> {
     let mut vector_of_context_file: Vec<ContextFile> = vec![];
     for r in results {
         let file_name = r.file_path.to_str().unwrap().to_string();
