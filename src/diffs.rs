@@ -133,7 +133,7 @@ fn undo_chunks(
     let mut results_fuzzy_ns = HashMap::new();
     for (chunk_id, chunk) in chunks.iter().map(|(id, c)|(*id, *c)) {
         let mut chunk_copy = chunk.clone();
-        
+
         mem::swap(&mut chunk_copy.lines_remove, &mut chunk_copy.lines_add);
         chunk_copy.line2 = chunk_copy.line1 + chunk_copy.lines_remove.lines().count();
 
@@ -185,7 +185,7 @@ pub fn read_files_n_apply_diff_chunks(
 
     let chunks_undo = chunks.iter().enumerate().filter(|(idx, _)|applied_state.get(*idx) == Some(&true)).collect::<Vec<_>>();
     let chunks_apply = chunks.iter().enumerate().filter(|(idx, _)|desired_state.get(*idx) == Some(&true)).collect::<Vec<_>>();
-    
+
     let mut chunk_apply_groups = HashMap::new();
     for c in chunks_apply.iter().cloned() {
         chunk_apply_groups.entry(c.1.file_name.clone()).or_insert(Vec::new()).push(c);
@@ -205,11 +205,11 @@ pub fn read_files_n_apply_diff_chunks(
 
         let file_text = match crate::files_in_workspace::read_file_from_disk_sync(&PathBuf::from(&file_name)) {
             Ok(t) => t.to_string(),
-            Err(_) => { 
+            Err(_) => {
                 for (c, _) in chunks_apply.iter() {
                     fuzzy_n_used.insert(*c, None);
                 }
-                continue; 
+                continue;
             }
         };
 
@@ -218,7 +218,7 @@ pub fn read_files_n_apply_diff_chunks(
         fuzzy_n_used.extend(fuzzy_ns);
         texts_after_patch.insert(file_name.clone(), new_text);
     }
-    
+
     (texts_after_patch, fuzzy_n_used)
 }
 
@@ -280,7 +280,7 @@ class Point2d:
             lines_add: "        self.x, self.y = x, y\n".to_string(),
         };
         let chunks = vec![chunk1];
-        
+
         let applied_state = vec![false];
         let desired_state = vec![true];
 
@@ -294,7 +294,7 @@ class Point2d:
         write_file(FILE1_FN, FILE1);
         let (_file_texts, results_fuzzy_n) = read_files_n_apply_diff_chunks(&chunks, &applied_state, &desired_state, TEST_MAX_FUZZY);
         let r2_state = fuzzy_results_into_state_vector(&results_fuzzy_n, chunks.len());
-        
+
         println!("r2 state: {:?}", r2_state);
         assert_eq!(vec![1], r2_state);
     }
