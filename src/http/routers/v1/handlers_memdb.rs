@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
+use tokio::sync::Mutex as AMutex;
 
 use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
-use parking_lot::Mutex as ParkMutex;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
@@ -39,7 +39,7 @@ struct MemQuery {
 
 pub async fn gcx2memdb(
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<Arc<ParkMutex<MemoryDatabase>>, ScratchError> {
+) -> Result<Arc<AMutex<MemoryDatabase>>, ScratchError> {
     let vec_db_module = gcx.read().await.vec_db.clone();
     let x = if let Some(ref mut db) = *vec_db_module.lock().await {
         Ok(db.memdb.clone())
@@ -58,7 +58,7 @@ pub async fn handle_mem_add(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock();
+    let memdb_locked = memdb.lock().await;
     match memdb_locked.add(&post.memtype, &post.goal, &post.project, &post.payload) {
         Ok(memid) => {
             let response = Response::builder()
@@ -80,7 +80,7 @@ pub async fn handle_mem_erase(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock();
+    let memdb_locked = memdb.lock().await;
     match memdb_locked.erase(&post.memid) {
         Ok(_) => {
             let response = Response::builder()
@@ -102,7 +102,7 @@ pub async fn handle_mem_update_used(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock();
+    let memdb_locked = memdb.lock().await;
     match memdb_locked.update_used(&post.memid, post.correct, post.useful) {
         Ok(_) => {
             let response = Response::builder()
@@ -124,7 +124,7 @@ pub async fn handle_mem_query(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock();
+    let memdb_locked = memdb.lock().await;
     // Implement the query logic here using memdb_locked and post
     // For now, returning a placeholder response
     let response = Response::builder()

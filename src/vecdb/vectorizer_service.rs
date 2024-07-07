@@ -4,6 +4,7 @@ use std::ops::Div;
 use std::sync::{Arc, Weak};
 use std::sync::RwLock as StdRwLock;
 use std::time::SystemTime;
+use parking_lot::Mutex as ParkMutex;
 
 use tokenizers::Tokenizer;
 use tokio::sync::{Mutex as AMutex, RwLock};
@@ -16,13 +17,14 @@ use crate::fetch_embedding::get_embedding_with_retry;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 use crate::vecdb::handler::VecDBHandler;
-use crate::vecdb::structs::{Record, SplitResult, VecdbConstants, VecDbStatus};
+use crate::vecdb::structs::{VecdbRecord, SplitResult, VecdbConstants, VecDbStatus};
 use crate::vecdb::vecdb_cache::VecDBCache;
+use crate::vecdb::structs::SimpleTextHashVector;
+use crate::at_tools::att_knowledge::MemoryDatabase;
 
 const DEBUG_WRITE_VECDB_FILES: bool = false;
 
 
-#[derive(Debug)]
 pub struct FileVectorizerService {
     update_request_queue: Arc<AMutex<VecDeque<Document>>>,
     output_queue: Arc<AMutex<VecDeque<Document>>>,
@@ -31,6 +33,7 @@ pub struct FileVectorizerService {
     status: Arc<AMutex<VecDbStatus>>,
     constants: VecdbConstants,
     api_key: String,
+    memdb: Arc<AMutex<MemoryDatabase>>,
 }
 
 async fn cooldown_queue_thread(
@@ -113,14 +116,15 @@ async fn vectorize_batch_from_q(
         status_locked.vectors_made_since_start += batch_result.len();
     }
 
-    let mut records = vec![];
+    let mut vecdb_records = vec![];
+    let mut cache_records = vec![];
     for (i, data_res) in batch.iter().enumerate() {
         if batch_result[i].is_empty() {
             info!("skipping an empty embedding split");
             continue;
         }
-        records.push(
-            Record {
+        vecdb_records.push(
+            VecdbRecord {
                 vector: Some(batch_result[i].clone()),
                 window_text: data_res.window_text.clone(),
                 window_text_hash: data_res.window_text_hash.clone(),
@@ -131,17 +135,27 @@ async fn vectorize_batch_from_q(
                 usefulness: 0.0,
             }
         );
+        cache_records.push(
+            SimpleTextHashVector {
+                vector: Some(batch_result[i].clone()),
+                window_text: data_res.window_text.clone(),
+                window_text_hash: data_res.window_text_hash.clone(),
+            }
+        );
     }
 
-    if records.len() > 0 {
-        info!("embeddings got {} records in {}ms", records.len(), t0.elapsed().as_millis());
-        match vecdb_handler_arc.lock().await.add_or_update(&records).await {
+    if vecdb_records.len() > 0 {
+        info!("embeddings got {} records in {}ms", vecdb_records.len(), t0.elapsed().as_millis());
+        match vecdb_handler_arc.lock().await.add_or_update(&vecdb_records).await {
             Err(e) => {
                 warn!("Error adding/updating records in VecDB: {}", e);
             }
             _ => {}
         }
-        match vecdb_cache_arc.lock().await.insert_records(records).await {
+    }
+
+    if cache_records.len() > 0 {
+        match vecdb_cache_arc.lock().await.cache_add_new_records(cache_records).await {
             Err(e) => {
                 warn!("Error adding records to the cacheDB: {}", e);
             }
@@ -165,7 +179,7 @@ async fn add_from_cache_to_vec_db(
             .drain(..group_size.min(delayed_cached_splits_q.len()))
             .collect::<Vec<_>>();
         let t0 = std::time::Instant::now();
-        let records = match vecdb_cache_arc.lock().await.get_records_by_splits(&batch).await {
+        let records: Vec<VecdbRecord> = match vecdb_cache_arc.lock().await.get_records_by_splits(&batch).await {
             Ok((records, non_found_splits)) => {
                 assert!(non_found_splits.is_empty());
                 records
@@ -191,6 +205,7 @@ async fn vectorize_thread(
     queue: Arc<AMutex<VecDeque<Document>>>,
     vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
     vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
+    memdb: Arc<AMutex<MemoryDatabase>>,
     status: Arc<AMutex<VecDbStatus>>,
     constants: VecdbConstants,
     api_key: String,
@@ -253,7 +268,7 @@ async fn vectorize_thread(
                 None => {
                     // No files left to process
                     if !reported_vecdb_complete {
-                        // add left splits
+                        // leftover splits
                         add_from_cache_to_vec_db(
                             &mut delayed_cached_splits_q,
                             vecdb_handler_arc.clone(),
@@ -265,12 +280,22 @@ async fn vectorize_thread(
                         vecdb_handler_arc.lock().await.update_indexed_file_paths().await;
                         info!("update_indexed_file_paths: it took {:.3}s", t0.elapsed().as_secs_f64());
                         reported_vecdb_complete = true;
-                        // For now, we do not create index 'cause it hurts quality of retrieval
+                        // For now, we do not create index because it hurts the quality of retrieval
                         // info!("VECDB Creating index");
                         // match vecdb_handler_arc.lock().await.create_index().await {
                         //     Ok(_) => info!("VECDB CREATED INDEX"),
                         //     Err(err) => info!("VECDB Error creating index: {}", err)
                         // }
+
+                        info!("MEMDB START");
+                        let r = memdb.lock().await.vectorize_all_payloads(
+                            status.clone(),
+                            client.clone(),
+                            &api_key,
+                            B,
+                        ).await;
+                        info!("/MEMDB {:?}", r);
+
                         let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
                         {
@@ -350,6 +375,7 @@ impl FileVectorizerService {
         vecdb_cache: Arc<AMutex<VecDBCache>>,
         constants: VecdbConstants,
         api_key: String,
+        memdb: Arc<AMutex<MemoryDatabase>>,
     ) -> Self {
         let update_request_queue = Arc::new(AMutex::new(VecDeque::new()));
         let output_queue = Arc::new(AMutex::new(VecDeque::new()));
@@ -372,6 +398,7 @@ impl FileVectorizerService {
             status: status.clone(),
             constants,
             api_key,
+            memdb,
         }
     }
 
@@ -397,6 +424,7 @@ impl FileVectorizerService {
                 self.output_queue.clone(),
                 self.vecdb_handler.clone(),
                 self.vecdb_cache.clone(),
+                self.memdb.clone(),
                 self.status.clone(),
                 constants,
                 self.api_key.clone(),

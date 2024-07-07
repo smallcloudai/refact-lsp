@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
-use parking_lot::Mutex as ParkMutex;
 use tokenizers::Tokenizer;
 use tokio::sync::{RwLock as ARwLock, RwLock};
 use tokio::sync::Mutex as AMutex;
@@ -39,7 +38,7 @@ fn vecdb_constants(
 }
 
 pub struct VecDb {
-    pub memdb: Arc<ParkMutex<crate::at_tools::att_knowledge::MemoryDatabase>>,
+    pub memdb: Arc<AMutex<crate::at_tools::att_knowledge::MemoryDatabase>>,
     vecdb_emb_client: Arc<AMutex<reqwest::Client>>,
     vecdb_handler: Arc<AMutex<VecDBHandler>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
@@ -223,15 +222,16 @@ impl VecDb {
         let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
-        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, vecdb_cache.clone())?;
+        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, vecdb_cache.clone(), &constants).await?;
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),
             constants.clone(),
             cmdline.api_key.clone(),
+            memdb.clone(),
         ).await));
         Ok(VecDb {
-            memdb,
+            memdb: memdb.clone(),
             vecdb_emb_client: Arc::new(AMutex::new(reqwest::Client::new())),
             vecdb_handler,
             vectorizer_service,

@@ -20,7 +20,7 @@ use tracing::info;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
-use crate::vecdb::structs::Record;
+use crate::vecdb::structs::VecdbRecord;
 
 impl Debug for VecDBHandler {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -119,8 +119,8 @@ impl VecDBHandler {
         self.indexed_file_paths = Arc::new(AMutex::new(res));
     }
 
-    pub async fn add_or_update(&mut self, records: &Vec<Record>) -> Result<(), String> {
-        fn make_emb_data(records: &Vec<Record>, embedding_size: i32) -> Result<ArrayData, String> {
+    pub async fn add_or_update(&mut self, records: &Vec<VecdbRecord>) -> Result<(), String> {
+        fn make_emb_data(records: &Vec<VecdbRecord>, embedding_size: i32) -> Result<ArrayData, String> {
             let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
             let mut emb_builder: Vec<f32> = vec![];
 
@@ -140,7 +140,8 @@ impl VecDBHandler {
             match ArrayData::builder(DataType::FixedSizeList(vec_trait.clone(), embedding_size))
                 .len(records.len())
                 .add_child_data(emb_data.clone())
-                .build() {
+                .build()
+            {
                 Ok(res) => Ok(res),
                 Err(err) => return Err(format!("{:?}", err))
             }
@@ -173,21 +174,6 @@ impl VecDBHandler {
             )],
             self.schema.clone(),
         );
-        RecordBatchIterator::new(
-            vec![RecordBatch::try_new(
-                self.schema.clone(),
-                vec![
-                    Arc::new(FixedSizeListArray::from(vectors)),
-                    Arc::new(StringArray::from(window_texts)),
-                    Arc::new(StringArray::from(window_text_hashes.clone())),
-                    Arc::new(StringArray::from(file_paths)),
-                    Arc::new(UInt64Array::from(start_lines)),
-                    Arc::new(UInt64Array::from(end_lines)),
-                ],
-            )],
-            self.schema.clone(),
-        );
-
         let data_res = self.data_table.add(
             data_batches_iter, Option::from(WriteParams {
                 mode: WriteMode::Append,
@@ -243,7 +229,7 @@ impl VecDBHandler {
         record_batch: RecordBatch,
         include_embedding: bool,
         embedding_to_compare: Option<&Vec<f32>>,
-    ) -> vectordb::error::Result<Vec<Record>> {
+    ) -> vectordb::error::Result<Vec<VecdbRecord>> {
         (0..record_batch.num_rows()).map(|idx| {
             let gathered_vec = as_primitive_array::<Float32Type>(
                 &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
@@ -262,7 +248,7 @@ impl VecDBHandler {
                 false => None
             };
 
-            Ok(Record {
+            Ok(VecdbRecord {
                 vector: embedding,
                 window_text: as_string_array(record_batch.column_by_name("window_text")
                     .expect("Missing column 'window_text'"))
@@ -293,7 +279,7 @@ impl VecDBHandler {
         embedding: &Vec<f32>,
         top_n: usize,
         vecdb_scope_filter_mb: Option<String>,
-    ) -> vectordb::error::Result<Vec<Record>> {
+    ) -> vectordb::error::Result<Vec<VecdbRecord>> {
         let query = self
             .data_table
             .clone()
@@ -308,7 +294,7 @@ impl VecDBHandler {
         let record_batch = concat_batches(&self.schema, &query)?;
         match VecDBHandler::parse_table_iter(record_batch, false, Some(&embedding)) {
             Ok(records) => {
-                let filtered: Vec<Record> = records
+                let filtered: Vec<VecdbRecord> = records
                     .into_iter()
                     .dedup()
                     .sorted_unstable_by(|a, b| {
