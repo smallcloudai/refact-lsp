@@ -219,11 +219,11 @@ impl VecDb {
         cmdline: CommandLine,
         constants: VecdbConstants,
     ) -> Result<VecDb, String> {
-        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir)?;
         let handler = VecDBHandler::init(constants.embedding_size).await?;
         let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
+        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, vecdb_cache.clone())?;
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),

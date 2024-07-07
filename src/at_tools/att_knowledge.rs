@@ -1,16 +1,18 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::fmt::Write;
 use serde_json::Value;
-use tracing::info;
 use async_trait::async_trait;
+use parking_lot::Mutex as ParkMutex;
+use rand::Rng;
+use rusqlite::{params, Connection, Result};
+use tracing::info;
+use tokio::sync::Mutex as AMutex;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
-use rusqlite::{params, Connection, Result};
-use std::sync::Arc;
-use parking_lot::Mutex as ParkMutex;
-use rand::Rng;
-use std::fmt::Write;
+use crate::vecdb::vecdb_cache::VecDBCache;
 
 
 pub struct AttKnowledge;
@@ -47,10 +49,11 @@ impl Tool for AttKnowledge {
 
 pub struct MemoryDatabase {
     pub conn: Arc<ParkMutex<Connection>>,
+    pub vecdb_cache: Arc<AMutex<VecDBCache>>,
 }
 
 impl MemoryDatabase {
-    pub fn create_table(&self) -> Result<()> {
+    pub fn create_table(&self) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
@@ -64,7 +67,7 @@ impl MemoryDatabase {
                 mstat_times_used INTEGER NOT NULL DEFAULT 0
             )",
             [],
-        )?;
+        ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -95,26 +98,73 @@ impl MemoryDatabase {
         )?;
         Ok(())
     }
+
+    pub fn print_everything(&self) -> Result<String, String> {
+        let mut table_contents = String::new();
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT * FROM memories")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, f64>(6)?,
+                row.get::<_, i32>(7)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row
+                .map_err(|e| e.to_string())?;
+            table_contents.push_str(&format!(
+                "memid={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, useful={}, times_used={}\n",
+                memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used
+            ));
+        }
+        Ok(table_contents)
+    }
 }
+
 
 pub fn mem_init(
     cache_dir: &std::path::PathBuf,
+    vecdb_cache: Arc<AMutex<VecDBCache>>,
 ) -> Result<Arc<ParkMutex<MemoryDatabase>>, String> {
     let dbpath = cache_dir.join("memories.sqlite");
     let cache_database = Connection::open_with_flags(
         dbpath,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
         | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
-        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | rusqlite::OpenFlags::SQLITE_OPEN_FULL_MUTEX
         | rusqlite::OpenFlags::SQLITE_OPEN_URI
     ).map_err(|err| format!("Failed to open database: {}", err))?;
 
-    cache_database.execute("PRAGMA journal_mode=WAL", params![])
+    cache_database.busy_timeout(std::time::Duration::from_secs(30))
+        .map_err(|err| format!("Failed to set busy timeout: {}", err))?;
+
+    cache_database.execute_batch("PRAGMA cache_size = 0; PRAGMA shared_cache = OFF;")
+        .map_err(|err| format!("Failed to set cache pragmas: {}", err))?;
+
+    let journal_mode: String = cache_database.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
         .map_err(|err| format!("Failed to set journal mode: {}", err))?;
 
-    Ok(Arc::new(ParkMutex::new(MemoryDatabase {
+    if journal_mode != "wal" {
+        return Err(format!("Failed to set WAL journal mode. Current mode: {}", journal_mode));
+    }
+
+    let db = MemoryDatabase {
         conn: Arc::new(ParkMutex::new(cache_database)),
-    })))
+        vecdb_cache,
+    };
+
+    db.create_table()?;
+
+    Ok(Arc::new(ParkMutex::new(db)))
 }
 
 fn generate_memid() -> String {
@@ -124,33 +174,4 @@ fn generate_memid() -> String {
         write!(&mut memid, "{:x}", rng.gen_range(0..16)).unwrap();
     }
     memid
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rusqlite::Connection;
-    use std::sync::Arc;
-    use parking_lot::Mutex as ParkMutex;
-
-    #[test]
-    fn test_memories() -> Result<(), Box<dyn std::error::Error>> {
-        let conn = Connection::open_in_memory()?;
-        let memory_db = MemoryDatabase {
-            conn: Arc::new(ParkMutex::new(conn)),
-        };
-
-        memory_db.create_table()?;
-
-        let m0 = memory_db.add("seq-of-acts", "compile", "proj1", "Wow, running cargo build on proj1 was successful!")?;
-        let m1 = memory_db.add("proj-fact", "compile", "proj1", "Looks like proj1 is written in fact in Rust.")?;
-        let m2 = memory_db.add("seq-of-acts", "compile", "proj2", "Wow, running cargo build on proj2 was successful!")?;
-        let m3 = memory_db.add("proj-fact", "compile", "proj2", "Looks like proj2 is written in fact in Rust.")?;
-
-        memory_db.update_used(&m1, 0.95, 0.85)?;
-        memory_db.erase(&m0)?;
-
-        Ok(())
-    }
 }

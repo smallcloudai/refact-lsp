@@ -85,8 +85,8 @@ async fn vectorize_batch_from_q(
     client: Arc<AMutex<reqwest::Client>>,
     constants: &VecdbConstants,
     api_key: &String,
-    vecdb_handler_ref: Arc<AMutex<VecDBHandler>>,
-    vecdb_cache_ref: Arc<AMutex<VecDBCache>>,
+    vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
+    vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
     #[allow(non_snake_case)]
     B: usize,
 ) -> Result<(), String> {
@@ -135,13 +135,13 @@ async fn vectorize_batch_from_q(
 
     if records.len() > 0 {
         info!("embeddings got {} records in {}ms", records.len(), t0.elapsed().as_millis());
-        match vecdb_handler_ref.lock().await.add_or_update(&records).await {
+        match vecdb_handler_arc.lock().await.add_or_update(&records).await {
             Err(e) => {
                 warn!("Error adding/updating records in VecDB: {}", e);
             }
             _ => {}
         }
-        match vecdb_cache_ref.lock().await.insert_records(records).await {
+        match vecdb_cache_arc.lock().await.insert_records(records).await {
             Err(e) => {
                 warn!("Error adding records to the cacheDB: {}", e);
             }
@@ -155,8 +155,8 @@ async fn vectorize_batch_from_q(
 
 async fn add_from_cache_to_vec_db(
     delayed_cached_splits_q: &mut Vec<SplitResult>,
-    vecdb_handler_ref: Arc<AMutex<VecDBHandler>>,
-    vecdb_cache_ref: Arc<AMutex<VecDBCache>>,
+    vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
+    vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
     group_size: usize,
 ) {
     info!("add_from_cache_to_vec_db: {} delayed cached splits in queue", delayed_cached_splits_q.len());
@@ -165,7 +165,7 @@ async fn add_from_cache_to_vec_db(
             .drain(..group_size.min(delayed_cached_splits_q.len()))
             .collect::<Vec<_>>();
         let t0 = std::time::Instant::now();
-        let records = match vecdb_cache_ref.lock().await.get_records_by_splits(&batch).await {
+        let records = match vecdb_cache_arc.lock().await.get_records_by_splits(&batch).await {
             Ok((records, non_found_splits)) => {
                 assert!(non_found_splits.is_empty());
                 records
@@ -176,7 +176,7 @@ async fn add_from_cache_to_vec_db(
             }
         };
         info!("read {} delayed cached splits from cache db took {:.3}s", batch.len(), t0.elapsed().as_secs_f32());
-        match vecdb_handler_ref.lock().await.add_or_update(&records).await {
+        match vecdb_handler_arc.lock().await.add_or_update(&records).await {
             Err(e) => {
                 warn!("Error adding/updating records in VecDB: {}", e);
             }
@@ -189,8 +189,8 @@ async fn add_from_cache_to_vec_db(
 async fn vectorize_thread(
     client: Arc<AMutex<reqwest::Client>>,
     queue: Arc<AMutex<VecDeque<Document>>>,
-    vecdb_handler_ref: Arc<AMutex<VecDBHandler>>,
-    vecdb_cache_ref: Arc<AMutex<VecDBCache>>,
+    vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
+    vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
     status: Arc<AMutex<VecDbStatus>>,
     constants: VecdbConstants,
     api_key: String,
@@ -220,8 +220,8 @@ async fn vectorize_thread(
                     client.clone(),
                     &constants,
                     &api_key,
-                    vecdb_handler_ref.clone(),
-                    vecdb_cache_ref.clone(),
+                    vecdb_handler_arc.clone(),
+                    vecdb_cache_arc.clone(),
                     B,
                 ).await.unwrap_or_else(|err| {
                     warn!("Error vectorizing: {}", err);
@@ -256,18 +256,18 @@ async fn vectorize_thread(
                         // add left splits
                         add_from_cache_to_vec_db(
                             &mut delayed_cached_splits_q,
-                            vecdb_handler_ref.clone(),
-                            vecdb_cache_ref.clone(),
+                            vecdb_handler_arc.clone(),
+                            vecdb_cache_arc.clone(),
                             1024,
                         ).await;
 
                         let t0 = std::time::Instant::now();
-                        vecdb_handler_ref.lock().await.update_indexed_file_paths().await;
+                        vecdb_handler_arc.lock().await.update_indexed_file_paths().await;
                         info!("update_indexed_file_paths: it took {:.3}s", t0.elapsed().as_secs_f64());
                         reported_vecdb_complete = true;
                         // For now, we do not create index 'cause it hurts quality of retrieval
                         // info!("VECDB Creating index");
-                        // match vecdb_handler_ref.lock().await.create_index().await {
+                        // match vecdb_handler_arc.lock().await.create_index().await {
                         //     Ok(_) => info!("VECDB CREATED INDEX"),
                         //     Err(err) => info!("VECDB Error creating index: {}", err)
                         // }
@@ -322,7 +322,7 @@ async fn vectorize_thread(
         }
 
         {
-            let vecdb_cache = vecdb_cache_ref.lock().await;
+            let vecdb_cache = vecdb_cache_arc.lock().await;
             for split_item in split_data.into_iter() {
                 if vecdb_cache.contains(&split_item.window_text_hash) {
                     delayed_cached_splits_q.push(split_item);
@@ -331,12 +331,12 @@ async fn vectorize_thread(
                 }
             }
         }
-        // Do not keep too many split in the memory
+        // Do not keep too many
         if delayed_cached_splits_q.len() > 1024 {
             add_from_cache_to_vec_db(
                 &mut delayed_cached_splits_q,
-                vecdb_handler_ref.clone(),
-                vecdb_cache_ref.clone(),
+                vecdb_handler_arc.clone(),
+                vecdb_cache_arc.clone(),
                 1024,
             ).await;
         }
