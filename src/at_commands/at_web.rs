@@ -102,8 +102,8 @@ async fn fetch_html(url: &str, timeout: Duration) -> Result<String, String> {
     Ok(body)
 }
 
-async fn execute_at_web(url: &str) -> Result<String, String>{
-    let html = fetch_html(url, Duration::from_secs(5)).await.unwrap();
+pub async fn execute_at_web(url: &str) -> Result<String, String>{
+    let html = fetch_html(url, Duration::from_secs(5)).await?;
     
     let text = html2text::config::with_decorator(CustomTextConversion)
         .string_from_read(&html.as_bytes()[..], 200)
@@ -124,7 +124,7 @@ impl AtWeb {
     }
 }
 
-fn text_on_clip(url_text: &str) -> String{
+pub fn text_on_clip(url_text: &str) -> String{
     format!("Executed @web {}", url_text)
 }
 
@@ -150,7 +150,7 @@ impl AtCommand for AtWeb {
         )?;
 
         let message = ChatMessage::new(
-            "assistant".to_string(),
+            "user".to_string(),
             text,
         );
 

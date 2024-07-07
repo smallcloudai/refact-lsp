@@ -207,3 +207,21 @@ pub fn parse_words_from_line(line: &String) -> Vec<(String, usize, usize)> {
     }
     results
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_words_from_line_with_link() {
+        let line = "Check out this link: https://doc.rust-lang.org/book/ch03-04-comments.html".to_string();
+        let parsed_words = parse_words_from_line(&line);
+
+        let link = parsed_words.iter().find(|(word, _, _)| word == "https://doc.rust-lang.org/book/ch03-04-comments.html");
+        assert!(link.is_some(), "The link should be parsed as a single word");
+        if let Some((word, start, end)) = link {
+            assert_eq!(word, "https://doc.rust-lang.org/book/ch03-04-comments.html");
+        }
+    }
+}

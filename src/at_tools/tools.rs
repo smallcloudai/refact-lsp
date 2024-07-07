@@ -30,6 +30,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         ("patch".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_patch::ToolPatch{}) as Box<dyn Tool + Send>))),
         ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn Tool + Send>))),
+        ("web".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_web::AttWeb{}) as Box<dyn Tool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -140,6 +141,15 @@ tools:
         type: "string"
         description: "Path to the specific file to diff (optional)."
     parameters_required:
+    
+  - name: "web"
+    description: "Fetch and convert a web page to text. Can be used to get the text content of a web page."
+    parameters:
+      - name: "url"
+        type: "string"
+        description: "URL of the web page to fetch."
+    parameters_required:
+      - "url"
 
 "####;
 
