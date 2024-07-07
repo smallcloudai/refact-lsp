@@ -249,7 +249,7 @@ print(x)
             lines_remove: "        self.x = x\n        self.y = y\n".to_string(),
             lines_add: "        self.x, self.y = x, y\n".to_string(),
             chunk_id: 1,
-            apply: false,
+            apply: true,
         };
 
         let chunks_undo: Vec<DiffChunk> = vec![chunk1.clone()];
