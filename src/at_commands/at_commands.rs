@@ -15,8 +15,9 @@ use crate::at_commands::at_ast_definition::AtAstDefinition;
 use crate::at_commands::at_ast_reference::AtAstReference;
 use crate::at_commands::at_ast_lookup_symbols::AtAstLookupSymbols;
 use crate::at_commands::at_file_search::AtFileSearch;
-use crate::at_commands::at_local_notes_to_self::AtLocalNotesToSelf;
+// use crate::at_commands::at_local_notes_to_self::AtLocalNotesToSelf;
 use crate::at_commands::at_diff::{AtDiff, AtDiffRev};
+use crate::at_commands::at_web::AtWeb;
 use crate::at_commands::execute_at::AtCommandMember;
 
 
@@ -74,6 +75,7 @@ pub async fn at_commands_dict(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<Strin
         // ("@local-notes-to-self".to_string(), Arc::new(AMutex::new(Box::new(AtLocalNotesToSelf::new()) as Box<dyn AtCommand + Send>))),
         ("@diff".to_string(), Arc::new(AMutex::new(Box::new(AtDiff::new()) as Box<dyn AtCommand + Send>))),
         ("@diff-rev".to_string(), Arc::new(AMutex::new(Box::new(AtDiffRev::new()) as Box<dyn AtCommand + Send>))),
+        ("@web".to_string(), Arc::new(AMutex::new(Box::new(AtWeb::new()) as Box<dyn AtCommand + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
