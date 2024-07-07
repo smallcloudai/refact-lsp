@@ -78,9 +78,11 @@ pub async fn run_tools(
             let mut have_answer = false;
             for msg in tool_msg_and_maybe_more {
                 if let ContextEnum::ChatMessage(ref raw_msg) = msg {
-                    context_messages.push(raw_msg.clone());
-                    stream_back_to_user.push_in_json(json!(raw_msg.clone()));
-                    if (raw_msg.role == "tool" || raw_msg.role == "diff") && raw_msg.tool_call_id == t_call.id {
+                    if raw_msg.role != "diff" {
+                        context_messages.push(raw_msg.clone());
+                        stream_back_to_user.push_in_json(json!(raw_msg.clone()));
+                    }
+                    if (raw_msg.role == "tool") && raw_msg.tool_call_id == t_call.id {
                         have_answer = true;
                     }
                 }
@@ -113,9 +115,7 @@ pub async fn run_tools(
     ).await;
 
     if !context_file.is_empty() {
-        let json_vec = context_file.iter().map(|p| {
-            json!(p)
-        }).collect::<Vec<Value>>();
+        let json_vec = context_file.iter().map(|p| { json!(p) }).collect::<Vec<Value>>();
 
         let message = ChatMessage::new(
             "context_file".to_string(),

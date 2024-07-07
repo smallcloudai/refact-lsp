@@ -10,3 +10,5 @@ mod att_note_to_self;
 mod att_execute_cmd;
 mod att_file_search;
 mod att_patch;
+mod att_diff;
+mod att_web;
