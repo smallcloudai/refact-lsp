@@ -7,7 +7,7 @@ use tracing::{info, warn};
 use tokio::sync::RwLock as ARwLock;
 
 use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_context_file_from_context_tool};
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ContextEnum, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::scratchpads::chat_utils_rag::{count_tokens, HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2};
 
@@ -47,6 +47,8 @@ pub async fn run_at_commands(
     // This is useful to give prefix and suffix of the same file precisely the position necessary for FIM-like operation of a chat model
     let mut rebuilt_messages: Vec<ChatMessage> = original_messages.iter().take(user_msg_starts).map(|m| m.clone()).collect();
     for msg_idx in user_msg_starts..original_messages.len() {
+        let mut at_results_msgs = vec![];
+        
         let msg = original_messages[msg_idx].clone();
         let role = msg.role.clone();
 
@@ -69,8 +71,7 @@ pub async fn run_at_commands(
         for exec_result in messages_exec_output.iter() {
             // at commands exec() can produce both role="user" and role="assistant" and role="diff" messages
             if let ContextEnum::ChatMessage(raw_msg) = exec_result {
-                rebuilt_messages.push(raw_msg.clone());
-                stream_back_to_user.push_in_json(json!(raw_msg));
+                at_results_msgs.push(raw_msg.clone());
             }
         }
 
@@ -92,8 +93,7 @@ pub async fn run_at_commands(
                     "context_file".to_string(),
                     serde_json::to_string(&json_vec).unwrap_or("".to_string()),
                 );
-                rebuilt_messages.push(message.clone());
-                stream_back_to_user.push_in_json(json!(message));
+                at_results_msgs.push(message);
             }
         }
         info!("postprocess_at_results2 {:.3}s", t0.elapsed().as_secs_f32());
@@ -105,6 +105,33 @@ pub async fn run_at_commands(
             if role == "user" {
                 stream_back_to_user.push_in_json(json!(msg));
             }
+        }
+
+        if !at_results_msgs.is_empty() {
+            let tool_call_id = format!("call_{}_{}", msg_idx, messages_with_at);
+            let tool_call_msg = ChatMessage {
+                role: "assistant".to_string(),
+                content: "".to_string(),
+                tool_calls: Some(vec![ChatToolCall {
+                    id: tool_call_id.clone(),
+                    function: ChatToolFunction {
+                        arguments: "pass".to_string(),
+                        name: "pass".to_string(),
+                    },
+                    tool_type: "function".to_string(),
+                }]),
+                tool_call_id: Value::Null.to_string()
+            };
+            rebuilt_messages.push(tool_call_msg.clone());
+            stream_back_to_user.push_in_json(json!(tool_call_msg));
+            let tool_msg = ChatMessage {
+                role: "tool".to_string(),
+                content: json!(at_results_msgs[0]).to_string(),
+                tool_calls: None,
+                tool_call_id,
+            };
+            rebuilt_messages.push(tool_msg.clone());
+            stream_back_to_user.push_in_json(json!(tool_msg));
         }
     }
     return (rebuilt_messages.clone(), user_msg_starts, any_context_produced)

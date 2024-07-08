@@ -227,7 +227,7 @@ fn default_gradient_type_value() -> i32 {
     -1
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatToolFunction {
     pub arguments: String,
     pub name: String,
@@ -241,7 +241,7 @@ pub struct ChatToolCall {
     pub tool_type: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
     #[serde(default, deserialize_with="deserialize_content")]

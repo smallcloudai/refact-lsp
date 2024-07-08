@@ -18,12 +18,11 @@ impl Tool for AttWeb {
         };
 
         let text = execute_at_web(&url).await?;
-        let message = ChatMessage::new("assistant".to_string(), text);
-
-        let mut results = vec![ContextEnum::ChatMessage(message)];
+        
+        let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: text_on_clip(&url),
+            content: text,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
         }));

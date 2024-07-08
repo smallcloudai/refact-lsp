@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 use tracing::{error, info, warn};
@@ -112,6 +112,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         });
         info!("chat passthrough {} messages -> {} messages after applying at-commands and limits, possibly adding the default system message", messages.len(), limited_msgs.len());
         let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
+        info!("limited_msgs (before filtering): \n\n{}\n\n", limited_msgs.iter().map(|x|format!("role: {}; content: {:?}...; tool_calls: {}", x.role, x.content.chars().take(15).collect::<String>(), x.tool_calls.clone().map(|i|serde_json::to_string_pretty(&json!(i)).unwrap()).unwrap_or("".to_string()) )).collect::<Vec<_>>().join("\n"));
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
                 filtered_msgs.push(msg.clone());
