@@ -4,7 +4,6 @@ use std::ops::Div;
 use std::sync::{Arc, Weak};
 use std::sync::RwLock as StdRwLock;
 use std::time::SystemTime;
-use parking_lot::Mutex as ParkMutex;
 
 use tokenizers::Tokenizer;
 use tokio::sync::{Mutex as AMutex, RwLock};
@@ -20,7 +19,7 @@ use crate::vecdb::handler::VecDBHandler;
 use crate::vecdb::structs::{VecdbRecord, SplitResult, VecdbConstants, VecDbStatus};
 use crate::vecdb::vecdb_cache::VecDBCache;
 use crate::vecdb::structs::SimpleTextHashVector;
-use crate::at_tools::att_knowledge::MemoryDatabase;
+use crate::at_tools::att_knowledge::MemoriesDatabase;
 
 const DEBUG_WRITE_VECDB_FILES: bool = false;
 
@@ -33,7 +32,7 @@ pub struct FileVectorizerService {
     status: Arc<AMutex<VecDbStatus>>,
     constants: VecdbConstants,
     api_key: String,
-    memdb: Arc<AMutex<MemoryDatabase>>,
+    memdb: Arc<AMutex<MemoriesDatabase>>,
 }
 
 async fn cooldown_queue_thread(
@@ -205,7 +204,7 @@ async fn vectorize_thread(
     queue: Arc<AMutex<VecDeque<Document>>>,
     vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
     vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
-    memdb: Arc<AMutex<MemoryDatabase>>,
+    memdb: Arc<AMutex<MemoriesDatabase>>,
     status: Arc<AMutex<VecDbStatus>>,
     constants: VecdbConstants,
     api_key: String,
@@ -288,7 +287,9 @@ async fn vectorize_thread(
                         // }
 
                         info!("MEMDB START");
-                        let r = memdb.lock().await.vectorize_all_payloads(
+                        let r = crate::at_tools::att_knowledge::vectorize_dirty_memories(
+                            memdb.clone(),
+                            vecdb_cache_arc.clone(),
                             status.clone(),
                             client.clone(),
                             &api_key,
@@ -375,7 +376,7 @@ impl FileVectorizerService {
         vecdb_cache: Arc<AMutex<VecDBCache>>,
         constants: VecdbConstants,
         api_key: String,
-        memdb: Arc<AMutex<MemoryDatabase>>,
+        memdb: Arc<AMutex<MemoriesDatabase>>,
     ) -> Self {
         let update_request_queue = Arc::new(AMutex::new(VecDeque::new()));
         let output_queue = Arc::new(AMutex::new(VecDeque::new()));

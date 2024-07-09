@@ -38,7 +38,7 @@ fn vecdb_constants(
 }
 
 pub struct VecDb {
-    pub memdb: Arc<AMutex<crate::at_tools::att_knowledge::MemoryDatabase>>,
+    pub memdb: Arc<AMutex<crate::at_tools::att_knowledge::MemoriesDatabase>>,
     vecdb_emb_client: Arc<AMutex<reqwest::Client>>,
     vecdb_handler: Arc<AMutex<VecDBHandler>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
@@ -222,7 +222,7 @@ impl VecDb {
         let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
-        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, vecdb_cache.clone(), &constants).await?;
+        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, &constants).await?;
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),

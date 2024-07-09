@@ -60,16 +60,17 @@ impl Tool for AttKnowledge {
 }
 
 
-pub struct MemoryDatabase {
+pub struct MemoriesDatabase {
     pub conn: Arc<ParkMutex<Connection>>,
     pub vecdb_constants: VecdbConstants,
-    pub vecdb_cache: Arc<AMutex<VecDBCache>>,
     pub memories_table: Table,
     pub schema_arc: SchemaRef,
     pub embedding_temp_dir: TempDir,
+    pub dirty_memids: Vec<String>,
+    pub dirty_everything: bool,
 }
 
-impl MemoryDatabase {
+impl MemoriesDatabase {
     pub fn create_table(&self) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
@@ -145,126 +146,14 @@ impl MemoryDatabase {
         }
         Ok(table_contents)
     }
-
-    pub async fn vectorize_all_payloads(
-        &mut self,
-        status: Arc<AMutex<crate::vecdb::structs::VecDbStatus>>,
-        client: Arc<AMutex<reqwest::Client>>,
-        api_key: &String,
-        #[allow(non_snake_case)]
-        B: usize,
-   ) -> Result<(), String> {
-        let mut memids: Vec<String> = Vec::new();
-        let mut todo: Vec<SimpleTextHashVector> = Vec::new();
-        {
-            let conn = self.conn.lock();
-            let mut stmt = conn.prepare("SELECT memid, m_payload FROM memories")
-                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                ))
-            }).map_err(|e| format!("Failed to query memories: {}", e))?;
-            for row in rows {
-                let (memid, m_payload) = row.map_err(|e| format!("Failed to read row: {}", e))?;
-                let window_text_hash = official_text_hashing_function(&m_payload);
-                let simple_text_hash_vector = SimpleTextHashVector {
-                    window_text: m_payload,
-                    window_text_hash,
-                    vector: None,
-                };
-                memids.push(memid);
-                todo.push(simple_text_hash_vector);
-            }
-        }
-
-        {
-            let mut cache = self.vecdb_cache.lock().await;
-            cache.process_simple_hash_text_vector(&mut todo).await.map_err(|e| format!("Failed to vectorize payload: {}", e))?
-            // this makes .vector appear for records that exist in cache
-        }
-
-        let todo_len = todo.len();
-        let mut to_vectorize = todo.iter_mut().filter(|x| x.vector.is_none()).collect::<Vec<&mut SimpleTextHashVector>>();
-        info!("{} memories total, {} to vectorize", todo_len, to_vectorize.len());
-        for chunk in to_vectorize.chunks_mut(B) {
-            let texts: Vec<String> = chunk.iter().map(|x| x.window_text.clone()).collect();
-            let embedding_mb = crate::fetch_embedding::get_embedding_with_retry(
-                client.clone(),
-                &self.vecdb_constants.endpoint_embeddings_style,
-                &self.vecdb_constants.model_name,
-                &self.vecdb_constants.endpoint_embeddings_template,
-                texts,
-                api_key,
-                1,
-            ).await?;
-            for (chunk_save, x) in chunk.iter_mut().zip(embedding_mb.iter()) {
-                chunk_save.vector = Some(x.clone());  // <-- look here
-            }
-        }
-        {
-            let mut cache = self.vecdb_cache.lock().await;
-            let temp_vec: Vec<SimpleTextHashVector> = to_vectorize.iter().map(|x| (**x).clone()).collect();
-            cache.cache_add_new_records(temp_vec).await.map_err(|e| format!("Failed to update cache: {}", e))?;
-        }
-
-        fn make_emb_data(records: &Vec<SimpleTextHashVector>, embedding_size: i32) -> Result<ArrayData, String> {
-            let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
-            let mut emb_builder: Vec<f32> = vec![];
-            for record in records {
-                emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
-            }
-            let emb_data_res = ArrayData::builder(DataType::Float32)
-                .add_buffer(Buffer::from_vec(emb_builder))
-                .len(records.len() * embedding_size as usize)
-                .build();
-            let emb_data = match emb_data_res {
-                Ok(res) => res,
-                Err(err) => { return Err(format!("{:?}", err)); }
-            };
-            match ArrayData::builder(DataType::FixedSizeList(vec_trait.clone(), embedding_size))
-                .len(records.len())
-                .add_child_data(emb_data.clone())
-                .build()
-            {
-                Ok(res) => Ok(res),
-                Err(err) => return Err(format!("{:?}", err))
-            }
-        }
-        let vectors: ArrayData = match make_emb_data(&todo, self.vecdb_constants.embedding_size) {
-            Ok(res) => res,
-            Err(err) => return Err(format!("{:?}", err))
-        };
-        let data_batches_iter = RecordBatchIterator::new(
-            vec![RecordBatch::try_new(
-                self.schema_arc.clone(),
-                vec![
-                    Arc::new(StringArray::from(memids)),
-                    Arc::new(FixedSizeListArray::from(vectors.clone())),
-                ],
-            )],
-            self.schema_arc.clone(),
-        );
-        let data_res = self.memories_table.add(
-            data_batches_iter,
-            Some(WriteParams {
-                mode: WriteMode::Append,
-                ..Default::default()
-            }),
-        ).await;
-        info!("Added {} memories to the database:\n{:?}", todo.len(), data_res);
-
-        Ok(())
-    }
 }
 
 
 pub async fn mem_init(
     cache_dir: &std::path::PathBuf,
-    vecdb_cache: Arc<AMutex<VecDBCache>>,
+    // vecdb_cache: Arc<AMutex<VecDBCache>>,
     constants: &VecdbConstants,
-) -> Result<Arc<AMutex<MemoryDatabase>>, String> {
+) -> Result<Arc<AMutex<MemoriesDatabase>>, String> {
     // SQLite database for memories, permanent on disk
     let dbpath = cache_dir.join("memories.sqlite");
     let cache_database = Connection::open_with_flags(
@@ -299,16 +188,165 @@ pub async fn mem_init(
     };
 
     // Return everything
-    let db = MemoryDatabase {
+    let db = MemoriesDatabase {
         conn: Arc::new(ParkMutex::new(cache_database)),
         vecdb_constants: constants.clone(),
-        vecdb_cache: vecdb_cache,
         memories_table: memories_table,
         schema_arc,
         embedding_temp_dir,
+        dirty_memids: Vec::new(),
+        dirty_everything: true,
     };
     db.create_table()?;
     Ok(Arc::new(AMutex::new(db)))
+}
+
+pub async fn vectorize_dirty_memories(
+    memdb: Arc<AMutex<MemoriesDatabase>>,
+    vecdb_cache: Arc<AMutex<VecDBCache>>,
+    status: Arc<AMutex<crate::vecdb::structs::VecDbStatus>>,
+    client: Arc<AMutex<reqwest::Client>>,
+    api_key: &String,
+    #[allow(non_snake_case)]
+    B: usize,
+) -> Result<(), String> {
+    let mut memids: Vec<String> = Vec::new();
+    let mut todo: Vec<SimpleTextHashVector> = Vec::new();
+    {
+        let memdb_locked = memdb.lock().await;
+        let conn = memdb_locked.conn.lock();
+        let rows: Vec<(String, String)> = if memdb_locked.dirty_everything {
+            let mut stmt = conn.prepare("SELECT memid, m_payload FROM memories")
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            let x = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query memories: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect rows: {}", e))?;
+            x
+        } else if !memdb_locked.dirty_memids.is_empty() {
+            let placeholders = (0..memdb_locked.dirty_memids.len())
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",");
+            let query = format!("SELECT memid, m_payload FROM memories WHERE memid IN ({})", placeholders);
+            let mut stmt = conn.prepare(&query)
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            let x = stmt.query_map(rusqlite::params_from_iter(memdb_locked.dirty_memids.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query memories: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect rows: {}", e))?;
+            x
+        } else {
+            Vec::new()
+        };
+        for (memid, m_payload) in rows {
+            let window_text_hash = official_text_hashing_function(&m_payload);
+            let simple_text_hash_vector = SimpleTextHashVector {
+                window_text: m_payload,
+                window_text_hash,
+                vector: None,
+            };
+            memids.push(memid);
+            todo.push(simple_text_hash_vector);
+        }
+    }
+
+    {
+        let mut cache_locked = vecdb_cache.lock().await;
+        cache_locked.process_simple_hash_text_vector(&mut todo).await.map_err(|e| format!("Failed to vectorize payload: {}", e))?
+        // this makes todo[].vector appear for records that exist in cache
+    }
+
+    let todo_len = todo.len();
+    let mut to_vectorize = todo.iter_mut().filter(|x| x.vector.is_none()).collect::<Vec<&mut SimpleTextHashVector>>();
+    info!("{} memories total, {} to vectorize", todo_len, to_vectorize.len());
+    let my_constants = memdb.lock().await.vecdb_constants.clone();
+    for chunk in to_vectorize.chunks_mut(B) {
+        let texts: Vec<String> = chunk.iter().map(|x| x.window_text.clone()).collect();
+        let embedding_mb = crate::fetch_embedding::get_embedding_with_retry(
+            client.clone(),
+            &my_constants.endpoint_embeddings_style,
+            &my_constants.model_name,
+            &my_constants.endpoint_embeddings_template,
+            texts,
+            api_key,
+            1,
+        ).await?;
+        for (chunk_save, x) in chunk.iter_mut().zip(embedding_mb.iter()) {
+            chunk_save.vector = Some(x.clone());  // <-- this will make the rest of todo[].vector appear
+        }
+    }
+
+    {
+        let mut cache_locked = vecdb_cache.lock().await;
+        let temp_vec: Vec<SimpleTextHashVector> = to_vectorize.iter().map(|x| (**x).clone()).collect();
+        cache_locked.cache_add_new_records(temp_vec).await.map_err(|e| format!("Failed to update cache: {}", e))?;
+    }
+
+    // Save to lance
+    fn make_emb_data(records: &Vec<SimpleTextHashVector>, embedding_size: i32) -> Result<ArrayData, String> {
+        let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
+        let mut emb_builder: Vec<f32> = vec![];
+        for record in records {
+            emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
+        }
+        let emb_data_res = ArrayData::builder(DataType::Float32)
+            .add_buffer(Buffer::from_vec(emb_builder))
+            .len(records.len() * embedding_size as usize)
+            .build();
+        let emb_data = match emb_data_res {
+            Ok(res) => res,
+            Err(err) => { return Err(format!("{:?}", err)); }
+        };
+        match ArrayData::builder(DataType::FixedSizeList(vec_trait.clone(), embedding_size))
+            .len(records.len())
+            .add_child_data(emb_data.clone())
+            .build()
+        {
+            Ok(res) => Ok(res),
+            Err(err) => return Err(format!("{:?}", err))
+        }
+    }
+    let vectors: ArrayData = match make_emb_data(&todo, my_constants.embedding_size) {
+        Ok(res) => res,
+        Err(err) => return Err(format!("{:?}", err))
+    };
+
+    let (my_schema_arc, mut my_memories_table) = {
+        let memdb_locked = memdb.lock().await;
+        (memdb_locked.schema_arc.clone(), memdb_locked.memories_table.clone())
+    };
+
+    let data_batches_iter = RecordBatchIterator::new(
+        vec![RecordBatch::try_new(
+            my_schema_arc.clone(),
+            vec![
+                Arc::new(StringArray::from(memids)),
+                Arc::new(FixedSizeListArray::from(vectors.clone())),
+            ],
+        )],
+        my_schema_arc.clone(),
+    );
+    let data_res = my_memories_table.add(
+        data_batches_iter,
+        Some(WriteParams {
+            mode: WriteMode::Append,
+            ..Default::default()
+        }),
+    ).await;
+    info!("Added {} memories to the database:\n{:?}", todo.len(), data_res);
+
+    Ok(())
 }
 
 fn generate_memid() -> String {

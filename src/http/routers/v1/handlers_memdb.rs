@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::at_tools::att_knowledge::MemoryDatabase;
+use crate::at_tools::att_knowledge::MemoriesDatabase;
 
 #[derive(Deserialize)]
 struct MemAddRequest {
@@ -39,7 +39,7 @@ struct MemQuery {
 
 pub async fn gcx2memdb(
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<Arc<AMutex<MemoryDatabase>>, ScratchError> {
+) -> Result<Arc<AMutex<MemoriesDatabase>>, ScratchError> {
     let vec_db_module = gcx.read().await.vec_db.clone();
     let x = if let Some(ref mut db) = *vec_db_module.lock().await {
         Ok(db.memdb.clone())
