@@ -48,14 +48,17 @@ impl Tool for AttTree {
                 return Err(err);
             }
         };
-
-        Ok(vec![
-            ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content,
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-            })
-        ])
+        
+        let mut results = vec![];
+        results.push(ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: "executed file tree".to_string(),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+        }));
+        results.push(ContextEnum::ChatMessage(ChatMessage::new(
+            "plain_text".to_string(), content
+        )));
+        Ok(results)
     }
 }

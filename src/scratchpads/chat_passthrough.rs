@@ -114,7 +114,10 @@ impl ScratchpadAbstract for ChatPassthrough {
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
                 filtered_msgs.push(msg.clone());
-
+            } else if msg.role == "plain_text" {
+                filtered_msgs.push(ChatMessage::new(
+                    "user".to_string(), msg.content.clone()
+                ));
             } else if msg.role == "diff" {
                 filtered_msgs.push(ChatMessage {
                     role: "tool".to_string(),

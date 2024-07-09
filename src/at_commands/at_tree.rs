@@ -251,7 +251,7 @@ impl AtCommand for AtTree {
         ).await {
             Ok(tree) => {
                 ContextEnum::ChatMessage(ChatMessage::new(
-                    "context_text".to_string(),
+                    "plain_text".to_string(),
                     tree,
                 ))
             }
