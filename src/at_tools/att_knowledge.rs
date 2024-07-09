@@ -64,8 +64,8 @@ pub struct MemoryDatabase {
     pub conn: Arc<ParkMutex<Connection>>,
     pub vecdb_constants: VecdbConstants,
     pub vecdb_cache: Arc<AMutex<VecDBCache>>,
-    pub data_table: Table,
-    pub schema: SchemaRef,
+    pub memories_table: Table,
+    pub schema_arc: SchemaRef,
     pub embedding_temp_dir: TempDir,
 }
 
@@ -185,7 +185,9 @@ impl MemoryDatabase {
             // this makes .vector appear for records that exist in cache
         }
 
+        let todo_len = todo.len();
         let mut to_vectorize = todo.iter_mut().filter(|x| x.vector.is_none()).collect::<Vec<&mut SimpleTextHashVector>>();
+        info!("{} memories total, {} to vectorize", todo_len, to_vectorize.len());
         for chunk in to_vectorize.chunks_mut(B) {
             let texts: Vec<String> = chunk.iter().map(|x| x.window_text.clone()).collect();
             let embedding_mb = crate::fetch_embedding::get_embedding_with_retry(
@@ -206,14 +208,6 @@ impl MemoryDatabase {
             let temp_vec: Vec<SimpleTextHashVector> = to_vectorize.iter().map(|x| (**x).clone()).collect();
             cache.cache_add_new_records(temp_vec).await.map_err(|e| format!("Failed to update cache: {}", e))?;
         }
-
-        // let schema = Arc::new(Schema::new(vec![
-        //     Field::new("memid", DataType::Utf8, false),
-        //     Field::new("thevec", DataType::FixedSizeList(
-        //         Arc::new(Field::new("item", DataType::Float32, false)),
-        //         constants.embedding_size,
-        //     ), false),
-        // ]));
 
         fn make_emb_data(records: &Vec<SimpleTextHashVector>, embedding_size: i32) -> Result<ArrayData, String> {
             let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
@@ -244,15 +238,15 @@ impl MemoryDatabase {
         };
         let data_batches_iter = RecordBatchIterator::new(
             vec![RecordBatch::try_new(
-                self.schema.clone(),
+                self.schema_arc.clone(),
                 vec![
-                    Arc::new(FixedSizeListArray::from(vectors.clone())),
                     Arc::new(StringArray::from(memids)),
+                    Arc::new(FixedSizeListArray::from(vectors.clone())),
                 ],
             )],
-            self.schema.clone(),
+            self.schema_arc.clone(),
         );
-        let data_res = self.data_table.add(
+        let data_res = self.memories_table.add(
             data_batches_iter,
             Some(WriteParams {
                 mode: WriteMode::Append,
@@ -290,17 +284,17 @@ pub async fn mem_init(
     // Arrow database for embeddings, only valid for the current process
     let embedding_temp_dir = TempDir::new().map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let embedding_path = embedding_temp_dir.path().to_str().unwrap();
-    let schema = Arc::new(Schema::new(vec![
+    let schema_arc = Arc::new(Schema::new(vec![
         Field::new("memid", DataType::Utf8, false),
         Field::new("thevec", DataType::FixedSizeList(
-            Arc::new(Field::new("item", DataType::Float32, false)),
+            Arc::new(Field::new("item", DataType::Float32, true)),
             constants.embedding_size,
         ), false),
     ]));
     let temp_database = Database::connect(embedding_path).await.map_err(|err| format!("Failed to connect to database: {:?}", err))?;
-    let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema.clone());
-    let data_table = match temp_database.create_table("data", batches_iter, Option::from(WriteParams::default())).await {
-        Ok(table) => table,
+    let batches_iter = RecordBatchIterator::new(vec![].into_iter().map(Ok), schema_arc.clone());
+    let memories_table = match temp_database.create_table("memories", batches_iter, Option::from(WriteParams::default())).await {
+        Ok(t) => t,
         Err(err) => return Err(format!("{:?}", err))
     };
 
@@ -309,8 +303,8 @@ pub async fn mem_init(
         conn: Arc::new(ParkMutex::new(cache_database)),
         vecdb_constants: constants.clone(),
         vecdb_cache: vecdb_cache,
-        data_table,
-        schema,
+        memories_table: memories_table,
+        schema_arc,
         embedding_temp_dir,
     };
     db.create_table()?;
