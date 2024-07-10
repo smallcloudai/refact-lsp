@@ -65,7 +65,6 @@ pub struct MemoriesDatabase {
     pub vecdb_constants: VecdbConstants,
     pub memories_table: Table,
     pub schema_arc: SchemaRef,
-    pub embedding_temp_dir: TempDir,
     pub dirty_memids: Vec<String>,
     pub dirty_everything: bool,
 }
@@ -193,7 +192,6 @@ pub async fn mem_init(
         vecdb_constants: constants.clone(),
         memories_table: memories_table,
         schema_arc,
-        embedding_temp_dir,
         dirty_memids: Vec::new(),
         dirty_everything: true,
     };
@@ -201,21 +199,15 @@ pub async fn mem_init(
     Ok(Arc::new(AMutex::new(db)))
 }
 
-pub async fn vectorize_dirty_memories(
+async fn recall_payload_for_dirty_memories_and_mark_them_not_dirty(
     memdb: Arc<AMutex<MemoriesDatabase>>,
-    vecdb_cache: Arc<AMutex<VecDBCache>>,
-    status: Arc<AMutex<crate::vecdb::structs::VecDbStatus>>,
-    client: Arc<AMutex<reqwest::Client>>,
-    api_key: &String,
-    #[allow(non_snake_case)]
-    B: usize,
-) -> Result<(), String> {
+) -> Result<(Vec<String>, Vec<SimpleTextHashVector>), String> {
     let mut memids: Vec<String> = Vec::new();
     let mut todo: Vec<SimpleTextHashVector> = Vec::new();
-    {
-        let memdb_locked = memdb.lock().await;
+    let mut memdb_locked = memdb.lock().await;
+    let rows: Vec<(String, String)> = {
         let conn = memdb_locked.conn.lock();
-        let rows: Vec<(String, String)> = if memdb_locked.dirty_everything {
+        if memdb_locked.dirty_everything {
             let mut stmt = conn.prepare("SELECT memid, m_payload FROM memories")
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
             let x = stmt.query_map([], |row| {
@@ -248,29 +240,47 @@ pub async fn vectorize_dirty_memories(
             x
         } else {
             Vec::new()
-        };
-        for (memid, m_payload) in rows {
-            let window_text_hash = official_text_hashing_function(&m_payload);
-            let simple_text_hash_vector = SimpleTextHashVector {
-                window_text: m_payload,
-                window_text_hash,
-                vector: None,
-            };
-            memids.push(memid);
-            todo.push(simple_text_hash_vector);
         }
+    };
+    for (memid, m_payload) in rows {
+        let window_text_hash = official_text_hashing_function(&m_payload);
+        let simple_text_hash_vector = SimpleTextHashVector {
+            window_text: m_payload,
+            window_text_hash,
+            vector: None,
+        };
+        memids.push(memid);
+        todo.push(simple_text_hash_vector);
+    }
+    memdb_locked.dirty_memids.clear();
+    memdb_locked.dirty_everything = false;
+    Ok((memids, todo))
+}
+
+pub async fn vectorize_dirty_memories(
+    memdb: Arc<AMutex<MemoriesDatabase>>,
+    vecdb_cache: Arc<AMutex<VecDBCache>>,
+    status: Arc<AMutex<crate::vecdb::structs::VecDbStatus>>,
+    client: Arc<AMutex<reqwest::Client>>,
+    api_key: &String,
+    #[allow(non_snake_case)]
+    B: usize,
+) -> Result<(), String> {
+    let (memids, mut todo) = recall_payload_for_dirty_memories_and_mark_them_not_dirty(memdb.clone()).await?;
+    if memids.is_empty() {
+        return Ok(());
     }
 
     {
         let mut cache_locked = vecdb_cache.lock().await;
-        cache_locked.process_simple_hash_text_vector(&mut todo).await.map_err(|e| format!("Failed to vectorize payload: {}", e))?
+        cache_locked.process_simple_hash_text_vector(&mut todo).await.map_err(|e| format!("Failed to get vectors from cache: {}", e))?
         // this makes todo[].vector appear for records that exist in cache
     }
 
     let todo_len = todo.len();
     let mut to_vectorize = todo.iter_mut().filter(|x| x.vector.is_none()).collect::<Vec<&mut SimpleTextHashVector>>();
     info!("{} memories total, {} to vectorize", todo_len, to_vectorize.len());
-    let my_constants = memdb.lock().await.vecdb_constants.clone();
+    let my_constants: VecdbConstants = memdb.lock().await.vecdb_constants.clone();
     for chunk in to_vectorize.chunks_mut(B) {
         let texts: Vec<String> = chunk.iter().map(|x| x.window_text.clone()).collect();
         let embedding_mb = crate::fetch_embedding::get_embedding_with_retry(
@@ -298,6 +308,8 @@ pub async fn vectorize_dirty_memories(
         let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
         let mut emb_builder: Vec<f32> = vec![];
         for record in records {
+            assert!(record.vector.is_some());
+            assert_eq!(record.vector.as_ref().unwrap().len(), embedding_size as usize);
             emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
         }
         let emb_data_res = ArrayData::builder(DataType::Float32)
@@ -322,11 +334,7 @@ pub async fn vectorize_dirty_memories(
         Err(err) => return Err(format!("{:?}", err))
     };
 
-    let (my_schema_arc, mut my_memories_table) = {
-        let memdb_locked = memdb.lock().await;
-        (memdb_locked.schema_arc.clone(), memdb_locked.memories_table.clone())
-    };
-
+    let my_schema_arc = memdb.lock().await.schema_arc.clone();
     let data_batches_iter = RecordBatchIterator::new(
         vec![RecordBatch::try_new(
             my_schema_arc.clone(),
@@ -337,14 +345,17 @@ pub async fn vectorize_dirty_memories(
         )],
         my_schema_arc.clone(),
     );
-    let data_res = my_memories_table.add(
-        data_batches_iter,
-        Some(WriteParams {
-            mode: WriteMode::Append,
-            ..Default::default()
-        }),
-    ).await;
-    info!("Added {} memories to the database:\n{:?}", todo.len(), data_res);
+    let data_res = {
+        let mut memdb_locked = memdb.lock().await;
+        memdb_locked.memories_table.add(
+            data_batches_iter,
+            Some(WriteParams {
+                mode: WriteMode::Append,
+                ..Default::default()
+            }),
+        ).await
+    };
+    info!("Updated {} memories in the database:\n{:?}", todo.len(), data_res);
 
     Ok(())
 }
