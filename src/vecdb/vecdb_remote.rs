@@ -4,7 +4,7 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde_json::json;
 
-use crate::vecdb::structs::{SearchResult, VecdbSearch};
+use crate::vecdb::structs::{MemoSearchResult, SearchResult, VecdbSearch};
 
 #[derive(Debug)]
 pub struct VecDbRemote {}
@@ -43,5 +43,9 @@ impl VecdbSearch for VecDbRemote {
         let result0 = result[0].clone();
         // info!("Vecdb search result: {:?}", &result0);
         Ok(result0)
+    }
+
+    async fn memdb_search(&self, _query: String, _top_n: usize) -> Result<MemoSearchResult, String> {
+        todo!()
     }
 }

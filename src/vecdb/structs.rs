@@ -15,6 +15,12 @@ pub trait VecdbSearch: Send {
         top_n: usize,
         filter_mb: Option<String>,
     ) -> Result<SearchResult, String>;
+
+    async fn memdb_search(
+        &self,
+        query: String,
+        top_n: usize,
+    ) -> Result<MemoSearchResult, String>;
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +60,13 @@ pub struct VecdbRecord {
     pub usefulness: f32,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct MemoRecord {
+    pub vector: Option<Vec<f32>>,
+    pub mem_id: String,
+    pub distance: f32,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct SplitResult {
     pub file_path: PathBuf,
@@ -76,4 +89,10 @@ pub struct SimpleTextHashVector {
 pub struct SearchResult {
     pub query_text: String,
     pub results: Vec<VecdbRecord>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MemoSearchResult {
+    pub query_text: String,
+    pub results: Vec<MemoRecord>,
 }

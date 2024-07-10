@@ -9,6 +9,7 @@ use tracing::{info, error};
 use async_trait::async_trait;
 use serde::Serialize;
 use tokio::task::JoinHandle;
+use crate::at_tools::att_knowledge::MemoriesDatabase;
 use crate::global_context::{CommandLine, GlobalContext};
 use crate::background_tasks::BackgroundTasksHolder;
 
@@ -16,7 +17,7 @@ use crate::fetch_embedding;
 use crate::files_in_workspace::Document;
 use crate::vecdb::handler::VecDBHandler;
 use crate::vecdb::vectorizer_service::FileVectorizerService;
-use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants};
+use crate::vecdb::structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoSearchResult};
 use crate::vecdb::vecdb_cache::VecDBCache;
 
 
@@ -222,7 +223,7 @@ impl VecDb {
         let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
-        let memdb = crate::at_tools::att_knowledge::mem_init(cache_dir, &constants).await?;
+        let memdb = Arc::new(AMutex::new(MemoriesDatabase::init(cache_dir, &constants).await?));
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),
@@ -260,26 +261,26 @@ impl VecDb {
         self.vectorizer_service.lock().await.status().await
     }
 
-    pub async fn memories_add(&mut self, memtype: &str, goal: &str, project: &str, payload: &str) -> Result<String, String>
+    pub async fn memories_add(&mut self, mem_type: &str, goal: &str, project: &str, payload: &str) -> Result<String, String>
     {
-        let memid = {
+        let mem_id = {
             let memdb_locked = self.memdb.lock().await;
-            memdb_locked.add(memtype, goal, project, payload)?
+            memdb_locked.add(mem_type, goal, project, payload)?
         };
         self.vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
         // TODO: wait until processing is over
-        Ok(memid)
+        Ok(mem_id)
     }
 
-    pub async fn memories_erase(&self, memid: &str) -> Result<(), String> {
+    pub async fn memories_erase(&self, mem_id: &str) -> Result<(), String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.erase(memid)?;
+        memdb_locked.erase(mem_id)?;
         Ok(())
     }
 
-    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+    pub async fn memories_update(&self, mem_id: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.update_used(memid, mstat_correct, mstat_useful)?;
+        memdb_locked.update_used(mem_id, mstat_correct, mstat_useful)?;
         Ok(())
     }
 }
@@ -330,5 +331,35 @@ impl VecdbSearch for VecDb {
                 results,
             }
         )
+    }
+
+    async fn memdb_search(
+        &self,
+        query: String,
+        top_n: usize,
+    ) -> Result<MemoSearchResult, String> {
+        let t0 = std::time::Instant::now();
+        let embedding = fetch_embedding::get_embedding_with_retry(
+            self.vecdb_emb_client.clone(),
+            &self.constants.endpoint_embeddings_style,
+            &self.constants.model_name,
+            &self.constants.endpoint_embeddings_template,
+            vec![query.clone()],
+            &self.cmdline.api_key,
+            5
+        ).await?;
+        if embedding.is_empty() {
+            return Err("memdb_search: empty embedding".to_string());
+        }
+        info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
+
+        let mut handler_locked = self.memdb.lock().await;
+
+        let results = match handler_locked.search(&embedding[0], top_n).await {
+            Ok(res) => res,
+            Err(err) => { return Err(err.to_string()) }
+        };
+        
+        Ok(MemoSearchResult {query_text: query, results})
     }
 }

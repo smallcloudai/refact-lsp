@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
-use tokio::sync::Mutex as AMutex;
 
 use axum::Extension;
 use axum::response::Result;
@@ -9,12 +8,12 @@ use serde::Deserialize;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::at_tools::att_knowledge::MemoriesDatabase;
-use crate::vecdb::vecdb::VecDb;
+use crate::vecdb::structs::VecdbSearch;
+
 
 #[derive(Deserialize)]
 struct MemAddRequest {
-    memtype: String,
+    mem_type: String,
     goal: String,
     project: String,
     payload: String,
@@ -22,12 +21,12 @@ struct MemAddRequest {
 
 #[derive(Deserialize)]
 struct MemEraseRequest {
-    memid: String,
+    mem_id: String,
 }
 
 #[derive(Deserialize)]
 struct MemUpdateUsedRequest {
-    memid: String,
+    mem_id: String,
     correct: f64,
     useful: f64,
 }
@@ -36,6 +35,7 @@ struct MemUpdateUsedRequest {
 struct MemQuery {
     goal: String,
     project: f64,
+    top_n: usize,
 }
 
 pub async fn handle_mem_add(
@@ -48,14 +48,14 @@ pub async fn handle_mem_add(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let memid = {
+    let mem_id = {
         let mut vec_db_locked = vec_db.lock().await;
         match vec_db_locked.as_mut() {
             None => {
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
             }
             Some(db) => {
-                db.memories_add(&post.memtype, &post.goal, &post.project, &post.payload).await.map_err(|e| {
+                db.memories_add(&post.mem_type, &post.goal, &post.project, &post.payload).await.map_err(|e| {
                     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
                 })?
             }
@@ -64,7 +64,7 @@ pub async fn handle_mem_add(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"memid\": \"{}\"}}", memid)))
+        .body(Body::from(format!("{{\"mem_id\": \"{}\"}}", mem_id)))
         .unwrap();
 
     Ok(response)
@@ -87,7 +87,7 @@ pub async fn handle_mem_erase(
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
             }
             Some(db) => {
-                db.memories_erase(&post.memid).await.map_err(|e| {
+                db.memories_erase(&post.mem_id).await.map_err(|e| {
                     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
                 })?
             }
@@ -96,7 +96,7 @@ pub async fn handle_mem_erase(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"status\": \"{}\"}}", result)))
+        .body(Body::from(format!("{{\"status\": \"{:?}\"}}", result)))
         .unwrap();
 
     Ok(response)
@@ -119,7 +119,7 @@ pub async fn handle_mem_update_used(
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
             }
             Some(db) => {
-                db.memories_update(&post.memid, post.correct, post.useful).await.map_err(|e| {
+                db.memories_update(&post.mem_id, post.correct, post.useful).await.map_err(|e| {
                     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
                 })?
             }
@@ -128,7 +128,7 @@ pub async fn handle_mem_update_used(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"status\": \"{}\"}}", result)))
+        .body(Body::from(format!("{{\"status\": \"{:?}\"}}", result)))
         .unwrap();
 
     Ok(response)
@@ -142,11 +142,25 @@ pub async fn handle_mem_query(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    // Implement the query logic here using memdb_locked and post
-    // For now, returning a placeholder response
+    // TODO: use project for filtering? (why is it f64??)
+
+    let cx_locked = gcx.read().await;
+    let search_res = match *cx_locked.vec_db.lock().await {
+        Some(ref db) => db.memdb_search(post.goal.to_string(), post.top_n).await
+            .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting memdb search results: {e}")))?,
+        None => {
+            return Err(ScratchError::new(
+                StatusCode::INTERNAL_SERVER_ERROR, "MemDB is not initialized".to_string()
+            ));
+        }
+    };
+
+    let response_body = serde_json::to_string_pretty(&search_res)
+        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("JSON serialization error: {}", e)))?;
+
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from("{\"status\": \"query not implemented\"}"))
+        .body(Body::from(response_body))
         .unwrap();
     Ok(response)
 }

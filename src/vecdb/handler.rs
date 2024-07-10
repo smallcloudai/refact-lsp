@@ -44,7 +44,7 @@ fn cosine_similarity(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
     dot_product / (magnitude_vec1 * magnitude_vec2)
 }
 
-fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
+pub fn cosine_distance(vec1: &Vec<f32>, vec2: &Vec<f32>) -> f32 {
     1.0 - cosine_similarity(vec1, vec2)
 }
 
