@@ -24,9 +24,14 @@ use crate::at_tools::att_knowledge::MemoriesDatabase;
 const DEBUG_WRITE_VECDB_FILES: bool = false;
 
 
+enum MessageToVecdbThread {
+    RegularDocument(Document),
+    MemoriesSomethingDirty(),
+}
+
 pub struct FileVectorizerService {
-    update_request_queue: Arc<AMutex<VecDeque<Document>>>,
-    output_queue: Arc<AMutex<VecDeque<Document>>>,
+    vecdb_delayed_q: Arc<AMutex<VecDeque<Document>>>,
+    vecdb_immediate_q: Arc<AMutex<VecDeque<MessageToVecdbThread>>>,
     vecdb_handler: Arc<AMutex<VecDBHandler>>,
     vecdb_cache: Arc<AMutex<VecDBCache>>,
     status: Arc<AMutex<VecDbStatus>>,
@@ -36,8 +41,8 @@ pub struct FileVectorizerService {
 }
 
 async fn cooldown_queue_thread(
-    update_request_queue: Arc<AMutex<VecDeque<Document>>>,
-    out_queue: Arc<AMutex<VecDeque<Document>>>,
+    vecdb_delayed_q: Arc<AMutex<VecDeque<Document>>>,
+    vecdb_immediate_q: Arc<AMutex<VecDeque<MessageToVecdbThread>>>,
     _status: Arc<AMutex<VecDbStatus>>,
     cooldown_secs: u64,
 ) {
@@ -46,7 +51,7 @@ async fn cooldown_queue_thread(
     loop {
         let mut docs: Vec<Document> = Vec::new();
         {
-            let mut queue_locked = update_request_queue.lock().await;
+            let mut queue_locked = vecdb_delayed_q.lock().await;
             for _ in 0..queue_locked.len() {
                 if let Some(doc) = queue_locked.pop_front() {
                     docs.push(doc);
@@ -75,7 +80,7 @@ async fn cooldown_queue_thread(
         }
         for doc in docs_to_process {
             last_updated.remove(&doc);
-            out_queue.lock().await.push_back(doc);
+            vecdb_immediate_q.lock().await.push_back(MessageToVecdbThread::RegularDocument(doc));
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
     }
@@ -201,7 +206,7 @@ async fn add_from_cache_to_vec_db(
 
 async fn vectorize_thread(
     client: Arc<AMutex<reqwest::Client>>,
-    queue: Arc<AMutex<VecDeque<Document>>>,
+    vecdb_immediate_q: Arc<AMutex<VecDeque<MessageToVecdbThread>>>,
     vecdb_handler_arc: Arc<AMutex<VecDBHandler>>,
     vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
     memdb: Arc<AMutex<MemoriesDatabase>>,
@@ -220,10 +225,10 @@ async fn vectorize_thread(
     let mut delayed_cached_splits_q: Vec<SplitResult> = vec![];
 
     loop {
-        let (doc_mb, files_unprocessed) = {
-            let mut queue_locked = queue.lock().await;
-            let q_len = queue_locked.len();
-            (queue_locked.pop_front(), q_len)
+        let (msg_to_me, files_unprocessed) = {
+            let mut qlocked = vecdb_immediate_q.lock().await;
+            let q_len = qlocked.len();
+            (qlocked.pop_front(), q_len)
         };
 
         loop {
@@ -253,8 +258,8 @@ async fn vectorize_thread(
         reported_vecdb_complete &= files_unprocessed == 0;
 
         let mut doc = {
-            match doc_mb {
-                Some(doc) => {
+            match msg_to_me {
+                Some(MessageToVecdbThread::RegularDocument(doc)) => {
                     let mut locked_status = status.lock().await;
                     locked_status.files_unprocessed = files_unprocessed;
                     if files_unprocessed > files_total {
@@ -263,6 +268,19 @@ async fn vectorize_thread(
                     locked_status.files_total = files_total;
                     locked_status.state = "parsing".to_string();
                     doc
+                }
+                Some(MessageToVecdbThread::MemoriesSomethingDirty()) => {
+                    info!("MEMDB START");
+                    let r = crate::at_tools::att_knowledge::vectorize_dirty_memories(
+                        memdb.clone(),
+                        vecdb_cache_arc.clone(),
+                        status.clone(),
+                        client.clone(),
+                        &api_key,
+                        B,
+                    ).await;
+                    info!("/MEMDB {:?}", r);
+                    continue;
                 }
                 None => {
                     // No files left to process
@@ -285,17 +303,6 @@ async fn vectorize_thread(
                         //     Ok(_) => info!("VECDB CREATED INDEX"),
                         //     Err(err) => info!("VECDB Error creating index: {}", err)
                         // }
-
-                        info!("MEMDB START");
-                        let r = crate::at_tools::att_knowledge::vectorize_dirty_memories(
-                            memdb.clone(),
-                            vecdb_cache_arc.clone(),
-                            status.clone(),
-                            client.clone(),
-                            &api_key,
-                            B,
-                        ).await;
-                        info!("/MEMDB {:?}", r);
 
                         let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
@@ -378,8 +385,8 @@ impl FileVectorizerService {
         api_key: String,
         memdb: Arc<AMutex<MemoriesDatabase>>,
     ) -> Self {
-        let update_request_queue = Arc::new(AMutex::new(VecDeque::new()));
-        let output_queue = Arc::new(AMutex::new(VecDeque::new()));
+        let vecdb_delayed_q = Arc::new(AMutex::new(VecDeque::new()));
+        let vecdb_immediate_q = Arc::new(AMutex::new(VecDeque::new()));
         let status = Arc::new(AMutex::new(
             VecDbStatus {
                 files_unprocessed: 0,
@@ -392,8 +399,8 @@ impl FileVectorizerService {
             }
         ));
         FileVectorizerService {
-            update_request_queue: update_request_queue.clone(),
-            output_queue: output_queue.clone(),
+            vecdb_delayed_q: vecdb_delayed_q.clone(),
+            vecdb_immediate_q: vecdb_immediate_q.clone(),
             vecdb_handler: vecdb_handler.clone(),
             vecdb_cache: vecdb_cache.clone(),
             status: status.clone(),
@@ -411,8 +418,8 @@ impl FileVectorizerService {
     ) -> Vec<JoinHandle<()>> {
         let cooldown_queue_join_handle = tokio::spawn(
             cooldown_queue_thread(
-                self.update_request_queue.clone(),
-                self.output_queue.clone(),
+                self.vecdb_delayed_q.clone(),
+                self.vecdb_immediate_q.clone(),
                 self.status.clone(),
                 self.constants.cooldown_secs,
             )
@@ -422,7 +429,7 @@ impl FileVectorizerService {
         let retrieve_thread_handle = tokio::spawn(
             vectorize_thread(
                 vecdb_client.clone(),
-                self.output_queue.clone(),
+                self.vecdb_immediate_q.clone(),
                 self.vecdb_handler.clone(),
                 self.vecdb_cache.clone(),
                 self.memdb.clone(),
@@ -436,13 +443,21 @@ impl FileVectorizerService {
         return vec![cooldown_queue_join_handle, retrieve_thread_handle];
     }
 
-    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, force: bool) {
+    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
         info!("adding {} files", documents.len());
-        if !force {
-            self.update_request_queue.lock().await.extend(documents.clone());
+        if !process_immediately {
+            self.vecdb_delayed_q.lock().await.extend(documents.clone());
         } else {
-            self.output_queue.lock().await.extend(documents.clone());
+            let mut qlocked = self.vecdb_immediate_q.lock().await;
+            for doc in documents.iter() {
+                qlocked.push_back(MessageToVecdbThread::RegularDocument(doc.clone()));
+            }
         }
+    }
+
+    pub async fn vectorizer_enqueue_dirty_memory(&self) {
+        let mut qlocked = self.vecdb_immediate_q.lock().await;
+        qlocked.push_back(MessageToVecdbThread::MemoriesSomethingDirty());
     }
 
     pub async fn status(&self) -> Result<VecDbStatus, String> {

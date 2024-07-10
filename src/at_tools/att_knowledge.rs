@@ -70,7 +70,7 @@ pub struct MemoriesDatabase {
 }
 
 impl MemoriesDatabase {
-    pub fn create_table(&self) -> Result<(), String> {
+    fn _create_table(&self) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
@@ -88,31 +88,31 @@ impl MemoriesDatabase {
         Ok(())
     }
 
-    pub fn add(&self, memtype: &str, goal: &str, project: &str, payload: &str) -> Result<String> {
+    pub fn add(&self, memtype: &str, goal: &str, project: &str, payload: &str) -> Result<String, String> {
         let conn = self.conn.lock();
         let memid = generate_memid();
         conn.execute(
             "INSERT INTO memories (memid, m_type, m_goal, m_project, m_payload) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![memid, memtype, goal, project, payload],
-        )?;
+        ).map_err(|e| e.to_string())?;
         Ok(memid)
     }
 
-    pub fn erase(&self, memid: &str) -> Result<()> {
+    pub fn erase(&self, memid: &str) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM memories WHERE memid = ?1",
             params![memid],
-        )?;
+        ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub fn update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<()> {
+    pub fn update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = ?1, mstat_useful = ?2 WHERE memid = ?3",
             params![mstat_correct, mstat_useful, memid],
-        )?;
+        ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -195,7 +195,7 @@ pub async fn mem_init(
         dirty_memids: Vec::new(),
         dirty_everything: true,
     };
-    db.create_table()?;
+    db._create_table()?;
     Ok(Arc::new(AMutex::new(db)))
 }
 

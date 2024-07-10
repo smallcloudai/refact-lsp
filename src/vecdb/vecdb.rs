@@ -248,8 +248,8 @@ impl VecDb {
         return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), gcx.clone(), self.constants.tokenizer.clone()).await;
     }
 
-    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, force: bool) {
-        self.vectorizer_service.lock().await.vectorizer_enqueue_files(documents, force).await;
+    pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
+        self.vectorizer_service.lock().await.vectorizer_enqueue_files(documents, process_immediately).await;
     }
 
     pub async fn remove_file(&self, file_path: &PathBuf) {
@@ -258,6 +258,29 @@ impl VecDb {
 
     pub async fn get_status(&self) -> Result<VecDbStatus, String> {
         self.vectorizer_service.lock().await.status().await
+    }
+
+    pub async fn memories_add(&mut self, memtype: &str, goal: &str, project: &str, payload: &str) -> Result<String, String>
+    {
+        let memid = {
+            let memdb_locked = self.memdb.lock().await;
+            memdb_locked.add(memtype, goal, project, payload)?
+        };
+        self.vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
+        // TODO: wait until processing is over
+        Ok(memid)
+    }
+
+    pub async fn memories_erase(&self, memid: &str) -> Result<(), String> {
+        let memdb_locked = self.memdb.lock().await;
+        memdb_locked.erase(memid)?;
+        Ok(())
+    }
+
+    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+        let memdb_locked = self.memdb.lock().await;
+        memdb_locked.update_used(memid, mstat_correct, mstat_useful)?;
+        Ok(())
     }
 }
 

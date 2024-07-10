@@ -20,7 +20,6 @@ use crate::vecdb::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, B
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct Document {
     pub path: PathBuf,
-    // #[allow(dead_code)]
     // pub language_id: String,
     pub text: Option<Rope>,
 }

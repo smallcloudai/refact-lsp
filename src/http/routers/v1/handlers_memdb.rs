@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::at_tools::att_knowledge::MemoriesDatabase;
+use crate::vecdb::vecdb::VecDb;
 
 #[derive(Deserialize)]
 struct MemAddRequest {
@@ -37,18 +38,6 @@ struct MemQuery {
     project: f64,
 }
 
-pub async fn gcx2memdb(
-    gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<Arc<AMutex<MemoriesDatabase>>, ScratchError> {
-    let vec_db_module = gcx.read().await.vec_db.clone();
-    let x = if let Some(ref mut db) = *vec_db_module.lock().await {
-        Ok(db.memdb.clone())
-    } else {
-        Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not enabled or there's no vectorization model available, memory cannot work either :/".to_string()))
-    };
-    x
-}
-
 pub async fn handle_mem_add(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
@@ -57,18 +46,28 @@ pub async fn handle_mem_add(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock().await;
-    match memdb_locked.add(&post.memtype, &post.goal, &post.project, &post.payload) {
-        Ok(memid) => {
-            let response = Response::builder()
-                .header("Content-Type", "application/json")
-                .body(Body::from(format!("{{\"memid\": \"{}\"}}", memid)))
-                .unwrap();
-            Ok(response)
+
+    let vec_db = gcx.read().await.vec_db.clone();
+    let memid = {
+        let mut vec_db_locked = vec_db.lock().await;
+        match vec_db_locked.as_mut() {
+            None => {
+                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
+            }
+            Some(db) => {
+                db.memories_add(&post.memtype, &post.goal, &post.project, &post.payload).await.map_err(|e| {
+                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+                })?
+            }
         }
-        Err(e) => Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
-    }
+    };
+
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!("{{\"memid\": \"{}\"}}", memid)))
+        .unwrap();
+
+    Ok(response)
 }
 
 pub async fn handle_mem_erase(
@@ -79,18 +78,28 @@ pub async fn handle_mem_erase(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock().await;
-    match memdb_locked.erase(&post.memid) {
-        Ok(_) => {
-            let response = Response::builder()
-                .header("Content-Type", "application/json")
-                .body(Body::from("{\"status\": \"success\"}"))
-                .unwrap();
-            Ok(response)
+
+    let vec_db = gcx.read().await.vec_db.clone();
+    let result = {
+        let mut vec_db_locked = vec_db.lock().await;
+        match vec_db_locked.as_mut() {
+            None => {
+                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
+            }
+            Some(db) => {
+                db.memories_erase(&post.memid).await.map_err(|e| {
+                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+                })?
+            }
         }
-        Err(e) => Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
-    }
+    };
+
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!("{{\"status\": \"{}\"}}", result)))
+        .unwrap();
+
+    Ok(response)
 }
 
 pub async fn handle_mem_update_used(
@@ -101,18 +110,28 @@ pub async fn handle_mem_update_used(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock().await;
-    match memdb_locked.update_used(&post.memid, post.correct, post.useful) {
-        Ok(_) => {
-            let response = Response::builder()
-                .header("Content-Type", "application/json")
-                .body(Body::from("{\"status\": \"success\"}"))
-                .unwrap();
-            Ok(response)
+
+    let vec_db = gcx.read().await.vec_db.clone();
+    let result = {
+        let mut vec_db_locked = vec_db.lock().await;
+        match vec_db_locked.as_mut() {
+            None => {
+                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
+            }
+            Some(db) => {
+                db.memories_update(&post.memid, post.correct, post.useful).await.map_err(|e| {
+                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+                })?
+            }
         }
-        Err(e) => Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))),
-    }
+    };
+
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!("{{\"status\": \"{}\"}}", result)))
+        .unwrap();
+
+    Ok(response)
 }
 
 pub async fn handle_mem_query(
@@ -123,8 +142,6 @@ pub async fn handle_mem_query(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let memdb = gcx2memdb(gcx).await?;
-    let memdb_locked = memdb.lock().await;
     // Implement the query logic here using memdb_locked and post
     // For now, returning a placeholder response
     let response = Response::builder()
