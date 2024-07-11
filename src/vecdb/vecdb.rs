@@ -261,26 +261,26 @@ impl VecDb {
         self.vectorizer_service.lock().await.status().await
     }
 
-    pub async fn memories_add(&mut self, mem_type: &str, goal: &str, project: &str, payload: &str) -> Result<String, String>
+    pub async fn memories_add(&mut self, m_type: &str, m_goal: &str, m_project: &str, m_payload: &str) -> Result<String, String>
     {
-        let mem_id = {
+        let memid = {
             let memdb_locked = self.memdb.lock().await;
-            memdb_locked.add(mem_type, goal, project, payload)?
+            memdb_locked.add(m_type, m_goal, m_project, m_payload)?
         };
         self.vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
         // TODO: wait until processing is over
-        Ok(mem_id)
+        Ok(memid)
     }
 
-    pub async fn memories_erase(&self, mem_id: &str) -> Result<(), String> {
+    pub async fn memories_erase(&self, memid: &str) -> Result<(), String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.erase(mem_id)?;
+        memdb_locked.erase(memid)?;
         Ok(())
     }
 
-    pub async fn memories_update(&self, mem_id: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.update_used(mem_id, mstat_correct, mstat_useful)?;
+        memdb_locked.update_used(memid, mstat_correct, mstat_useful)?;
         Ok(())
     }
 }
@@ -359,7 +359,7 @@ impl VecdbSearch for VecDb {
             Ok(res) => res,
             Err(err) => { return Err(err.to_string()) }
         };
-        
+
         Ok(MemoSearchResult {query_text: query, results})
     }
 }

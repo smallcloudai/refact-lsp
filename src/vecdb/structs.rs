@@ -63,7 +63,7 @@ pub struct VecdbRecord {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MemoRecord {
     pub vector: Option<Vec<f32>>,
-    pub mem_id: String,
+    pub memid: String,
     pub distance: f32,
 }
 

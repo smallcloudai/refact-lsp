@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
+use serde_json::json;
 
 use axum::Extension;
 use axum::response::Result;
@@ -21,12 +22,12 @@ struct MemAddRequest {
 
 #[derive(Deserialize)]
 struct MemEraseRequest {
-    mem_id: String,
+    memid: String,
 }
 
 #[derive(Deserialize)]
 struct MemUpdateUsedRequest {
-    mem_id: String,
+    memid: String,
     correct: f64,
     useful: f64,
 }
@@ -34,7 +35,7 @@ struct MemUpdateUsedRequest {
 #[derive(Deserialize)]
 struct MemQuery {
     goal: String,
-    project: f64,
+    project: String,
     top_n: usize,
 }
 
@@ -48,7 +49,7 @@ pub async fn handle_mem_add(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let mem_id = {
+    let memid = {
         let mut vec_db_locked = vec_db.lock().await;
         match vec_db_locked.as_mut() {
             None => {
@@ -64,7 +65,7 @@ pub async fn handle_mem_add(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"mem_id\": \"{}\"}}", mem_id)))
+        .body(Body::from(format!("{{\"memid\": \"{}\"}}", memid)))
         .unwrap();
 
     Ok(response)
@@ -87,7 +88,7 @@ pub async fn handle_mem_erase(
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
             }
             Some(db) => {
-                db.memories_erase(&post.mem_id).await.map_err(|e| {
+                db.memories_erase(&post.memid).await.map_err(|e| {
                     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
                 })?
             }
@@ -96,7 +97,7 @@ pub async fn handle_mem_erase(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"status\": \"{:?}\"}}", result)))
+        .body(Body::from(serde_json::to_string(&json!({"success": 1})).unwrap()))
         .unwrap();
 
     Ok(response)
@@ -119,7 +120,7 @@ pub async fn handle_mem_update_used(
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
             }
             Some(db) => {
-                db.memories_update(&post.mem_id, post.correct, post.useful).await.map_err(|e| {
+                db.memories_update(&post.memid, post.correct, post.useful).await.map_err(|e| {
                     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
                 })?
             }
@@ -128,7 +129,7 @@ pub async fn handle_mem_update_used(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"status\": \"{:?}\"}}", result)))
+        .body(Body::from(serde_json::to_string(&json!({"success": 1})).unwrap()))
         .unwrap();
 
     Ok(response)

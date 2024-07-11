@@ -100,8 +100,8 @@ impl MemoriesDatabase {
         let embedding_temp_dir = TempDir::new().map_err(|e| format!("Failed to create temp dir: {}", e))?;
         let embedding_path = embedding_temp_dir.path().to_str().unwrap();
         let schema_arc = Arc::new(Schema::new(vec![
-            Field::new("mem_id", DataType::Utf8, false),
-            Field::new("vector", DataType::FixedSizeList(
+            Field::new("memid", DataType::Utf8, false),
+            Field::new("thevec", DataType::FixedSizeList(
                 Arc::new(Field::new("item", DataType::Float32, true)),
                 constants.embedding_size,
             ), false),
@@ -130,7 +130,7 @@ impl MemoriesDatabase {
         let conn = self.conn.lock();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
-                mem_id TEXT PRIMARY KEY,
+                memid TEXT PRIMARY KEY,
                 m_type TEXT NOT NULL,
                 m_goal TEXT NOT NULL,
                 m_project TEXT NOT NULL,
@@ -145,38 +145,38 @@ impl MemoriesDatabase {
     }
 
     pub fn add(&self, mem_type: &str, goal: &str, project: &str, payload: &str) -> Result<String, String> {
-        fn generate_mem_id() -> String {
+        fn generate_memid() -> String {
             let mut rng = rand::thread_rng();
-            let mut mem_id = String::new();
+            let mut x = String::new();
             for _ in 0..10 {
-                write!(&mut mem_id, "{:x}", rng.gen_range(0..16)).unwrap();
+                write!(&mut x, "{:x}", rng.gen_range(0..16)).unwrap();
             }
-            mem_id
+            x
         }
 
         let conn = self.conn.lock();
-        let mem_id = generate_mem_id();
+        let memid = generate_memid();
         conn.execute(
-            "INSERT INTO memories (mem_id, m_type, m_goal, m_project, m_payload) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![mem_id, mem_type, goal, project, payload],
+            "INSERT INTO memories (memid, m_type, m_goal, m_project, m_payload) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![memid, mem_type, goal, project, payload],
         ).map_err(|e| e.to_string())?;
-        Ok(mem_id)
+        Ok(memid)
     }
 
-    pub fn erase(&self, mem_id: &str) -> Result<(), String> {
+    pub fn erase(&self, memid: &str) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
-            "DELETE FROM memories WHERE mem_id = ?1",
-            params![mem_id],
+            "DELETE FROM memories WHERE memid = ?1",
+            params![memid],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub fn update_used(&self, mem_id: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+    pub fn update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
-            "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = ?1, mstat_useful = ?2 WHERE mem_id = ?3",
-            params![mstat_correct, mstat_useful, mem_id],
+            "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = ?1, mstat_useful = ?2 WHERE memid = ?3",
+            params![mstat_correct, mstat_useful, memid],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -201,11 +201,11 @@ impl MemoriesDatabase {
         .map_err(|e| e.to_string())?;
 
         for row in rows {
-            let (mem_id, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row
+            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row
                 .map_err(|e| e.to_string())?;
             table_contents.push_str(&format!(
-                "mem_id={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, useful={}, times_used={}\n",
-                mem_id, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used
+                "memid={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, useful={}, times_used={}\n",
+                memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used
             ));
         }
         Ok(table_contents)
@@ -236,8 +236,8 @@ impl MemoriesDatabase {
 
             Ok(MemoRecord {
                 vector: embedding,
-                mem_id: as_string_array(record_batch.column_by_name("mem_id")
-                   .expect("Missing column 'mem_id'"))
+                memid: as_string_array(record_batch.column_by_name("memid")
+                   .expect("Missing column 'memid'"))
                    .value(idx)
                    .to_string(),
                 distance,
@@ -258,7 +258,7 @@ impl MemoriesDatabase {
             .execute().await?
             .try_collect::<Vec<_>>().await?;
         let record_batch = concat_batches(&self.schema_arc, &query)?;
-        
+
         match MemoriesDatabase::parse_table_iter(record_batch, false, Some(&embedding)) {
             Ok(records) => {
                 let filtered = records.into_iter().dedup().sorted_unstable_by(|a, b|a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal)).collect::<Vec<_>>();
@@ -278,7 +278,7 @@ async fn recall_payload_for_dirty_memories_and_mark_them_not_dirty(
     let rows: Vec<(String, String)> = {
         let conn = memdb_locked.conn.lock();
         if memdb_locked.dirty_everything {
-            let mut stmt = conn.prepare("SELECT mem_id, m_payload FROM memories")
+            let mut stmt = conn.prepare("SELECT memid, m_payload FROM memories")
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
             let x = stmt.query_map([], |row| {
                 Ok((
@@ -295,7 +295,7 @@ async fn recall_payload_for_dirty_memories_and_mark_them_not_dirty(
                 .map(|_| "?")
                 .collect::<Vec<_>>()
                 .join(",");
-            let query = format!("SELECT mem_id, m_payload FROM memories WHERE mem_id IN ({})", placeholders);
+            let query = format!("SELECT memid, m_payload FROM memories WHERE memid IN ({})", placeholders);
             let mut stmt = conn.prepare(&query)
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
             let x = stmt.query_map(rusqlite::params_from_iter(memdb_locked.dirty_memids.iter()), |row| {
@@ -312,14 +312,14 @@ async fn recall_payload_for_dirty_memories_and_mark_them_not_dirty(
             Vec::new()
         }
     };
-    for (mem_id, m_payload) in rows {
+    for (memid, m_payload) in rows {
         let window_text_hash = official_text_hashing_function(&m_payload);
         let simple_text_hash_vector = SimpleTextHashVector {
             window_text: m_payload,
             window_text_hash,
             vector: None,
         };
-        memids.push(mem_id);
+        memids.push(memid);
         todo.push(simple_text_hash_vector);
     }
     memdb_locked.dirty_memids.clear();
