@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 base_url = "http://127.0.0.1:8001"
 
@@ -38,15 +38,15 @@ async def mem_erase(session: aiohttp.ClientSession, memid: str) -> Dict[str, Any
         return await response.json()
 
 
-async def mem_query(session: aiohttp.ClientSession, goal: str, project: str, top_n: Optional[int] = 5) -> Dict[str, Any]:
+async def mem_query(session: aiohttp.ClientSession, goal: str, project: str, top_n: Optional[int] = 5) -> Tuple[int, Dict[str, Any]]:
     url = f"{base_url}/v1/mem-query"
     data = {
         "goal": goal,
-        "project": 123,
+        "project": project,
         "top_n": top_n
     }
     async with session.post(url, json=data) as response:
-        return await response.json()
+        return response.status, await response.json()
 
 
 async def test_memory_operations():
@@ -64,8 +64,8 @@ async def test_memory_operations():
         print("Erased memory:", erase_result)
 
         await asyncio.sleep(3)
-        query_result = await mem_query(session, "compile", "proj1")
-        print("Query result:", query_result)
+        http_status, query_result = await mem_query(session, "compile", "proj1")
+        print("Query result: %s\n%s" % (http_status, json.dumps(query_result, indent=4)))
 
         # You can add more assertions here to verify the results
         # For example:

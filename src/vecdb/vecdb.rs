@@ -265,23 +265,23 @@ impl VecDb {
     {
         let memid = {
             let memdb_locked = self.memdb.lock().await;
-            memdb_locked.add(m_type, m_goal, m_project, m_payload)?
+            memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?
         };
         self.vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
         // TODO: wait until processing is over
         Ok(memid)
     }
 
-    pub async fn memories_erase(&self, memid: &str) -> Result<(), String> {
+    pub async fn memories_erase(&self, memid: &str) -> Result<usize, String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.erase(memid)?;
-        Ok(())
+        let erased_cnt = memdb_locked.permdb_erase(memid)?;
+        Ok(erased_cnt)
     }
 
-    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<usize, String> {
         let memdb_locked = self.memdb.lock().await;
-        memdb_locked.update_used(memid, mstat_correct, mstat_useful)?;
-        Ok(())
+        let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_useful)?;
+        Ok(updated_cnt)
     }
 }
 
@@ -353,9 +353,7 @@ impl VecdbSearch for VecDb {
         }
         info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
 
-        let mut handler_locked = self.memdb.lock().await;
-
-        let results = match handler_locked.search(&embedding[0], top_n).await {
+        let results = match crate::at_tools::att_knowledge::lance_search(self.memdb.clone(), &embedding[0], top_n).await {
             Ok(res) => res,
             Err(err) => { return Err(err.to_string()) }
         };

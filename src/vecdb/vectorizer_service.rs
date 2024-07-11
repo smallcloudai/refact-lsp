@@ -270,7 +270,7 @@ async fn vectorize_thread(
                     doc
                 }
                 Some(MessageToVecdbThread::MemoriesSomethingDirty()) => {
-                    info!("MEMDB START");
+                    info!("MEMDB VECTORIZER START");
                     let r = crate::at_tools::att_knowledge::vectorize_dirty_memories(
                         memdb.clone(),
                         vecdb_cache_arc.clone(),

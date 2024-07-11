@@ -11,7 +11,6 @@ use rand::Rng;
 use rusqlite::{params, Connection, Result};
 use arrow::array::{ArrayData, Float32Array, StringArray, FixedSizeListArray, RecordBatchIterator, RecordBatch};
 use arrow::buffer::Buffer;
-use arrow::compute::concat_batches;
 use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
 use arrow_array::types::Float32Type;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
@@ -122,11 +121,11 @@ impl MemoriesDatabase {
             dirty_memids: Vec::new(),
             dirty_everything: true,
         };
-        db._create_table()?;
+        db._permdb_create_table()?;
         Ok(db)
     }
 
-    fn _create_table(&self) -> Result<(), String> {
+    fn _permdb_create_table(&self) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
@@ -144,7 +143,7 @@ impl MemoriesDatabase {
         Ok(())
     }
 
-    pub fn add(&self, mem_type: &str, goal: &str, project: &str, payload: &str) -> Result<String, String> {
+    pub fn permdb_add(&self, mem_type: &str, goal: &str, project: &str, payload: &str) -> Result<String, String> {
         fn generate_memid() -> String {
             let mut rng = rand::thread_rng();
             let mut x = String::new();
@@ -163,25 +162,25 @@ impl MemoriesDatabase {
         Ok(memid)
     }
 
-    pub fn erase(&self, memid: &str) -> Result<(), String> {
+    pub fn permdb_erase(&self, memid: &str) -> Result<usize, String> {
         let conn = self.conn.lock();
-        conn.execute(
+        let affected_rows = conn.execute(
             "DELETE FROM memories WHERE memid = ?1",
             params![memid],
         ).map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(affected_rows)
     }
 
-    pub fn update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<(), String> {
+    pub fn permdb_update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<usize, String> {
         let conn = self.conn.lock();
-        conn.execute(
+        let affected_rows = conn.execute(
             "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = ?1, mstat_useful = ?2 WHERE memid = ?3",
             params![mstat_correct, mstat_useful, memid],
         ).map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(affected_rows)
     }
 
-    pub fn print_everything(&self) -> Result<String, String> {
+    pub fn permdb_print_everything(&self) -> Result<String, String> {
         let mut table_contents = String::new();
         let conn = self.conn.lock();
         let mut stmt = conn.prepare("SELECT * FROM memories")
@@ -210,66 +209,71 @@ impl MemoriesDatabase {
         }
         Ok(table_contents)
     }
+}
 
-    fn parse_table_iter(
-        record_batch: RecordBatch,
-        include_embedding: bool,
-        embedding_to_compare: Option<&Vec<f32>>,
-    ) -> vectordb::error::Result<Vec<MemoRecord>> {
-        (0..record_batch.num_rows()).map(|idx| {
-            let gathered_vec = as_primitive_array::<Float32Type>(
-                &as_fixed_size_list_array(record_batch.column_by_name("vector").unwrap())
-                    .iter()
-                    .map(|x| x.unwrap())
-                    .collect::<Vec<_>>()[idx]
-            )
+fn lance_fetch_all_records_measuring_distance(
+    record_batch: RecordBatch,
+    include_embedding: bool,
+    embedding_to_compare: Option<&Vec<f32>>,
+) -> vectordb::error::Result<Vec<MemoRecord>> {
+    (0..record_batch.num_rows()).map(|idx| {
+        let gathered_vec = as_primitive_array::<Float32Type>(
+            &as_fixed_size_list_array(record_batch.column_by_name("thevec").unwrap())
                 .iter()
-                .map(|x| x.unwrap()).collect::<Vec<_>>();
-            let distance = match embedding_to_compare {
-                None => { -1.0 }
-                Some(embedding) => { cosine_distance(&embedding, &gathered_vec) }
-            };
-            let embedding = match include_embedding {
-                true => Some(gathered_vec),
-                false => None
-            };
+                .map(|x| x.unwrap())
+                .collect::<Vec<_>>()[idx]
+        )
+            .iter()
+            .map(|x| x.unwrap()).collect::<Vec<_>>();
+        let distance = match embedding_to_compare {
+            None => { -1.0 }
+            Some(embedding) => { cosine_distance(&embedding, &gathered_vec) }
+        };
+        let embedding = match include_embedding {
+            true => Some(gathered_vec),
+            false => None
+        };
 
-            Ok(MemoRecord {
-                vector: embedding,
-                memid: as_string_array(record_batch.column_by_name("memid")
-                   .expect("Missing column 'memid'"))
-                   .value(idx)
-                   .to_string(),
-                distance,
-            })
-        }).collect()
-    }
+        Ok(MemoRecord {
+            memid: as_string_array(record_batch.column_by_name("memid")
+               .expect("Missing column 'memid'"))
+               .value(idx)
+               .to_string(),
+            thevec: embedding,
+            distance,
+        })
+    }).collect()   // collect() here operates on Result<> and returns Result<Vec<>>, a feature of rust
+}
 
-    pub async fn search(
-        &mut self,
-        embedding: &Vec<f32>,
-        top_n: usize,
-    ) -> vectordb::error::Result<Vec<MemoRecord>> {
-        let query = self.memories_table
-            .clone()
-            .search(Some(Float32Array::from(embedding.clone())))
-            .limit(top_n)
-            .use_index(true)
-            .execute().await?
-            .try_collect::<Vec<_>>().await?;
-        let record_batch = concat_batches(&self.schema_arc, &query)?;
+pub async fn lance_search(
+    memdb: Arc<AMutex<MemoriesDatabase>>,
+    embedding: &Vec<f32>,
+    top_n: usize,
+) -> vectordb::error::Result<Vec<MemoRecord>> {
+    let (my_memories_table, my_schema_arc) = {
+        let memdb_locked = memdb.lock().await;
+        (memdb_locked.memories_table.clone(), memdb_locked.schema_arc.clone())
+    };
+    let query = my_memories_table
+        .clone()
+        .search(Some(Float32Array::from(embedding.clone())))
+        .column("thevec")
+        .limit(top_n)
+        .use_index(true)
+        .execute().await?
+        .try_collect::<Vec<_>>().await?;
+    let record_batch = arrow::compute::concat_batches(&my_schema_arc, &query)?;
 
-        match MemoriesDatabase::parse_table_iter(record_batch, false, Some(&embedding)) {
-            Ok(records) => {
-                let filtered = records.into_iter().dedup().sorted_unstable_by(|a, b|a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal)).collect::<Vec<_>>();
-                Ok(filtered)
-            },
-            Err(e) => Err(e),
-        }
+    match lance_fetch_all_records_measuring_distance(record_batch, false, Some(&embedding)) {
+        Ok(records) => {
+            let sorted = records.into_iter().sorted_unstable_by(|a, b|a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal)).collect::<Vec<_>>();
+            Ok(sorted)
+        },
+        Err(e) => Err(e),
     }
 }
 
-async fn recall_payload_for_dirty_memories_and_mark_them_not_dirty(
+async fn recall_dirty_memories_and_mark_them_not_dirty(
     memdb: Arc<AMutex<MemoriesDatabase>>,
 ) -> Result<(Vec<String>, Vec<SimpleTextHashVector>), String> {
     let mut memids: Vec<String> = Vec::new();
@@ -336,7 +340,7 @@ pub async fn vectorize_dirty_memories(
     #[allow(non_snake_case)]
     B: usize,
 ) -> Result<(), String> {
-    let (memids, mut todo) = recall_payload_for_dirty_memories_and_mark_them_not_dirty(memdb.clone()).await?;
+    let (memids, mut todo) = recall_dirty_memories_and_mark_them_not_dirty(memdb.clone()).await?;
     if memids.is_empty() {
         return Ok(());
     }
@@ -399,6 +403,7 @@ pub async fn vectorize_dirty_memories(
             Err(err) => return Err(format!("{:?}", err))
         }
     }
+
     let vectors: ArrayData = match make_emb_data(&todo, my_constants.embedding_size) {
         Ok(res) => res,
         Err(err) => return Err(format!("{:?}", err))

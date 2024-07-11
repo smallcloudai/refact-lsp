@@ -81,7 +81,7 @@ pub async fn handle_mem_erase(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let result = {
+    let erased_cnt = {
         let mut vec_db_locked = vec_db.lock().await;
         match vec_db_locked.as_mut() {
             None => {
@@ -94,10 +94,11 @@ pub async fn handle_mem_erase(
             }
         }
     };
+    assert!(erased_cnt <= 1);
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_string(&json!({"success": 1})).unwrap()))
+        .body(Body::from(serde_json::to_string(&json!({"success": erased_cnt>0})).unwrap()))
         .unwrap();
 
     Ok(response)
@@ -113,7 +114,7 @@ pub async fn handle_mem_update_used(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let result = {
+    let updated_cnt = {
         let mut vec_db_locked = vec_db.lock().await;
         match vec_db_locked.as_mut() {
             None => {
@@ -126,10 +127,11 @@ pub async fn handle_mem_update_used(
             }
         }
     };
+    assert!(updated_cnt <= 1);
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_string(&json!({"success": 1})).unwrap()))
+        .body(Body::from(serde_json::to_string(&json!({"success": updated_cnt>0})).unwrap()))
         .unwrap();
 
     Ok(response)
@@ -143,7 +145,6 @@ pub async fn handle_mem_query(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    // TODO: use project for filtering? (why is it f64??)
 
     let cx_locked = gcx.read().await;
     let search_res = match *cx_locked.vec_db.lock().await {
@@ -156,8 +157,7 @@ pub async fn handle_mem_query(
         }
     };
 
-    let response_body = serde_json::to_string_pretty(&search_res)
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("JSON serialization error: {}", e)))?;
+    let response_body = serde_json::to_string_pretty(&search_res).unwrap();
 
     let response = Response::builder()
         .header("Content-Type", "application/json")

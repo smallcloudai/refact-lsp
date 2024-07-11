@@ -60,13 +60,6 @@ pub struct VecdbRecord {
     pub usefulness: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct MemoRecord {
-    pub vector: Option<Vec<f32>>,
-    pub memid: String,
-    pub distance: f32,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct SplitResult {
     pub file_path: PathBuf,
@@ -89,6 +82,13 @@ pub struct SimpleTextHashVector {
 pub struct SearchResult {
     pub query_text: String,
     pub results: Vec<VecdbRecord>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct MemoRecord {
+    pub memid: String,
+    pub thevec: Option<Vec<f32>>,
+    pub distance: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
