@@ -49,19 +49,15 @@ pub async fn handle_mem_add(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let memid = {
-        let mut vec_db_locked = vec_db.lock().await;
-        match vec_db_locked.as_mut() {
-            None => {
-                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
-            }
-            Some(db) => {
-                db.memories_add(&post.mem_type, &post.goal, &post.project, &post.payload).await.map_err(|e| {
-                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
-                })?
-            }
-        }
-    };
+    let memid = crate::vecdb::vecdb::memories_add(
+        vec_db,
+        &post.mem_type,
+        &post.goal,
+        &post.project,
+        &post.payload
+    ).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+    })?;
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
@@ -70,7 +66,6 @@ pub async fn handle_mem_add(
 
     Ok(response)
 }
-
 pub async fn handle_mem_erase(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
@@ -81,19 +76,10 @@ pub async fn handle_mem_erase(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let erased_cnt = {
-        let mut vec_db_locked = vec_db.lock().await;
-        match vec_db_locked.as_mut() {
-            None => {
-                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
-            }
-            Some(db) => {
-                db.memories_erase(&post.memid).await.map_err(|e| {
-                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
-                })?
-            }
-        }
-    };
+    let erased_cnt = crate::vecdb::vecdb::memories_erase(vec_db, &post.memid).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+    })?;
+
     assert!(erased_cnt <= 1);
 
     let response = Response::builder()
@@ -114,19 +100,15 @@ pub async fn handle_mem_update_used(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let updated_cnt = {
-        let mut vec_db_locked = vec_db.lock().await;
-        match vec_db_locked.as_mut() {
-            None => {
-                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "VecDB is not initialized".to_string()));
-            }
-            Some(db) => {
-                db.memories_update(&post.memid, post.correct, post.useful).await.map_err(|e| {
-                    ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
-                })?
-            }
-        }
-    };
+    let updated_cnt = crate::vecdb::vecdb::memories_update(
+        vec_db,
+        &post.memid,
+        post.correct,
+        post.useful
+    ).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+    })?;
+
     assert!(updated_cnt <= 1);
 
     let response = Response::builder()
@@ -147,15 +129,10 @@ pub async fn handle_mem_query(
     })?;
 
     let cx_locked = gcx.read().await;
-    let search_res = match *cx_locked.vec_db.lock().await {
-        Some(ref db) => db.memdb_search(post.goal.to_string(), post.top_n).await
-            .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting memdb search results: {e}")))?,
-        None => {
-            return Err(ScratchError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, "MemDB is not initialized".to_string()
-            ));
-        }
-    };
+    let vec_db = cx_locked.vec_db.clone();
+
+    let search_res = crate::vecdb::vecdb::memories_search(vec_db, post.goal, post.top_n).await
+        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting memdb search results: {e}")))?;
 
     let response_body = serde_json::to_string_pretty(&search_res).unwrap();
 

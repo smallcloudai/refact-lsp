@@ -44,8 +44,4 @@ impl VecdbSearch for VecDbRemote {
         // info!("Vecdb search result: {:?}", &result0);
         Ok(result0)
     }
-
-    async fn memdb_search(&self, _query: String, _top_n: usize) -> Result<MemoSearchResult, String> {
-        todo!()
-    }
 }

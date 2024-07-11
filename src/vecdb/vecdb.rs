@@ -260,31 +260,100 @@ impl VecDb {
     pub async fn get_status(&self) -> Result<VecDbStatus, String> {
         self.vectorizer_service.lock().await.status().await
     }
-
-    pub async fn memories_add(&mut self, m_type: &str, m_goal: &str, m_project: &str, m_payload: &str) -> Result<String, String>
-    {
-        let memid = {
-            let memdb_locked = self.memdb.lock().await;
-            memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?
-        };
-        self.vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
-        // TODO: wait until processing is over
-        Ok(memid)
-    }
-
-    pub async fn memories_erase(&self, memid: &str) -> Result<usize, String> {
-        let memdb_locked = self.memdb.lock().await;
-        let erased_cnt = memdb_locked.permdb_erase(memid)?;
-        Ok(erased_cnt)
-    }
-
-    pub async fn memories_update(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<usize, String> {
-        let memdb_locked = self.memdb.lock().await;
-        let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_useful)?;
-        Ok(updated_cnt)
-    }
 }
 
+pub async fn memories_add(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    m_type: &str,
+    m_goal: &str,
+    m_project: &str,
+    m_payload: &str
+) -> Result<String, String> {
+    let (memdb, vectorizer_service) = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        (vec_db.memdb.clone(), vec_db.vectorizer_service.clone())
+    };
+
+    let memid = {
+        let memdb_locked = memdb.lock().await;
+        memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?
+    };
+    vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
+    // TODO: wait until processing is over
+    Ok(memid)
+}
+
+pub async fn memories_erase(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    memid: &str
+) -> Result<usize, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let erased_cnt = memdb_locked.permdb_erase(memid)?;
+    Ok(erased_cnt)
+}
+
+pub async fn memories_update(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    memid: &str,
+    mstat_correct: f64,
+    mstat_useful: f64
+) -> Result<usize, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_useful)?;
+    Ok(updated_cnt)
+}
+
+pub async fn memories_search(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    query: String,
+    top_n: usize,
+) -> Result<MemoSearchResult, String> {
+    let t0 = std::time::Instant::now();
+    let (memdb, vecdb_emb_client, constants, cmdline) = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        (
+            vec_db.memdb.clone(),
+            vec_db.vecdb_emb_client.clone(),
+            vec_db.constants.clone(),
+            vec_db.cmdline.clone(),
+        )
+    };
+
+    let embedding = fetch_embedding::get_embedding_with_retry(
+        vecdb_emb_client,
+        &constants.endpoint_embeddings_style,
+        &constants.model_name,
+        &constants.endpoint_embeddings_template,
+        vec![query.clone()],
+        &cmdline.api_key,
+        5
+    ).await?;
+    if embedding.is_empty() {
+        return Err("memdb_search: empty embedding".to_string());
+    }
+    info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
+
+    let results = match crate::at_tools::att_knowledge::lance_search(memdb, &embedding[0], top_n).await {
+        Ok(res) => res,
+        Err(err) => { return Err(err.to_string()) }
+    };
+
+    Ok(MemoSearchResult {query_text: query, results})
+}
 
 #[async_trait]
 impl VecdbSearch for VecDb {
@@ -331,33 +400,5 @@ impl VecdbSearch for VecDb {
                 results,
             }
         )
-    }
-
-    async fn memdb_search(
-        &self,
-        query: String,
-        top_n: usize,
-    ) -> Result<MemoSearchResult, String> {
-        let t0 = std::time::Instant::now();
-        let embedding = fetch_embedding::get_embedding_with_retry(
-            self.vecdb_emb_client.clone(),
-            &self.constants.endpoint_embeddings_style,
-            &self.constants.model_name,
-            &self.constants.endpoint_embeddings_template,
-            vec![query.clone()],
-            &self.cmdline.api_key,
-            5
-        ).await?;
-        if embedding.is_empty() {
-            return Err("memdb_search: empty embedding".to_string());
-        }
-        info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
-
-        let results = match crate::at_tools::att_knowledge::lance_search(self.memdb.clone(), &embedding[0], top_n).await {
-            Ok(res) => res,
-            Err(err) => { return Err(err.to_string()) }
-        };
-
-        Ok(MemoSearchResult {query_text: query, results})
     }
 }

@@ -15,12 +15,6 @@ pub trait VecdbSearch: Send {
         top_n: usize,
         filter_mb: Option<String>,
     ) -> Result<SearchResult, String>;
-
-    async fn memdb_search(
-        &self,
-        query: String,
-        top_n: usize,
-    ) -> Result<MemoSearchResult, String>;
 }
 
 #[derive(Debug, Clone)]
