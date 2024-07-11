@@ -19,18 +19,20 @@ use itertools::Itertools;
 use lance::dataset::{WriteMode, WriteParams};
 use lance_linalg::distance::cosine_distance;
 use reqwest::Client;
+use serde::Serialize;
 use vectordb::database::Database;
 use tempfile::TempDir;
-use tokio::sync::Mutex as AMutex;
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
+use tokio::time::Instant;
 use vectordb::table::Table;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::vecdb::vdb_cache::VecDBCache;
-use crate::vecdb::vdb_structs::{MemoRecord, SimpleTextHashVector, VecdbConstants, VecDbStatus};
+use crate::vecdb::vdb_structs::{MemoRecord, MemoSearchResult, SimpleTextHashVector, VecdbConstants, VecDbStatus};
 use crate::ast::chunk_utils::official_text_hashing_function;
-
+use crate::global_context::GlobalContext;
 
 pub struct AttKnowledge;
 
@@ -38,31 +40,51 @@ pub struct AttKnowledge;
 impl Tool for AttKnowledge {
     async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         info!("run @knowledge {:?}", args);
-        let mut im_going_to_do = match args.get("im_going_to_do") {
+        let im_going_to_do = match args.get("im_going_to_do") {
             Some(Value::String(s)) => s.clone(),
             Some(v) => { return Err(format!("argument `im_going_to_do` is not a string: {:?}", v)) },
             None => { return Err("argument `im_going_to_do` is missing".to_string()) }
         };
-
-        let mut memories: Vec<String> = vec![];
-        memories.push("memory 5f4he83\nThe Frog class represents a frog in a 2D environment, with position and velocity attributes. It is defined at /Users/kot/code/refact-lsp/tests/emergency_frog_situation/frog.py:5".to_string());
+        
+        let memories = get_memories_by_goal(ccx.global_context.clone(), &im_going_to_do, ccx.top_n).await?;
+        
+        let memories_str = memories.iter().map(|m|
+            format!("Memory:\nID: {}\n{}\n", m.memid, m.m_payload)
+        ).collect::<Vec<String>>().join("\n");
+        
+        println!("memories_str: {}", memories_str);
 
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: serde_json::to_string(&memories).unwrap(),
+            content: "executed knowledge".to_string(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
         }));
-
+        
+        results.push(ContextEnum::ChatMessage(ChatMessage::new(
+            "plain_text".to_string(),
+            memories_str
+        )));
         Ok(results)
     }
 
     fn depends_on(&self) -> Vec<String> {
-        vec!["ast".to_string()]
+        vec!["vecdb".to_string()]
     }
 }
 
+#[derive(Serialize)]
+pub struct Memory {
+    pub memid: String,
+    pub m_type: String,
+    pub m_goal: String,
+    pub m_project: String,
+    pub m_payload: String,
+    pub mstat_correct: f64,
+    pub mstat_useful: f64,
+    pub mstat_times_used: i32,
+}
 
 pub struct MemoriesDatabase {
     pub conn: Arc<ParkMutex<Connection>>,
@@ -180,6 +202,7 @@ impl MemoriesDatabase {
         Ok(affected_rows)
     }
 
+    #[allow(dead_code)]
     pub fn permdb_print_everything(&self) -> Result<String, String> {
         let mut table_contents = String::new();
         let conn = self.conn.lock();
@@ -209,6 +232,60 @@ impl MemoriesDatabase {
         }
         Ok(table_contents)
     }
+
+    pub async fn select_by_memids(&self, memids: &[String]) -> Result<Vec<Memory>, String> {
+        let t0 = Instant::now();
+        let conn = self.conn.lock();
+        let placeholders: String = memids.iter().map(|_| "?").collect::<Vec<&str>>().join(",");
+        let query = format!("SELECT * FROM memories WHERE memid IN ({})", placeholders);
+        let params = rusqlite::params_from_iter(memids);
+        let mut statement = conn.prepare(&query).map_err(|e| e.to_string())?;
+
+        let result = match statement.query_map(params, |row| {
+            Ok(Memory {
+                memid: row.get(0)?,
+                m_type: row.get(1)?,
+                m_goal: row.get(2)?,
+                m_project: row.get(3)?,
+                m_payload: row.get(4)?,
+                mstat_correct: row.get(5)?,
+                mstat_useful: row.get(6)?,
+                mstat_times_used: row.get(7)?,
+            })
+        }) {
+            Ok(rows) => {
+                let mut result_vec = Vec::new();
+                for row in rows {
+                    result_vec.push(row.map_err(|e|format!("select_by_memids: Error getting row: {:?}", e))?);
+                }
+                Ok(result_vec)
+            },
+            Err(err) => Err(format!("Error select_by_memids: {:?}", err)),
+        };
+        let elapsed_time = t0.elapsed();
+        println!("SELECT {}: took: {:.2}s", memids.join(", "), elapsed_time.as_secs_f64());
+        result
+    }
+}
+
+pub async fn get_memories_by_goal(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    goal: &String,
+    top_n: usize,
+) -> Result<Vec<Memory>, String> {
+    let cx_locked = gcx.read().await;
+    let vec_db = cx_locked.vec_db.clone();
+
+    let search_res = crate::vecdb::vdb_highlev::memories_search(vec_db.clone(), goal, top_n).await?;
+
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db_ref = vec_db_guard.as_ref().ok_or("get_memories_by_goal: vecdb is not available".to_string())?;
+        vec_db_ref.memdb.clone()
+    };
+
+    let memories = memories_from_search(memdb, search_res).await?;
+    Ok(memories)
 }
 
 fn lance_fetch_all_records_measuring_distance(
@@ -271,6 +348,34 @@ pub async fn lance_search(
         },
         Err(e) => Err(e),
     }
+}
+
+pub async fn memories_from_search(
+    memdb: Arc<AMutex<MemoriesDatabase>>, 
+    search_res: MemoSearchResult,
+) -> Result<Vec<Memory>, String> {
+    fn calculate_score(distance: f32, times_used: i32) -> f32 {
+        distance - (times_used as f32) * 0.01
+    }
+
+    let records = memdb.lock().await.select_by_memids(&search_res.results.iter().map(|x| x.memid.clone()).collect::<Vec<_>>()).await?;
+    let mut memory_distance_pairs: Vec<(Memory, f32)> = records
+        .into_iter()
+        .filter_map(|memory| {
+            search_res.results.iter()
+                .find(|result| result.memid == memory.memid)
+                .map(|result| (memory, result.distance))
+        })
+        .collect();
+
+    memory_distance_pairs.sort_by(|a, b| {
+        let score_a = calculate_score(a.1, a.0.mstat_times_used);
+        let score_b = calculate_score(b.1, b.0.mstat_times_used);
+        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let sorted_memories = memory_distance_pairs.into_iter().map(|(memory, _)| memory).collect::<Vec<_>>();
+    Ok(sorted_memories)
 }
 
 async fn recall_dirty_memories_and_mark_them_not_dirty(

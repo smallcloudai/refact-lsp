@@ -146,7 +146,7 @@ tools:
     parameters_required: []
 
   - name: "knowledge"
-    description: "What kind of knowledge you will need to accomplish this task?"
+    description: "Used to retrieve your past experiences from previous interactions with user. Contains short notes from yourself that shall help you navigate the subject. Shall be called when user switches a new topic."
     parameters:
       - name: "im_going_to_do"
         type: "string"
