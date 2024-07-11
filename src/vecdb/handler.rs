@@ -95,8 +95,8 @@ impl VecDBHandler {
         }
     }
 
-    pub async fn add_or_update(&mut self, records: &Vec<Record>) -> Result<(), String> {
-        fn make_emb_data(records: &Vec<Record>, embedding_size: i32) -> Result<ArrayData, String> {
+    pub async fn add_or_update(&mut self, records: &Vec<VecdbRecord>) -> Result<(), String> {
+        fn make_emb_data(records: &Vec<VecdbRecord>, embedding_size: i32) -> Result<ArrayData, String> {
             let vec_trait = Arc::new(Field::new("item", DataType::Float32, true));
             let mut emb_builder: Vec<f32> = vec![];
 
