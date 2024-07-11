@@ -6,10 +6,9 @@ use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
-use crate::at_tools::att_knowledge::{get_memories_by_goal, memories_from_search};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-
+use crate::knowledge::get_memories_by_goal;
 
 #[derive(Deserialize)]
 struct MemAddRequest {
