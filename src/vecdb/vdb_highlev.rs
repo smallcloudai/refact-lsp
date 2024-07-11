@@ -306,7 +306,7 @@ pub async fn memories_update(
 
 pub async fn memories_search(
     vec_db: Arc<AMutex<Option<VecDb>>>,
-    query: String,
+    query: &String,
     top_n: usize,
 ) -> Result<MemoSearchResult, String> {
     let t0 = std::time::Instant::now();
@@ -340,7 +340,7 @@ pub async fn memories_search(
         Err(err) => { return Err(err.to_string()) }
     };
 
-    Ok(MemoSearchResult {query_text: query, results})
+    Ok(MemoSearchResult {query_text: query.clone(), results})
 }
 
 #[async_trait]

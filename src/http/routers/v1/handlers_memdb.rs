@@ -6,10 +6,9 @@ use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
-
+use crate::at_tools::att_knowledge::{get_memories_by_goal, memories_from_search};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::vecdb::vdb_structs::VecdbSearch;
 
 
 #[derive(Deserialize)]
@@ -127,14 +126,12 @@ pub async fn handle_mem_query(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
+    
+    let memories = get_memories_by_goal(gcx.clone(), &post.goal, post.top_n).await
+        .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"))
+    })?;
 
-    let cx_locked = gcx.read().await;
-    let vec_db = cx_locked.vec_db.clone();
-
-    let search_res = crate::vecdb::vdb_highlev::memories_search(vec_db, post.goal, post.top_n).await
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting memdb search results: {e}")))?;
-
-    let response_body = serde_json::to_string_pretty(&search_res).unwrap();
+    let response_body = serde_json::to_string_pretty(&memories).unwrap();
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
