@@ -15,10 +15,10 @@ use crate::ast::file_splitter::AstBasedFileSplitter;
 use crate::fetch_embedding::get_embedding_with_retry;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
+use crate::knowledge::{MemoriesDatabase, vectorize_dirty_memories};
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_structs::{VecdbRecord, SplitResult, VecdbConstants, VecDbStatus, SimpleTextHashVector};
 use crate::vecdb::vdb_cache::VecDBCache;
-use crate::at_tools::att_knowledge::MemoriesDatabase;
 
 const DEBUG_WRITE_VECDB_FILES: bool = false;
 
@@ -270,7 +270,7 @@ async fn vectorize_thread(
                 }
                 Some(MessageToVecdbThread::MemoriesSomethingDirty()) => {
                     info!("MEMDB VECTORIZER START");
-                    let r = crate::at_tools::att_knowledge::vectorize_dirty_memories(
+                    let r = vectorize_dirty_memories(
                         memdb.clone(),
                         vecdb_cache_arc.clone(),
                         status.clone(),

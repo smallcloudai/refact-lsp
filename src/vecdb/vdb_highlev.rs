@@ -2,18 +2,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use tokenizers::Tokenizer;
-use tokio::sync::{RwLock as ARwLock, RwLock};
-use tokio::sync::Mutex as AMutex;
 use tracing::{info, error};
 
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
-use crate::at_tools::att_knowledge::MemoriesDatabase;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex };
 use crate::global_context::{CommandLine, GlobalContext};
 use crate::background_tasks::BackgroundTasksHolder;
 
 use crate::fetch_embedding;
 use crate::files_in_workspace::Document;
+use crate::knowledge::{lance_search, MemoriesDatabase};
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_thread::FileVectorizerService;
 use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoSearchResult};
@@ -38,7 +37,7 @@ fn vecdb_constants(
 }
 
 pub struct VecDb {
-    pub memdb: Arc<AMutex<crate::at_tools::att_knowledge::MemoriesDatabase>>,
+    pub memdb: Arc<AMutex<MemoriesDatabase>>,
     vecdb_emb_client: Arc<AMutex<reqwest::Client>>,
     vecdb_handler: Arc<AMutex<VecDBHandler>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
@@ -231,7 +230,7 @@ impl VecDb {
 
     pub async fn vecdb_start_background_tasks(
         &self,
-        gcx: Arc<RwLock<GlobalContext>>,
+        gcx: Arc<ARwLock<GlobalContext>>,
     ) -> Vec<JoinHandle<()>> {
         info!("vecdb: start_background_tasks");
         return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), gcx.clone(), self.constants.tokenizer.clone()).await;
@@ -335,7 +334,7 @@ pub async fn memories_search(
     }
     info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
 
-    let results = match crate::at_tools::att_knowledge::lance_search(memdb, &embedding[0], top_n).await {
+    let results = match lance_search(memdb, &embedding[0], top_n).await {
         Ok(res) => res,
         Err(err) => { return Err(err.to_string()) }
     };
