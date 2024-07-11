@@ -27,8 +27,8 @@ use vectordb::table::Table;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
-use crate::vecdb::vecdb_cache::VecDBCache;
-use crate::vecdb::structs::{MemoRecord, SimpleTextHashVector, VecdbConstants, VecDbStatus};
+use crate::vecdb::vdb_cache::VecDBCache;
+use crate::vecdb::vdb_structs::{MemoRecord, SimpleTextHashVector, VecdbConstants, VecDbStatus};
 use crate::ast::chunk_utils::official_text_hashing_function;
 
 

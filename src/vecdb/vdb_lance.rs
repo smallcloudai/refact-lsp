@@ -15,12 +15,11 @@ use futures_util::TryStreamExt;
 use itertools::Itertools;
 use lance::dataset::{WriteMode, WriteParams};
 use tempfile::{tempdir, TempDir};
-use tokio::sync::Mutex as AMutex;
 use tracing::info;
 use vectordb::database::Database;
 use vectordb::table::Table;
 
-use crate::vecdb::structs::VecdbRecord;
+use crate::vecdb::vdb_structs::VecdbRecord;
 
 impl Debug for VecDBHandler {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

@@ -15,10 +15,9 @@ use crate::ast::file_splitter::AstBasedFileSplitter;
 use crate::fetch_embedding::get_embedding_with_retry;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
-use crate::vecdb::handler::VecDBHandler;
-use crate::vecdb::structs::{VecdbRecord, SplitResult, VecdbConstants, VecDbStatus};
-use crate::vecdb::vecdb_cache::VecDBCache;
-use crate::vecdb::structs::SimpleTextHashVector;
+use crate::vecdb::vdb_lance::VecDBHandler;
+use crate::vecdb::vdb_structs::{VecdbRecord, SplitResult, VecdbConstants, VecDbStatus, SimpleTextHashVector};
+use crate::vecdb::vdb_cache::VecDBCache;
 use crate::at_tools::att_knowledge::MemoriesDatabase;
 
 const DEBUG_WRITE_VECDB_FILES: bool = false;

@@ -9,7 +9,7 @@ use tokio::fs;
 use tokio_rusqlite::Connection;
 use tracing::info;
 
-use crate::vecdb::structs::{VecdbRecord, SplitResult, SimpleTextHashVector};
+use crate::vecdb::vdb_structs::{VecdbRecord, SplitResult, SimpleTextHashVector};
 
 impl Debug for VecDBCache {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
