@@ -76,7 +76,7 @@ pub async fn handle_mem_erase(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let erased_cnt = crate::vecdb::vecdb::memories_erase(vec_db, &post.memid).await.map_err(|e| {
+    let erased_cnt = crate::vecdb::vdb_highlev::memories_erase(vec_db, &post.memid).await.map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
     })?;
 
@@ -100,7 +100,7 @@ pub async fn handle_mem_update_used(
     })?;
 
     let vec_db = gcx.read().await.vec_db.clone();
-    let updated_cnt = crate::vecdb::vecdb::memories_update(
+    let updated_cnt = crate::vecdb::vdb_highlev::memories_update(
         vec_db,
         &post.memid,
         post.correct,
@@ -131,7 +131,7 @@ pub async fn handle_mem_query(
     let cx_locked = gcx.read().await;
     let vec_db = cx_locked.vec_db.clone();
 
-    let search_res = crate::vecdb::vecdb::memories_search(vec_db, post.goal, post.top_n).await
+    let search_res = crate::vecdb::vdb_highlev::memories_search(vec_db, post.goal, post.top_n).await
         .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting memdb search results: {e}")))?;
 
     let response_body = serde_json::to_string_pretty(&search_res).unwrap();
