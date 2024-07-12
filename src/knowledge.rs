@@ -242,7 +242,7 @@ fn _lance_fetch_all_records_measuring_distance(
         let distance = match embedding_to_compare {
             None => { -1.0 }
             Some(embedding) => {
-                info!("cosine_distance, embd\n{:?}\nv\n{:?}\n", embedding, gathered_vec);
+                // info!("cosine_distance, embd\n{:?}\nv\n{:?}\n", embedding, gathered_vec);
                 cosine_distance(&embedding, &gathered_vec)
             }
         };
