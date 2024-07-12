@@ -162,3 +162,23 @@ pub async fn handle_mem_query(
         .unwrap();
     Ok(response)
 }
+
+pub async fn handle_mem_list(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    _body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let vec_db = gcx.read().await.vec_db.clone();
+
+    let memories = crate::vecdb::vdb_highlev::memories_select_all(vec_db).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+    })?;
+
+    let response_body = serde_json::to_string_pretty(&memories).unwrap();
+
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(response_body))
+        .unwrap();
+
+    Ok(response)
+}
