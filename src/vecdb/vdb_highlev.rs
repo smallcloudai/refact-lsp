@@ -322,6 +322,20 @@ pub async fn get_status(vec_db: Arc<AMutex<Option<VecDb>>>) -> Result<Option<Vec
     return Ok(Some(vstatus_copy));
 }
 
+pub async fn memories_select_all(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+) -> Result<Vec<MemoRecord>, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let results = memdb_locked.permdb_select_all(None).await?;
+    Ok(results)
+}
+
 pub async fn memories_erase(
     vec_db: Arc<AMutex<Option<VecDb>>>,
     memid: &str

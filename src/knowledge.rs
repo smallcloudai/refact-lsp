@@ -4,7 +4,7 @@ use tracing::info;
 
 use parking_lot::Mutex as ParkMutex;
 use rand::Rng;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection};
 use arrow::array::{ArrayData, Float32Array, StringArray, FixedSizeListArray, RecordBatchIterator, RecordBatch};
 use arrow::buffer::Buffer;
 use arrow_array::cast::{as_fixed_size_list_array, as_primitive_array, as_string_array};
@@ -13,7 +13,6 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::TryStreamExt;
 use itertools::Itertools;
 use lance::dataset::{WriteMode, WriteParams};
-use lance_linalg::distance::cosine_distance;
 use reqwest::Client;
 use vectordb::database::Database;
 use tempfile::TempDir;
@@ -22,6 +21,7 @@ use tokio::time::Instant;
 use vectordb::table::Table;
 
 use crate::vecdb::vdb_cache::VecDBCache;
+use crate::vecdb::vdb_lance::cosine_distance;
 use crate::vecdb::vdb_structs::{MemoRecord, SimpleTextHashVector, VecdbConstants, VecDbStatus};
 use crate::ast::chunk_utils::official_text_hashing_function;
 
@@ -33,6 +33,21 @@ pub struct MemoriesDatabase {
     pub schema_arc: SchemaRef,
     pub dirty_memids: Vec<String>,
     pub dirty_everything: bool,
+}
+
+fn map_row_to_memo_record(row: &rusqlite::Row) -> rusqlite::Result<MemoRecord> {
+    Ok(MemoRecord {
+        memid: row.get(0)?,
+        thevec: None,
+        distance: 2.0,
+        m_type: row.get(1)?,
+        m_goal: row.get(2)?,
+        m_project: row.get(3)?,
+        m_payload: row.get(4)?,
+        mstat_correct: row.get(5)?,
+        mstat_useful: row.get(6)?,
+        mstat_times_used: row.get(7)?,
+    })
 }
 
 impl MemoriesDatabase {
@@ -158,12 +173,10 @@ impl MemoriesDatabase {
                 row.get::<_, f64>(6)?,
                 row.get::<_, i32>(7)?,
             ))
-        })
-            .map_err(|e| e.to_string())?;
+        }).map_err(|e| e.to_string())?;
 
         for row in rows {
-            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row
-                .map_err(|e| e.to_string())?;
+            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row.map_err(|e| e.to_string())?;
             table_contents.push_str(&format!(
                 "memid={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, useful={}, times_used={}\n",
                 memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used
@@ -172,53 +185,53 @@ impl MemoriesDatabase {
         Ok(table_contents)
     }
 
+    pub async fn permdb_select_all(&self, filter: Option<&str>) -> Result<Vec<MemoRecord>, String> {
+        let conn = self.conn.lock();
+        let query = match filter {
+            Some(f) => format!("SELECT * FROM memories WHERE {}", f),
+            None => "SELECT * FROM memories".to_string(),
+        };
+
+        let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], map_row_to_memo_record).map_err(|e| e.to_string())?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     pub async fn permdb_fillout_records(&self, input_records: Vec<MemoRecord>) -> Result<Vec<MemoRecord>, String> {
         let t0 = Instant::now();
         let conn = self.conn.lock();
 
         let memids: Vec<String> = input_records.iter().map(|record| record.memid.clone()).collect();
-        let placeholders: String = memids.iter().map(|_| "?").collect::<Vec<&str>>().join(",");
+        let placeholders = memids.iter().map(|_| "?").collect::<Vec<&str>>().join(",");
         let query = format!("SELECT * FROM memories WHERE memid IN ({})", placeholders);
         let params = rusqlite::params_from_iter(memids.iter());
         let mut statement = conn.prepare(&query).map_err(|e| e.to_string())?;
 
-        let db_records: std::collections::HashMap<String, MemoRecord> = match statement.query_map(params, |row| {
-            Ok(MemoRecord {
-                memid: row.get(0)?,
-                thevec: None,
-                distance: 2.0,
-                m_type: row.get(1)?,
-                m_goal: row.get(2)?,
-                m_project: row.get(3)?,
-                m_payload: row.get(4)?,
-                mstat_correct: row.get(5)?,
-                mstat_useful: row.get(6)?,
-                mstat_times_used: row.get(7)?,
-            })
-        }) {
-            Ok(rows) => {
-                rows.filter_map(|row_result| {
-                    row_result.map(|record| (record.memid.clone(), record)).ok()
-                }).collect()
-            },
-            Err(err) => return Err(format!("Error select_by_memids: {:?}", err)),
-        };
+        let db_records: std::collections::HashMap<String, MemoRecord> = statement
+            .query_map(params, map_row_to_memo_record)
+            .map_err(|e| e.to_string())?
+            .filter_map(|row_result| row_result.ok().map(|record| (record.memid.clone(), record)))
+            .collect();
 
-        let result: Vec<MemoRecord> = input_records.into_iter().filter_map(|mut record| {
-            if let Some(db_record) = db_records.get(&record.memid) {
-                record.m_type = db_record.m_type.clone();
-                record.m_goal = db_record.m_goal.clone();
-                record.m_project = db_record.m_project.clone();
-                record.m_payload = db_record.m_payload.clone();
-                record.mstat_correct = db_record.mstat_correct;
-                record.mstat_useful = db_record.mstat_useful;
-                record.mstat_times_used = db_record.mstat_times_used;
-                Some(record)
-            } else {
-                tracing::warn!("permdb_memids2records() not found memid={}", record.memid);
-                None
-            }
-        }).collect();
+        let result: Vec<MemoRecord> = input_records
+            .into_iter()
+            .filter_map(|mut record| {
+                if let Some(db_record) = db_records.get(&record.memid) {
+                    record.m_type = db_record.m_type.clone();
+                    record.m_goal = db_record.m_goal.clone();
+                    record.m_project = db_record.m_project.clone();
+                    record.m_payload = db_record.m_payload.clone();
+                    record.mstat_correct = db_record.mstat_correct;
+                    record.mstat_useful = db_record.mstat_useful;
+                    record.mstat_times_used = db_record.mstat_times_used;
+                    Some(record)
+                } else {
+                    tracing::warn!("permdb_memids2records() not found memid={}", record.memid);
+                    None
+                }
+            }).collect();
+
         let elapsed_time = t0.elapsed();
         info!("SELECT {}: took: {:.2}s", memids.join(", "), elapsed_time.as_secs_f64());
         Ok(result)
