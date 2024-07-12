@@ -14,7 +14,7 @@ use crate::fetch_embedding;
 use crate::files_in_workspace::Document;
 use crate::knowledge::{lance_search, MemoriesDatabase};
 use crate::vecdb::vdb_lance::VecDBHandler;
-use crate::vecdb::vdb_thread::FileVectorizerService;
+use crate::vecdb::vdb_thread::{FileVectorizerService, vectorizer_enqueue_dirty_memory, vectorizer_enqueue_files};
 use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoRecord, MemoSearchResult};
 use crate::vecdb::vdb_cache::VecDBCache;
 
@@ -233,11 +233,12 @@ impl VecDb {
         gcx: Arc<ARwLock<GlobalContext>>,
     ) -> Vec<JoinHandle<()>> {
         info!("vecdb: start_background_tasks");
+        vectorizer_enqueue_dirty_memory(self.vectorizer_service.clone()).await;
         return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), gcx.clone(), self.constants.tokenizer.clone()).await;
     }
 
     pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
-        crate::vecdb::vdb_thread::vectorizer_enqueue_files(self.vectorizer_service.clone(), documents, process_immediately).await;
+        vectorizer_enqueue_files(self.vectorizer_service.clone(), documents, process_immediately).await;
     }
 
     pub async fn remove_file(&self, file_path: &PathBuf) {
@@ -264,7 +265,7 @@ pub async fn memories_add(
         memdb_locked.dirty_memids.push(x.clone());
         x
     };
-    crate::vecdb::vdb_thread::vectorizer_enqueue_dirty_memory(vectorizer_service).await;  // sets queue_additions inside
+    vectorizer_enqueue_dirty_memory(vectorizer_service).await;  // sets queue_additions inside
     Ok(memid)
 }
 
