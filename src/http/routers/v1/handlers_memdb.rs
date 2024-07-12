@@ -8,7 +8,7 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::knowledge::get_memories_by_goal;
+
 
 #[derive(Deserialize)]
 struct MemAddRequest {
@@ -125,9 +125,14 @@ pub async fn handle_mem_query(
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    
-    let memories = get_memories_by_goal(gcx.clone(), &post.goal, post.top_n).await
-        .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"))
+
+    let vec_db = gcx.read().await.vec_db.clone();
+    let memories = crate::vecdb::vdb_highlev::memories_search(
+        vec_db,
+        &post.goal,
+        post.top_n
+    ).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"))
     })?;
 
     let response_body = serde_json::to_string_pretty(&memories).unwrap();

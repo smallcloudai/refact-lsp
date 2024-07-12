@@ -15,7 +15,7 @@ use crate::files_in_workspace::Document;
 use crate::knowledge::{lance_search, MemoriesDatabase};
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_thread::FileVectorizerService;
-use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoSearchResult};
+use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoRecord, MemoSearchResult};
 use crate::vecdb::vdb_cache::VecDBCache;
 
 
@@ -308,6 +308,11 @@ pub async fn memories_search(
     query: &String,
     top_n: usize,
 ) -> Result<MemoSearchResult, String> {
+    fn calculate_score(distance: f32, _times_used: i32) -> f32 {
+        distance
+        // distance - (times_used as f32) * 0.01
+    }
+
     let t0 = std::time::Instant::now();
     let (memdb, vecdb_emb_client, constants, cmdline) = {
         let vec_db_guard = vec_db.lock().await;
@@ -334,12 +339,17 @@ pub async fn memories_search(
     }
     info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
 
-    let results = match lance_search(memdb, &embedding[0], top_n).await {
+    let lance_results = match lance_search(memdb.clone(), &embedding[0], top_n).await {
         Ok(res) => res,
         Err(err) => { return Err(err.to_string()) }
     };
-
-    Ok(MemoSearchResult {query_text: query.clone(), results})
+    let mut results: Vec<MemoRecord> = memdb.lock().await.permdb_fillout_records(lance_results).await?;
+    results.sort_by(|a, b| {
+        let score_a = calculate_score(a.distance, a.mstat_times_used);
+        let score_b = calculate_score(b.distance, b.mstat_times_used);
+        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(MemoSearchResult {query_text: query.clone(), results })
 }
 
 #[async_trait]
