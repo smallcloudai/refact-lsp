@@ -34,7 +34,7 @@ pub struct FileVectorizerService {
     pub vecdb_handler: Arc<AMutex<VecDBHandler>>,
     pub vecdb_cache: Arc<AMutex<VecDBCache>>,
     pub vstatus: Arc<AMutex<VecDbStatus>>,
-    pub vstatus_notify: Arc<ANotify>,
+    pub vstatus_notify: Arc<ANotify>,   // fun stuff https://docs.rs/tokio/latest/tokio/sync/struct.Notify.html
     constants: VecdbConstants,
     api_key: String,
     memdb: Arc<AMutex<MemoriesDatabase>>,
