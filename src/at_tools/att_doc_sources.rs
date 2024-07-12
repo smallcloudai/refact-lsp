@@ -137,6 +137,10 @@ fn find_content(html: String) -> String {
         }
     }
 
+    if let Some(node) = document.find(Name("article")).next() {
+        return node.html();
+    }
+
     html
 }
 
