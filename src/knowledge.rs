@@ -15,30 +15,16 @@ use itertools::Itertools;
 use lance::dataset::{WriteMode, WriteParams};
 use lance_linalg::distance::cosine_distance;
 use reqwest::Client;
-use serde::Serialize;
 use vectordb::database::Database;
 use tempfile::TempDir;
-use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
+use tokio::sync::Mutex as AMutex;
 use tokio::time::Instant;
 use vectordb::table::Table;
 
 use crate::vecdb::vdb_cache::VecDBCache;
-use crate::vecdb::vdb_structs::{MemoRecord, MemoSearchResult, SimpleTextHashVector, VecdbConstants, VecDbStatus};
+use crate::vecdb::vdb_structs::{MemoRecord, SimpleTextHashVector, VecdbConstants, VecDbStatus};
 use crate::ast::chunk_utils::official_text_hashing_function;
-use crate::global_context::GlobalContext;
 
-
-#[derive(Serialize)]
-pub struct Memory {
-    pub memid: String,
-    pub m_type: String,
-    pub m_goal: String,
-    pub m_project: String,
-    pub m_payload: String,
-    pub mstat_correct: f64,
-    pub mstat_useful: f64,
-    pub mstat_times_used: i32,
-}
 
 pub struct MemoriesDatabase {
     pub conn: Arc<ParkMutex<Connection>>,
@@ -186,17 +172,21 @@ impl MemoriesDatabase {
         Ok(table_contents)
     }
 
-    pub async fn select_by_memids(&self, memids: &[String]) -> Result<Vec<Memory>, String> {
+    pub async fn permdb_fillout_records(&self, input_records: Vec<MemoRecord>) -> Result<Vec<MemoRecord>, String> {
         let t0 = Instant::now();
         let conn = self.conn.lock();
+
+        let memids: Vec<String> = input_records.iter().map(|record| record.memid.clone()).collect();
         let placeholders: String = memids.iter().map(|_| "?").collect::<Vec<&str>>().join(",");
         let query = format!("SELECT * FROM memories WHERE memid IN ({})", placeholders);
-        let params = rusqlite::params_from_iter(memids);
+        let params = rusqlite::params_from_iter(memids.iter());
         let mut statement = conn.prepare(&query).map_err(|e| e.to_string())?;
 
-        let result = match statement.query_map(params, |row| {
-            Ok(Memory {
+        let db_records: std::collections::HashMap<String, MemoRecord> = match statement.query_map(params, |row| {
+            Ok(MemoRecord {
                 memid: row.get(0)?,
+                thevec: None,
+                distance: 2.0,
                 m_type: row.get(1)?,
                 m_goal: row.get(2)?,
                 m_project: row.get(3)?,
@@ -207,41 +197,35 @@ impl MemoriesDatabase {
             })
         }) {
             Ok(rows) => {
-                let mut result_vec = Vec::new();
-                for row in rows {
-                    result_vec.push(row.map_err(|e|format!("select_by_memids: Error getting row: {:?}", e))?);
-                }
-                Ok(result_vec)
+                rows.filter_map(|row_result| {
+                    row_result.map(|record| (record.memid.clone(), record)).ok()
+                }).collect()
             },
-            Err(err) => Err(format!("Error select_by_memids: {:?}", err)),
+            Err(err) => return Err(format!("Error select_by_memids: {:?}", err)),
         };
+
+        let result: Vec<MemoRecord> = input_records.into_iter().filter_map(|mut record| {
+            if let Some(db_record) = db_records.get(&record.memid) {
+                record.m_type = db_record.m_type.clone();
+                record.m_goal = db_record.m_goal.clone();
+                record.m_project = db_record.m_project.clone();
+                record.m_payload = db_record.m_payload.clone();
+                record.mstat_correct = db_record.mstat_correct;
+                record.mstat_useful = db_record.mstat_useful;
+                record.mstat_times_used = db_record.mstat_times_used;
+                Some(record)
+            } else {
+                tracing::warn!("permdb_memids2records() not found memid={}", record.memid);
+                None
+            }
+        }).collect();
         let elapsed_time = t0.elapsed();
-        println!("SELECT {}: took: {:.2}s", memids.join(", "), elapsed_time.as_secs_f64());
-        result
+        info!("SELECT {}: took: {:.2}s", memids.join(", "), elapsed_time.as_secs_f64());
+        Ok(result)
     }
 }
 
-pub async fn get_memories_by_goal(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    goal: &String,
-    top_n: usize,
-) -> Result<Vec<Memory>, String> {
-    let cx_locked = gcx.read().await;
-    let vec_db = cx_locked.vec_db.clone();
-
-    let search_res = crate::vecdb::vdb_highlev::memories_search(vec_db.clone(), goal, top_n).await?;
-
-    let memdb = {
-        let vec_db_guard = vec_db.lock().await;
-        let vec_db_ref = vec_db_guard.as_ref().ok_or("get_memories_by_goal: vecdb is not available".to_string())?;
-        vec_db_ref.memdb.clone()
-    };
-
-    let memories = memories_from_search(memdb, search_res).await?;
-    Ok(memories)
-}
-
-fn lance_fetch_all_records_measuring_distance(
+fn _lance_fetch_all_records_measuring_distance(
     record_batch: RecordBatch,
     include_embedding: bool,
     embedding_to_compare: Option<&Vec<f32>>,
@@ -271,6 +255,7 @@ fn lance_fetch_all_records_measuring_distance(
                 .to_string(),
             thevec: embedding,
             distance,
+            ..Default::default()
         })
     }).collect()   // collect() here operates on Result<> and returns Result<Vec<>>, a feature of rust
 }
@@ -294,41 +279,13 @@ pub async fn lance_search(
         .try_collect::<Vec<_>>().await?;
     let record_batch = arrow::compute::concat_batches(&my_schema_arc, &query)?;
 
-    match lance_fetch_all_records_measuring_distance(record_batch, false, Some(&embedding)) {
+    match _lance_fetch_all_records_measuring_distance(record_batch, false, Some(&embedding)) {
         Ok(records) => {
             let sorted = records.into_iter().sorted_unstable_by(|a, b|a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal)).collect::<Vec<_>>();
             Ok(sorted)
         },
         Err(e) => Err(e),
     }
-}
-
-pub async fn memories_from_search(
-    memdb: Arc<AMutex<MemoriesDatabase>>,
-    search_res: MemoSearchResult,
-) -> Result<Vec<Memory>, String> {
-    fn calculate_score(distance: f32, times_used: i32) -> f32 {
-        distance - (times_used as f32) * 0.01
-    }
-
-    let records = memdb.lock().await.select_by_memids(&search_res.results.iter().map(|x| x.memid.clone()).collect::<Vec<_>>()).await?;
-    let mut memory_distance_pairs: Vec<(Memory, f32)> = records
-        .into_iter()
-        .filter_map(|memory| {
-            search_res.results.iter()
-                .find(|result| result.memid == memory.memid)
-                .map(|result| (memory, result.distance))
-        })
-        .collect();
-
-    memory_distance_pairs.sort_by(|a, b| {
-        let score_a = calculate_score(a.1, a.0.mstat_times_used);
-        let score_b = calculate_score(b.1, b.0.mstat_times_used);
-        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let sorted_memories = memory_distance_pairs.into_iter().map(|(memory, _)| memory).collect::<Vec<_>>();
-    Ok(sorted_memories)
 }
 
 async fn recall_dirty_memories_and_mark_them_not_dirty(
@@ -406,7 +363,7 @@ pub async fn vectorize_dirty_memories(
     {
         let mut cache_locked = vecdb_cache.lock().await;
         cache_locked.process_simple_hash_text_vector(&mut todo).await.map_err(|e| format!("Failed to get vectors from cache: {}", e))?
-        // this makes _todo[].vector appear for records that exist in cache
+        // this makes todo[].vector appear for records that exist in cache
     }
 
     let todo_len = todo.len();
@@ -442,7 +399,7 @@ pub async fn vectorize_dirty_memories(
         for record in records {
             assert!(record.vector.is_some());
             assert_eq!(record.vector.as_ref().unwrap().len(), embedding_size as usize);
-            emb_builder.append(&mut record.vector.clone().expect("No embedding is provided"));
+            emb_builder.append(&mut record.vector.clone().expect("No embedding"));
         }
         let emb_data_res = ArrayData::builder(DataType::Float32)
             .add_buffer(Buffer::from_vec(emb_builder))
@@ -488,7 +445,7 @@ pub async fn vectorize_dirty_memories(
             }),
         ).await
     };
-    info!("Updated {} memories in the database:\n{:?}", todo.len(), data_res);
+    info!("updated {} memories in the database:\n{:?}", todo.len(), data_res);
 
     Ok(())
 }
