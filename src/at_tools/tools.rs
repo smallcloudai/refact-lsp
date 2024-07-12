@@ -189,7 +189,7 @@ const NOT_READY_TOOLS: &str = r####"
     parameters:
       - name: "action"
         type: "string"
-        description: "Either 'list', 'add', or 'remove'"
+        description: "Either 'list', 'add', 'remove' or 'inline'. Use inline whenever the user asks a question with a url that looks like a documentation source."
       - name: "source"
         type: "string"
         description: "A local folder or http(s) url. Required when action is not 'list'."
