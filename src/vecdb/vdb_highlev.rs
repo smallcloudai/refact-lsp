@@ -237,15 +237,11 @@ impl VecDb {
     }
 
     pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
-        self.vectorizer_service.lock().await.vectorizer_enqueue_files(documents, process_immediately).await;
+        crate::vecdb::vdb_thread::vectorizer_enqueue_files(self.vectorizer_service.clone(), documents, process_immediately).await;
     }
 
     pub async fn remove_file(&self, file_path: &PathBuf) {
         self.vecdb_handler.lock().await.remove(file_path).await;
-    }
-
-    pub async fn get_status(&self) -> Result<VecDbStatus, String> {
-        self.vectorizer_service.lock().await.status().await
     }
 }
 
@@ -263,12 +259,67 @@ pub async fn memories_add(
     };
 
     let memid = {
-        let memdb_locked = memdb.lock().await;
-        memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?
+        let mut memdb_locked = memdb.lock().await;
+        let x = memdb_locked.permdb_add(m_type, m_goal, m_project, m_payload)?;
+        memdb_locked.dirty_memids.push(x.clone());
+        x
     };
-    vectorizer_service.lock().await.vectorizer_enqueue_dirty_memory().await;
-    // TODO: wait until processing is over
+    crate::vecdb::vdb_thread::vectorizer_enqueue_dirty_memory(vectorizer_service).await;  // sets queue_additions inside
     Ok(memid)
+}
+
+pub async fn memories_block_until_vectorized(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+) -> Result<(), String> {
+    let vectorizer_service = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.vectorizer_service.clone()
+    };
+    let (vstatus, vstatus_notify) = {
+        let service = vectorizer_service.lock().await;
+        (service.vstatus.clone(), service.vstatus_notify.clone())
+    };
+    loop {
+        let future: tokio::sync::futures::Notified = vstatus_notify.notified();
+        {
+            let vstatus_locked = vstatus.lock().await;
+            if vstatus_locked.state == "done" && !vstatus_locked.queue_additions {
+                break;
+            }
+        }
+        future.await;
+    };
+    Ok(())
+}
+
+pub async fn get_status(vec_db: Arc<AMutex<Option<VecDb>>>) -> Result<Option<VecDbStatus>, String> {
+    let vectorizer_service = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.vectorizer_service.clone()
+    };
+    let (vstatus, vecdb_handler, vecdb_cache) = {
+        let vectorizer_locked = vectorizer_service.lock().await;
+        (
+            vectorizer_locked.vstatus.clone(),
+            vectorizer_locked.vecdb_handler.clone(),
+            vectorizer_locked.vecdb_cache.clone(),
+        )
+    };
+    let mut vstatus_copy = vstatus.lock().await.clone();
+    vstatus_copy.db_size = match vecdb_handler.lock().await.size().await {
+        Ok(res) => res,
+        Err(err) => return Err(err)
+    };
+    vstatus_copy.db_cache_size = match vecdb_cache.lock().await.size().await {
+        Ok(res) => res,
+        Err(err) => return Err(err.to_string())
+    };
+    if vstatus_copy.state == "done" && vstatus_copy.queue_additions {
+        vstatus_copy.state = "parsing".to_string();
+    }
+    return Ok(Some(vstatus_copy));
 }
 
 pub async fn memories_erase(

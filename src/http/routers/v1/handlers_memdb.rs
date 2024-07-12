@@ -60,11 +60,12 @@ pub async fn handle_mem_add(
 
     let response = Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(format!("{{\"memid\": \"{}\"}}", memid)))
+        .body(Body::from(serde_json::to_string(&json!({"memid": memid})).unwrap()))
         .unwrap();
 
     Ok(response)
 }
+
 pub async fn handle_mem_erase(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
@@ -113,6 +114,23 @@ pub async fn handle_mem_update_used(
     let response = Response::builder()
         .header("Content-Type", "application/json")
         .body(Body::from(serde_json::to_string(&json!({"success": updated_cnt>0})).unwrap()))
+        .unwrap();
+
+    Ok(response)
+}
+
+pub async fn handle_mem_block_until_vectorized(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    _body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let vec_db = gcx.read().await.vec_db.clone();
+    crate::vecdb::vdb_highlev::memories_block_until_vectorized(vec_db)
+        .await
+        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_string(&json!({"success": true})).unwrap()))
         .unwrap();
 
     Ok(response)
