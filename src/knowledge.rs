@@ -241,7 +241,10 @@ fn _lance_fetch_all_records_measuring_distance(
             .map(|x| x.unwrap()).collect::<Vec<_>>();
         let distance = match embedding_to_compare {
             None => { -1.0 }
-            Some(embedding) => { cosine_distance(&embedding, &gathered_vec) }
+            Some(embedding) => {
+                info!("cosine_distance, embd\n{:?}\nv\n{:?}\n", embedding, gathered_vec);
+                cosine_distance(&embedding, &gathered_vec)
+            }
         };
         let embedding = match include_embedding {
             true => Some(gathered_vec),
@@ -297,7 +300,7 @@ async fn recall_dirty_memories_and_mark_them_not_dirty(
     let rows: Vec<(String, String)> = {
         let conn = memdb_locked.conn.lock();
         if memdb_locked.dirty_everything {
-            let mut stmt = conn.prepare("SELECT memid, m_payload FROM memories")
+            let mut stmt = conn.prepare("SELECT memid, m_goal FROM memories")
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
             let x = stmt.query_map([], |row| {
                 Ok((
@@ -314,7 +317,7 @@ async fn recall_dirty_memories_and_mark_them_not_dirty(
                 .map(|_| "?")
                 .collect::<Vec<_>>()
                 .join(",");
-            let query = format!("SELECT memid, m_payload FROM memories WHERE memid IN ({})", placeholders);
+            let query = format!("SELECT memid, m_goal FROM memories WHERE memid IN ({})", placeholders);
             let mut stmt = conn.prepare(&query)
                 .map_err(|e| format!("Failed to prepare statement: {}", e))?;
             let x = stmt.query_map(rusqlite::params_from_iter(memdb_locked.dirty_memids.iter()), |row| {
@@ -331,10 +334,10 @@ async fn recall_dirty_memories_and_mark_them_not_dirty(
             Vec::new()
         }
     };
-    for (memid, m_payload) in rows {
-        let window_text_hash = official_text_hashing_function(&m_payload);
+    for (memid, m_goal) in rows {
+        let window_text_hash = official_text_hashing_function(&m_goal);
         let simple_text_hash_vector = SimpleTextHashVector {
-            window_text: m_payload,
+            window_text: m_goal,
             window_text_hash,
             vector: None,
         };

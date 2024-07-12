@@ -33,6 +33,7 @@ struct MemUpdateUsedRequest {
 #[derive(Deserialize)]
 struct MemQuery {
     goal: String,
+    #[allow(unused)]
     project: String,
     top_n: usize,
 }
