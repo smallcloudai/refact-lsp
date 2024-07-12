@@ -140,6 +140,30 @@ fn find_content(html: String) -> String {
     html
 }
 
+// returns a pair of html and markdown
+async fn fetch_and_convert_to_md(url: &str) -> Result<(String, String), String> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|_| format!("Unable to connect to '{url}'"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Unable to connect to '{url}'"));
+    }
+
+    let html = response
+        .text()
+        .await
+        .map_err(|_| "Unable to convert page to text".to_string())?;
+
+    let html = find_content(html);
+
+    let md = html2text::config::with_decorator(CustomTextConversion)
+        .string_from_read(&html.as_bytes()[..], 200)
+        .map_err(|_| "Unable to convert html to text".to_string())?;
+
+    Ok((html, md))
+}
+
 async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<DocOrigin, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
@@ -164,25 +188,9 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
         let is_last_iteration = iteration == depth;
 
         for url in queue {
-            let response = reqwest::get(url.clone())
-                .await
-                .map_err(|_| format!("Unable to connect to '{url}'"))?;
-
-            if !response.status().is_success() {
-                warn!("Error when connecting to '{url}': {}", response.status());
+            let Ok((html, text)) = fetch_and_convert_to_md(&url).await else {
                 continue;
-            }
-
-            let html = response
-                .text()
-                .await
-                .map_err(|_| "Unable to convert page to text".to_string())?;
-
-            let html = find_content(html);
-
-            let text = html2text::config::with_decorator(CustomTextConversion)
-                .string_from_read(&html.as_bytes()[..], 200)
-                .map_err(|_| "Unable to convert html to text".to_string())?;
+            };
 
             // create file
             let Some((dir_path, file_name)) = get_directory_and_file_from_url(&url) else {
@@ -276,12 +284,16 @@ async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) ->
     Ok(results)
 }
 
+fn get_source_from_args(args: &HashMap<String, Value>) -> Result<String, String> {
+    match args.get("source") {
+        Some(Value::String(s)) => Ok(s.clone()),
+        Some(v) => Err(format!("argument `source` is not a string: {:?}", v)),
+        None => Err("Missing source argument for doc_sources".to_string()),
+    }
+}
+
 async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
-    let source = match args.get("source") {
-        Some(Value::String(s)) => s.clone(),
-        Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
-        None => return Err("Missing source argument for doc_sources_add".to_string()),
-    };
+    let source = get_source_from_args(args)?;
 
     // if the source is an url, download the page and convert it to markdown
     if source.starts_with("http://") || source.starts_with("https://") {
@@ -326,11 +338,7 @@ async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, arg
 }
 
 async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
-    let source = match args.get("source") {
-        Some(Value::String(s)) => s.clone(),
-        Some(v) => return Err(format!("argument `source` is not a string: {:?}", v)),
-        None => return Err("Missing source argument for doc_sources_remove".to_string()),
-    };
+    let source = get_source_from_args(args)?;
 
     let gc = ccx.global_context
         .write()
@@ -362,6 +370,25 @@ async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, 
     Ok(results)
 }
 
+async fn doc_sources_inline(tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = get_source_from_args(args)?;
+
+    // if the source is an url, download the page and convert it to markdown
+    if !source.starts_with("http://") && !source.starts_with("https://") {
+        return Err("Source must be a url for inline documentation requests".to_string());
+    }
+
+    let (_, md) = fetch_and_convert_to_md(&source).await?;
+
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: md,
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
+}
+
 #[async_trait]
 impl AtTool for AttDocSources {
     async fn execute(
@@ -379,7 +406,8 @@ impl AtTool for AttDocSources {
             "list" => doc_sources_list(ccx, tool_call_id).await,
             "add" => doc_sources_add(ccx, tool_call_id, args).await,
             "remove" => doc_sources_remove(ccx, tool_call_id, args).await,
-            _ => Err(format!("Unknown argument action `{}`. Action must be one of 'add', 'remove', 'list'", action))
+            "inline" => doc_sources_inline(tool_call_id, args).await,
+            _ => Err(format!("Unknown argument action `{}`. Action must be one of 'add', 'remove', 'list' or 'inline'", action))
         }
     }
 }
