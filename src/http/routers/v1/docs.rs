@@ -267,7 +267,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
         pages,
     };
 
-    if let Ok(origin_json) = serde_json::to_string(&origin) {
+    if let Ok(origin_json) = serde_json::to_string_pretty(&origin) {
         let mut file_path = directory.clone();
         file_path.push("origin.json");
         let mut file = File::create(&file_path)
