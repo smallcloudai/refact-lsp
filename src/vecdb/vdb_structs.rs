@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::sync::RwLock as StdRwLock;
-use tokenizers::Tokenizer;
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use tokenizers::Tokenizer;
+use async_trait::async_trait;
 
 
 #[async_trait]
@@ -38,7 +38,8 @@ pub struct VecDbStatus {
     pub vectors_made_since_start: usize,
     pub db_size: usize,
     pub db_cache_size: usize,
-    pub state: String
+    pub state: String,   // "starting", "parsing", "done"
+    pub queue_additions: bool,
 }
 
 
