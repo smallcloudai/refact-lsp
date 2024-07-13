@@ -1,6 +1,6 @@
 import asyncio
 import aiohttp
-import json
+import json, time
 from typing import Dict, Any, Optional, Tuple
 
 base_url = "http://127.0.0.1:8001"
@@ -16,6 +16,13 @@ async def mem_add(session: aiohttp.ClientSession, mem_type: str, goal: str, proj
     }
     async with session.post(url, json=data) as response:
         return await response.json()
+
+
+async def mem_block_until_vectorized(session: aiohttp.ClientSession) -> Tuple[Dict[str, Any], float]:
+    url = f"{base_url}/v1/mem-block-until-vectorized"
+    t0 = time.time()
+    async with session.get(url) as response:
+        return (await response.json(), time.time() - t0)
 
 
 async def mem_update_used(session: aiohttp.ClientSession, memid: str, correct: float, useful: float) -> Dict[str, Any]:
@@ -55,7 +62,10 @@ async def test_memory_operations():
         m1 = await mem_add(session, "proj-fact", "compile", "proj1", "Looks like proj1 is written in fact in Rust.")
         m2 = await mem_add(session, "seq-of-acts", "compile", "proj2", "Wow, running cargo build on proj2 was successful!")
         m3 = await mem_add(session, "proj-fact", "compile", "proj2", "Looks like proj2 is written in fact in Rust.")
-        print("Added memories:", m0, m1, m2, m3)
+        print("Added memories:\n%s\n%s\n%s\n%s" % (m0, m1, m2, m3))
+
+        bl, bl_t = await mem_block_until_vectorized(session)
+        print("Block result: %0.1fs %s" % (bl_t, bl))
 
         update_result = await mem_update_used(session, m1["memid"], 0.95, 0.85)
         print("Updated memory:", update_result)
