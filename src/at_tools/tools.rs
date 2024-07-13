@@ -13,8 +13,8 @@ use crate::toolbox::toolbox_config::ToolCustDict;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
-    async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>;
-    fn depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>;
+    fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
 }
 
 pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>
@@ -43,7 +43,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
     let mut result = HashMap::new();
     for (key, value) in tools_all {
         let command = value.lock().await;
-        let depends_on = command.depends_on();
+        let depends_on = command.tool_depends_on();
         if depends_on.contains(&"ast".to_string()) && !ast_on {
             continue;
         }
@@ -96,7 +96,7 @@ tools:
       - "file_path"
 
   - name: "file"
-    description: "Read the file, the same as cat shell command, but skeletonizes files that are too large."
+    description: "Read the file, the same as cat shell command, but skeletonizes files that are too large. Doesn't work on dirs."
     parameters:
       - name: "path"
         type: "string"

@@ -98,6 +98,7 @@ async fn vectorize_batch_from_q(
     B: usize,
 ) -> Result<(), String> {
     let batch = embed_q.drain(..B.min(embed_q.len())).collect::<Vec<_>>();
+    assert!(batch.len() > 0);
     let t0 = Instant::now();
 
     let batch_result = get_embedding_with_retry(
