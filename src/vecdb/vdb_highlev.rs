@@ -210,7 +210,7 @@ impl VecDb {
         let cache = VecDBCache::init(cache_dir, &constants.model_name, constants.embedding_size).await?;
         let vecdb_handler = Arc::new(AMutex::new(handler));
         let vecdb_cache = Arc::new(AMutex::new(cache));
-        let memdb = Arc::new(AMutex::new(MemoriesDatabase::init(cache_dir, &constants).await?));
+        let memdb = Arc::new(AMutex::new(MemoriesDatabase::init(cache_dir, &constants, cmdline.reset_memory).await?));
         let vectorizer_service = Arc::new(AMutex::new(FileVectorizerService::new(
             vecdb_handler.clone(),
             vecdb_cache.clone(),

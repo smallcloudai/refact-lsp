@@ -55,6 +55,7 @@ impl MemoriesDatabase {
         cache_dir: &PathBuf,
         // vecdb_cache: Arc<AMutex<VecDBCache>>,
         constants: &VecdbConstants,
+        reset_memory: bool,
     ) -> Result<MemoriesDatabase, String> {
         // SQLite database for memories, permanent on disk
         let dbpath = cache_dir.join("memories.sqlite");
@@ -98,12 +99,15 @@ impl MemoriesDatabase {
             dirty_memids: Vec::new(),
             dirty_everything: true,
         };
-        db._permdb_create_table()?;
+        db._permdb_create_table(reset_memory)?;
         Ok(db)
     }
 
-    fn _permdb_create_table(&self) -> Result<(), String> {
+    fn _permdb_create_table(&self, reset_memory: bool) -> Result<(), String> {
         let conn = self.conn.lock();
+        if reset_memory {
+            conn.execute("DROP TABLE IF EXISTS memories", []).map_err(|e| e.to_string())?;
+        }
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
                 memid TEXT PRIMARY KEY,
