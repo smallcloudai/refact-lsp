@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
-use crate::vecdb::vdb_highlev::{memories_search, memories_update};
+use crate::vecdb::vdb_highlev::memories_search;
 
 pub struct AttGetKnowledge;
 
@@ -24,11 +24,7 @@ impl Tool for AttGetKnowledge {
 
         let vec_db = ccx.global_context.read().await.vec_db.clone();
         let memories = memories_search(vec_db.clone(), &im_going_to_do, ccx.top_n).await?;
-        
-        for m in memories.results.iter() {
-            memories_update(vec_db.clone(), &m.memid.clone(), 0., 0.).await?;
-        }
-        
+
         let memories_json = memories.results.iter().map(|m| {
             serde_json::json!({
                 "memid": m.memid.clone(),
