@@ -1,4 +1,4 @@
-import aiohttp, os, termcolor, copy, json
+import aiohttp, os, termcolor, copy, json, time
 from typing import Optional, List, Any, Tuple, Dict, Literal, Set
 from pydantic import BaseModel
 
@@ -290,3 +290,54 @@ async def diff_apply(
             if response.status != 200:
                 raise Exception(f"unexpected response status {response.status}, response: {await response.text()}")
             return await response.json(content_type=None)
+
+
+async def mem_add(session: aiohttp.ClientSession, base_url: str, mem_type: str, goal: str, project: str, payload: str) -> Dict[str, Any]:
+    url = f"{base_url}/v1/mem-add"
+    data = {
+        "mem_type": mem_type,
+        "goal": goal,
+        "project": project,
+        "payload": payload
+    }
+    async with session.post(url, json=data) as response:
+        return await response.json()
+
+
+async def mem_block_until_vectorized(session: aiohttp.ClientSession, base_url: str) -> Tuple[Dict[str, Any], float]:
+    url = f"{base_url}/v1/mem-block-until-vectorized"
+    t0 = time.time()
+    async with session.get(url) as response:
+        return (await response.json(), time.time() - t0)
+
+
+async def mem_update_used(session: aiohttp.ClientSession, base_url: str, memid: str, correct: float, useful: float) -> Dict[str, Any]:
+    url = f"{base_url}/v1/mem-update-used"
+    data = {
+        "memid": memid,
+        "correct": correct,
+        "useful": useful
+    }
+    async with session.post(url, json=data) as response:
+        return await response.json()
+
+
+async def mem_erase(session: aiohttp.ClientSession, base_url: str, memid: str) -> Dict[str, Any]:
+    url = f"{base_url}/v1/mem-erase"
+    data = {
+        "memid": memid
+    }
+    async with session.post(url, json=data) as response:
+        return await response.json()
+
+
+async def mem_query(session: aiohttp.ClientSession, base_url: str, goal: str, project: str, top_n: Optional[int] = 5) -> Tuple[int, Dict[str, Any]]:
+    url = f"{base_url}/v1/mem-query"
+    data = {
+        "goal": goal,
+        "project": project,
+        "top_n": top_n
+    }
+    async with session.post(url, json=data) as response:
+        return response.status, await response.json()
+
