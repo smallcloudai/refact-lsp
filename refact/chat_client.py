@@ -345,3 +345,13 @@ async def mem_query(base_url: str, goal: str, project: str, top_n: Optional[int]
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
             return response.status, await response.json()
+
+async def ongoing_update(base_url: str, goal: str, ongoing_json: str):
+    url = f"{base_url}/ongoing-update"
+    data = {
+        "goal": goal,
+        "ongoing_json": ongoing_json,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=data) as response:
+            return await response.json()

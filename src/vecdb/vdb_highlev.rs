@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use std::sync::Mutex as StdMutex;
+use std::collections::HashMap;
 use tokenizers::Tokenizer;
+use indexmap::IndexMap;
 use tracing::{info, error};
 
 use async_trait::async_trait;
@@ -15,7 +18,7 @@ use crate::files_in_workspace::Document;
 use crate::knowledge::{lance_search, MemoriesDatabase};
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_thread::{FileVectorizerService, vectorizer_enqueue_dirty_memory, vectorizer_enqueue_files};
-use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoRecord, MemoSearchResult};
+use crate::vecdb::vdb_structs::{SearchResult, VecdbSearch, VecDbStatus, VecdbConstants, MemoRecord, MemoSearchResult, OngoingFlow};
 use crate::vecdb::vdb_cache::VecDBCache;
 
 
@@ -43,6 +46,7 @@ pub struct VecDb {
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
     cmdline: CommandLine,  // TODO: take from command line what's needed, don't store a copy
     constants: VecdbConstants,
+    pub mem_ongoing: Arc<StdMutex<HashMap<String, OngoingFlow>>>,
 }
 
 async fn vecdb_test_request(
@@ -225,6 +229,7 @@ impl VecDb {
             vectorizer_service,
             cmdline: cmdline.clone(),
             constants: constants.clone(),
+            mem_ongoing: Arc::new(StdMutex::new(HashMap::<String, OngoingFlow>::new())),
         })
     }
 
@@ -417,6 +422,43 @@ pub async fn memories_search(
     });
     Ok(MemoSearchResult {query_text: query.clone(), results })
 }
+
+pub async fn ongoing_update_or_create(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    goal: String,
+    ongoing_json: IndexMap<String, serde_json::Value>,
+) -> Result<(), String> {
+    let ongoing_map_arc = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.mem_ongoing.clone()
+    };
+    let mut ongoing_map = ongoing_map_arc.lock().unwrap();
+    if let Some(ongoing) = ongoing_map.get_mut(&goal) {
+        ongoing.ongoing_json = ongoing_json;
+    } else {
+        let new_ongoing = OngoingFlow {
+            goal: goal.clone(),
+            ongoing_json,
+        };
+        ongoing_map.insert(goal, new_ongoing);
+    }
+    Ok(())
+}
+
+pub async fn ongoing_find(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    goal: String,
+) -> Result<Option<OngoingFlow>, String> {
+    let ongoing_map_arc = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.mem_ongoing.clone()
+    };
+    let ongoing_map = ongoing_map_arc.lock().unwrap();
+    Ok(ongoing_map.get(&goal).cloned())
+}
+
 
 #[async_trait]
 impl VecdbSearch for VecDb {

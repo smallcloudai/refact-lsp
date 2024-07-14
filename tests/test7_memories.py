@@ -22,9 +22,11 @@ async def test_memory_operations():
     erase_result = await chat_client.mem_erase(base_url, m0["memid"])
     print("Erased memory:", erase_result)
 
-    await asyncio.sleep(3)
     http_status, query_result = await chat_client.mem_query(base_url, "compile", "proj1")
     print("Query result: %s\n%s" % (http_status, json.dumps(query_result, indent=4)))
+
+    x = await chat_client.ongoing_update(base_url, "compile", "{\"HELLO\": \"world\"}")
+    print("Save ongoing: %s" % (x))
 
     # You can add more assertions here to verify the results
     # For example:

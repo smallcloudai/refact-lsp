@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::json;
+use indexmap::IndexMap;
 
 use axum::Extension;
 use axum::response::Result;
@@ -182,3 +183,70 @@ pub async fn handle_mem_list(
 
     Ok(response)
 }
+
+#[derive(Deserialize)]
+struct OngoingUpdateRequest {
+    goal: String,
+    ongoing_json: String,
+}
+
+pub async fn handle_ongoing_update_or_create(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let post: OngoingUpdateRequest = serde_json::from_slice(&body_bytes).map_err(|e| {
+        tracing::info!("cannot parse input:\n{:?}", body_bytes);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+    })?;
+    let vec_db = gcx.read().await.vec_db.clone();
+
+
+    let ongoing_json: IndexMap<String, serde_json::Value> = serde_json::from_str(&post.ongoing_json).map_err(|e| {
+        tracing::info!("cannot parse input:\n{:?}", body_bytes);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+    })?;
+
+    crate::vecdb::vdb_highlev::ongoing_update_or_create(
+        vec_db,
+        post.goal,
+        ongoing_json,
+    ).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+    })?;
+    let response = Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_string(&json!({"success": true})).unwrap()))
+        .unwrap();
+    Ok(response)
+}
+
+// pub async fn handle_ongoing_find(
+//     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+//     body_bytes: hyper::body::Bytes,
+// ) -> Result<Response<Body>, ScratchError> {
+//     let post: OngoingFindRequest = serde_json::from_slice(&body_bytes).map_err(|e| {
+//         tracing::info!("cannot parse input:\n{:?}", body_bytes);
+//         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+//     })?;
+//     let vec_db = gcx.read().await.vec_db.clone();
+//     let ongoing = crate::vecdb::vdb_highlev::ongoing_find(
+//         vec_db,
+//         post.goal
+//     ).await.map_err(|e| {
+//         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+//     })?;
+//     let response_body = match ongoing {
+//         Some(ongoing) => serde_json::to_string(&json!({
+//             "found": true,
+//             "ongoing": ongoing
+//         })).unwrap(),
+//         None => serde_json::to_string(&json!({
+//             "found": false
+//         })).unwrap(),
+//     };
+//     let response = Response::builder()
+//         .header("Content-Type", "application/json")
+//         .body(Body::from(response_body))
+//         .unwrap();
+//     Ok(response)
+// }

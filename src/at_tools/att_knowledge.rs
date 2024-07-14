@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
-use crate::vecdb::vdb_highlev::memories_search;
-use crate::vecdb::vdb_structs::MemoRecord;
+use crate::vecdb::vdb_highlev::{memories_search, ongoing_find};
+
 
 pub struct AttGetKnowledge;
 
@@ -24,24 +24,7 @@ impl Tool for AttGetKnowledge {
         };
 
         let vec_db = ccx.global_context.read().await.vec_db.clone();
-        let mut memories: crate::vecdb::vdb_structs::MemoSearchResult = memories_search(vec_db.clone(), &im_going_to_do, ccx.top_n).await?;
-
-        // 💿 There is no ongoing session on the topic of "{im_going_to_do}". A new session was created, it's a good idea to formulate a plan.
-        // 💿 An ongoing session on the topic of "{im_going_to_do}" is activated. Continue with your plan.
-        if false {
-            memories.results.push(
-                MemoRecord {
-                    memid: "ongoing".to_string(),
-                    thevec: None,
-                    distance: 2.0,
-                    m_type: "ongoing".to_string(),
-                    m_goal: im_going_to_do.clone(),
-                    m_project: "project1".to_string(),
-                    m_payload: format!("💿 An ongoing session on the topic \"{}\" is activated. Continue with your plan.", im_going_to_do),
-                    ..Default::default()
-                }
-            );
-        }
+        let memories: crate::vecdb::vdb_structs::MemoSearchResult = memories_search(vec_db.clone(), &im_going_to_do, ccx.top_n).await?;
 
         let memories_json = memories.results.iter().map(|m| {
             serde_json::json!({
@@ -49,11 +32,7 @@ impl Tool for AttGetKnowledge {
                 "content": m.m_payload.clone()
             })
         }).collect::<Vec<Value>>();
-        let mut memories_str = serde_json::to_string(&memories_json).unwrap();
-        if false {
-            // works with sonnet
-            memories_str.push_str("\n\n💿 There is no ongoing session with this goal. A new empty ongoing session is created, formulate your plan now.");
-        }
+        let memories_str = serde_json::to_string(&memories_json).unwrap();
 
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
@@ -62,13 +41,24 @@ impl Tool for AttGetKnowledge {
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
         }));
-        // better for gpt-3.5
-        results.push(ContextEnum::ChatMessage(ChatMessage {
-            role: "user".to_string(),
-            content: "💿 There is no ongoing session with this goal. A new empty ongoing session is created, formulate your plan now.".to_string(),
-            tool_calls: None,
-            tool_call_id: "".to_string(),
-        }));
+
+        let ongoing_maybe: Option<crate::vecdb::vdb_structs::OngoingFlow> = ongoing_find(vec_db.clone(), im_going_to_do.clone()).await?;
+        if let Some(ongoing) = ongoing_maybe {
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "user".to_string(),
+                content: format!("💿 An ongoing session with this goal is found. This is your own summary of your progress. Continue with your previous plan:\n\n{}", serde_json::to_string_pretty(&ongoing.ongoing_json).unwrap()),
+                tool_calls: None,
+                tool_call_id: String::new(),
+            }));
+        } else {
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "user".to_string(),
+                content: format!("💿 There is no ongoing session with this goal. A new empty ongoing session is created, formulate your plan now."),
+                tool_calls: None,
+                tool_call_id: String::new(),
+            }));
+        }
+
         Ok(results)
     }
 

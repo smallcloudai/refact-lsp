@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::RwLock as StdRwLock;
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use indexmap::IndexMap;
 use tokenizers::Tokenizer;
 use async_trait::async_trait;
 
@@ -97,4 +98,11 @@ pub struct MemoRecord {
 pub struct MemoSearchResult {
     pub query_text: String,
     pub results: Vec<MemoRecord>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OngoingFlow {
+    pub goal: String,
+    pub ongoing_json: IndexMap<String, serde_json::Value>,
 }
