@@ -281,7 +281,8 @@ pub struct ChatPost {
     pub max_tokens: usize,
     #[serde(default)]
     pub tools: Option<Vec<serde_json::Value>>,
-    // pub tool_choice: Option<String>,
+    #[serde(default)]
+    pub tool_choice: Option<String>,
     #[serde(default)]
     pub only_deterministic_messages: bool,  // means don't sample from the model
     #[serde(default)]
