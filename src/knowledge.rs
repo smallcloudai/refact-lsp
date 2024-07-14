@@ -45,7 +45,7 @@ fn map_row_to_memo_record(row: &rusqlite::Row) -> rusqlite::Result<MemoRecord> {
         m_project: row.get(3)?,
         m_payload: row.get(4)?,
         mstat_correct: row.get(5)?,
-        mstat_useful: row.get(6)?,
+        mstat_relevant: row.get(6)?,
         mstat_times_used: row.get(7)?,
     })
 }
@@ -116,7 +116,7 @@ impl MemoriesDatabase {
                 m_project TEXT NOT NULL,
                 m_payload TEXT NOT NULL,
                 mstat_correct REAL NOT NULL DEFAULT 0,
-                mstat_useful REAL NOT NULL DEFAULT 0,
+                mstat_relevant REAL NOT NULL DEFAULT 0,
                 mstat_times_used INTEGER NOT NULL DEFAULT 0
             )",
             [],
@@ -151,11 +151,11 @@ impl MemoriesDatabase {
         Ok(affected_rows)
     }
 
-    pub fn permdb_update_used(&self, memid: &str, mstat_correct: f64, mstat_useful: f64) -> Result<usize, String> {
+    pub fn permdb_update_used(&self, memid: &str, mstat_correct: i32, mstat_relevant: i32) -> Result<usize, String> {
         let conn = self.conn.lock();
         let affected_rows = conn.execute(
-            "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = ?1, mstat_useful = ?2 WHERE memid = ?3",
-            params![mstat_correct, mstat_useful, memid],
+            "UPDATE memories SET mstat_times_used = mstat_times_used + 1, mstat_correct = mstat_correct + ?1, mstat_relevant = mstat_relevant + ?2 WHERE memid = ?3",
+            params![mstat_correct, mstat_relevant, memid],
         ).map_err(|e| e.to_string())?;
         Ok(affected_rows)
     }
@@ -180,10 +180,10 @@ impl MemoriesDatabase {
         }).map_err(|e| e.to_string())?;
 
         for row in rows {
-            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used) = row.map_err(|e| e.to_string())?;
+            let (memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_relevant, mstat_times_used) = row.map_err(|e| e.to_string())?;
             table_contents.push_str(&format!(
-                "memid={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, useful={}, times_used={}\n",
-                memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_useful, mstat_times_used
+                "memid={}, type={}, goal: {:?}, project: {:?}, payload: {:?}, correct={}, relevant={}, times_used={}\n",
+                memid, m_type, m_goal, m_project, m_payload, mstat_correct, mstat_relevant, mstat_times_used
             ));
         }
         Ok(table_contents)
@@ -227,7 +227,7 @@ impl MemoriesDatabase {
                     record.m_project = db_record.m_project.clone();
                     record.m_payload = db_record.m_payload.clone();
                     record.mstat_correct = db_record.mstat_correct;
-                    record.mstat_useful = db_record.mstat_useful;
+                    record.mstat_relevant = db_record.mstat_relevant;
                     record.mstat_times_used = db_record.mstat_times_used;
                     Some(record)
                 } else {
@@ -237,7 +237,7 @@ impl MemoriesDatabase {
             }).collect();
 
         let elapsed_time = t0.elapsed();
-        info!("SELECT {}: took: {:.2}s", memids.join(", "), elapsed_time.as_secs_f64());
+        info!("permdb_fillout_records({}) took {:.2}s", memids.len(), elapsed_time.as_secs_f64());
         Ok(result)
     }
 }

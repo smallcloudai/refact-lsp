@@ -355,8 +355,8 @@ pub async fn memories_erase(
 pub async fn memories_update(
     vec_db: Arc<AMutex<Option<VecDb>>>,
     memid: &str,
-    mstat_correct: f64,
-    mstat_useful: f64
+    mstat_correct: i32,
+    mstat_relevant: i32,
 ) -> Result<usize, String> {
     let memdb = {
         let vec_db_guard = vec_db.lock().await;
@@ -365,7 +365,7 @@ pub async fn memories_update(
     };
 
     let memdb_locked = memdb.lock().await;
-    let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_useful)?;
+    let updated_cnt = memdb_locked.permdb_update_used(memid, mstat_correct, mstat_relevant)?;
     Ok(updated_cnt)
 }
 

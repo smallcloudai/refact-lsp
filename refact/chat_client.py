@@ -313,12 +313,12 @@ async def mem_block_until_vectorized(base_url: str) -> Tuple[Dict[str, Any], flo
             return (await response.json(), time.time() - t0)
 
 
-async def mem_update_used(base_url: str, memid: str, correct: float, useful: float) -> Dict[str, Any]:
+async def mem_update_used(base_url: str, memid: str, correct: float, relevant: float) -> Dict[str, Any]:
     url = f"{base_url}/mem-update-used"
     data = {
         "memid": memid,
         "correct": correct,
-        "useful": useful
+        "relevant": relevant
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:

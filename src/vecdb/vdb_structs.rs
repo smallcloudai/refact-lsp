@@ -89,7 +89,7 @@ pub struct MemoRecord {
     pub m_project: String,
     pub m_payload: String,
     pub mstat_correct: f64,
-    pub mstat_useful: f64,
+    pub mstat_relevant: f64,
     pub mstat_times_used: i32,
 }
 

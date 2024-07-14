@@ -26,8 +26,8 @@ struct MemEraseRequest {
 #[derive(Deserialize)]
 struct MemUpdateUsedRequest {
     memid: String,
-    correct: f64,
-    useful: f64,
+    correct: i32,
+    relevant: i32,
 }
 
 #[derive(Deserialize)]
@@ -104,7 +104,7 @@ pub async fn handle_mem_update_used(
         vec_db,
         &post.memid,
         post.correct,
-        post.useful
+        post.relevant
     ).await.map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
     })?;
