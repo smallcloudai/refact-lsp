@@ -30,8 +30,8 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         ("patch".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_patch::tool::ToolPatch{}) as Box<dyn Tool + Send>))),
-        // ("save_knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttSaveKnowledge{}) as Box<dyn Tool + Send>))),
-        ("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttGetKnowledge{}) as Box<dyn Tool + Send>))),
+        ("save-knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttSaveKnowledge{}) as Box<dyn Tool + Send>))),
+        ("get-knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttGetKnowledge{}) as Box<dyn Tool + Send>))),
     ]);
 
     let (ast_on, vecdb_on) = {
@@ -146,33 +146,34 @@ tools:
         description: "An optional absolute path to get files tree for a particular folder or file. Do not pass it if you need full project tree."
     parameters_required: []
 
-  - name: "knowledge"
-    description: "What kind of knowledge you will need to accomplish this task? Call each time you have a new task or topic."
+  - name: "get-knowledge"
+    description: "Used to retrieve your past experiences from previous interactions with user. Contains short notes from yourself that shall help you navigate the subject. Shall be called when user switches a new topic."
     parameters:
       - name: "im_going_to_do"
         type: "string"
-        description: "Put your intent there: 'debug file1.cpp', 'install project1', 'gather info about MyClass'"
+        description: "Your intent"
     parameters_required:
       - "im_going_to_do"
+      
+  - name: "save-knowledge"
+    description: "Use it when you see something you'd want to remember about user, project or your experience for your future self."
+    parameters:
+      - name: "memory_topic"
+        type: "string"
+        description: "one or two words that describe the memory"
+      - name: "memory_text"
+        type: "string"
+        description: "The text of memory you want to save"
+      - name: "memory_type"
+        type: "string"
+        description: "one of: `consequence` -- the set of actions that caused success / fail; `reflection` -- what can you do better next time; `familirity` -- what new did you get about the project; `relationship` -- what new did you get about the user."
+    parameters_required:
+      - "memory_topic"
+      - "memory_text"
+      - "memory_type"
+
 "####;
 
-
-// - name: "save_knowledge"
-// description: "Use it when you see something you'd want to remember about user, project or your experience for your future self."
-// parameters:
-//   - name: "memory_topic"
-//     type: "string"
-//     description: "one or two words that describe the memory"
-//   - name: "memory_text"
-//     type: "string"
-//     description: "The text of memory you want to save"
-//   - name: "memory_type"
-//     type: "string"
-//     description: "one of: `consequence` -- the set of actions that caused success / fail; `reflection` -- what can you do better next time; `familirity` -- what new did you get about the project; `relationship` -- what new did you get about the user."
-// parameters_required:
-//   - "memory_topic"
-//   - "memory_text"
-//   - "memory_type"
 
 // - "op"
 // - name: "op"
