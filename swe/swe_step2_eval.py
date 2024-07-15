@@ -1,7 +1,9 @@
 import json
 import asyncio
+import os.path
 import traceback
 
+import jsonlines
 import termcolor
 import whatthepatch
 
@@ -17,6 +19,7 @@ from typing import Dict, Any
 
 # MODEL = "gpt-3.5-turbo"
 MODEL = "gpt-4o"
+# MODEL = "claude-3-5-sonnet"
 
 
 def patched_file(patch: str) -> str:
@@ -27,17 +30,33 @@ def patched_file(patch: str) -> str:
     return header.old_path[len("a/"):]
 
 
+def full_path(instance_id, file_path, repo_path):
+    if instance_id.startswith("django"):
+        return repo_path / file_path
+    elif instance_id.startswith("astropy"):
+        return repo_path / file_path
+    else:
+        assert False
+
+
 class SWERunner(AgentRunner):
 
     async def _steps(self, base_url: str, repo_path: Path, *args, **kwargs) -> Dict[str, Any]:
         results: Dict[str, Any] = dict()
         problem_statement = kwargs["problem_statement"]
+
+        data = list(jsonlines.open("/home/svakhreev/projects/refact-lsp/swe/loc_outputs.jsonl"))
+        files = next((item["found_files"] for item in data if item["instance_id"] == kwargs['instance_id']))
+        files = list(map(lambda x: str(full_path(kwargs['instance_id'], x, repo_path)), files))
+        for file in files:
+            assert os.path.exists(file)
+
         results["summarized_problem_statement"] = "\n\n".join([
             problem_statement,
             kwargs["step1_data"],
         ])
+        step = ProducePatchStep(base_url=base_url, model_name=MODEL, attempts=1, files=files)
         try:
-            step = ProducePatchStep(base_url=base_url, model_name=MODEL, attempts=3)
             results["model_patches"] = \
                 await step.process(task=results["summarized_problem_statement"], repo_path=repo_path)
         except Exception as e:

@@ -11,7 +11,7 @@ from datasets import load_dataset
 async def process_instance(instance_id: str, output: Path, timeout: int = 120):
     try:
         process = await asyncio.create_subprocess_exec(
-            "python", "swe/swe_steps.py", instance_id,
+            "python", "swe/swe_step2_eval.py", instance_id,
             "--timeout", str(timeout),
             "--output", str(output),
         )
@@ -31,11 +31,11 @@ async def main():
 
     parser = ArgumentParser()
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--run", type=str, default="gpt35-gpt4")
+    parser.add_argument("--run", type=str, default="gpt4o")
     args = parser.parse_args()
 
     output = Path(__file__).parent / "predictions" / args.run
-    for row_batch in chunked(load_dataset('princeton-nlp/SWE-bench_Lite', split='test'), n=args.workers):
+    for row_batch in chunked(list(load_dataset('princeton-nlp/SWE-bench_Lite', split='test'))[:40], n=args.workers):
         await asyncio.gather(*[process_instance(row["instance_id"], output) for row in row_batch])
 
     with jsonlines.open(output / "all_preds.jsonl", 'w') as f:
