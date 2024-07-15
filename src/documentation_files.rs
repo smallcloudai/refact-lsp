@@ -6,8 +6,8 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use itertools::Itertools;
 use log::{error, warn};
-use crate::at_tools::att_doc_sources::DocOrigin;
 use crate::files_in_workspace::Document;
+use crate::http::routers::v1::docs::DocOrigin;
 
 pub fn get_docs_dir() -> PathBuf {
     let mut home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
