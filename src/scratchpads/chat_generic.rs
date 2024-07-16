@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tokenizers::Tokenizer;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tracing::{info, error};
 
 use crate::at_commands::execute_at::run_at_commands;
+use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
@@ -64,7 +66,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
-        exploration_tools: bool,
+        exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     ) -> Result<(), String> {
         self.token_esc = patch.get("token_esc").and_then(|x| x.as_str()).unwrap_or("").to_string();
         self.keyword_syst = patch.get("keyword_system").and_then(|x| x.as_str()).unwrap_or("SYSTEM:").to_string();
@@ -170,7 +172,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
 pub async fn default_system_message_from_patch(
     patch: &Value,
     global_context: Arc<ARwLock<GlobalContext>>,
-    exploration_tools: bool,
+    exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
 ) -> String {
     let default_system_message_mb = patch.get("default_system_message")
         .and_then(|x| x.as_str())

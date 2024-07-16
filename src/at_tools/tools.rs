@@ -15,6 +15,7 @@ use crate::toolbox::toolbox_config::ToolCustDict;
 pub trait Tool: Send + Sync {
     async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>;
     fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
+    fn prompt(&self) -> Option<&str> { None }
 }
 
 pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>
@@ -30,7 +31,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("remember_how_to_use_tools".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
         ("patch".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_patch::tool::ToolPatch{}) as Box<dyn Tool + Send>))),
-        ("save-knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttSaveKnowledge{}) as Box<dyn Tool + Send>))),
+        ("save-memory".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_memory::AttSaveMemory{}) as Box<dyn Tool + Send>))),
         ("get-knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttGetKnowledge{}) as Box<dyn Tool + Send>))),
     ]);
 
@@ -155,7 +156,7 @@ tools:
     parameters_required:
       - "im_going_to_do"
       
-  - name: "save-knowledge"
+  - name: "save-memory"
     description: "You must call it when user mentions valuable information about himself or the project. For example, personal information, tastes, habbits, especially when user corrects you."
     parameters:
       - name: "memory_topic"

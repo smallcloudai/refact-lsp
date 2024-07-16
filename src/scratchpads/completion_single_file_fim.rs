@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::time::Instant;
@@ -8,7 +9,7 @@ use log::warn;
 use ropey::Rope;
 use serde_json::{Value, json};
 use tokenizers::Tokenizer;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tracing::{info, error};
 use tree_sitter::Point;
 use uuid::Uuid;
@@ -17,6 +18,7 @@ use crate::ast::ast_module::AstModule;
 use crate::ast::comments_wrapper::{get_language_id_by_filename, wrap_comments};
 use crate::ast::treesitter::language_id::LanguageId;
 use crate::at_commands::at_ast_lookup_symbols::results2message;
+use crate::at_tools::tools::Tool;
 use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
@@ -131,7 +133,7 @@ impl ScratchpadAbstract for SingleFileFIM {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
-        _exploration_tools: bool,
+        _exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     ) -> Result<(), String> {
         // That will work for some models (starcoder) without patching
         self.fim_prefix = patch.get("fim_prefix").and_then(|x| x.as_str()).unwrap_or("<fim_prefix>").to_string();

@@ -1,18 +1,20 @@
+use std::collections::HashMap;
 use serde_json;
 use std::sync::Arc;
 use std::sync::RwLock;
+use tokio::sync::Mutex as AMutex;
 use tokenizers::Tokenizer;
 use crate::call_validation::SamplingParameters;
 use async_trait::async_trait;
 use serde_json::Value;
-
+use crate::at_tools::tools::Tool;
 
 #[async_trait]
 pub trait ScratchpadAbstract: Send {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
-        exploration_tools: bool,
+        exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     ) -> Result<(), String>;
 
     async fn prompt(

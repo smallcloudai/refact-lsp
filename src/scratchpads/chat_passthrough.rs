@@ -1,14 +1,16 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tokenizers::Tokenizer;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_tools::execute_att::run_tools;
+use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, ContextMemory, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
@@ -86,7 +88,7 @@ impl ScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
-        exploration_tools: bool,
+        exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     ) -> Result<(), String> {
         self.default_system_message = default_system_message_from_patch(&patch, self.global_context.clone(), exploration_tools).await;
         Ok(())

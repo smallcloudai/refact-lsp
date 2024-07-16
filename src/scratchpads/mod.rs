@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tokenizers::Tokenizer;
 use crate::ast::ast_module::AstModule;
+use crate::at_tools::tools::{at_tools_merged_and_filtered, Tool};
 
 pub mod completion_single_file_fim;
 pub mod chat_generic;
@@ -45,9 +47,22 @@ pub async fn create_code_completion_scratchpad(
     } else {
         return Err(format!("This rust binary doesn't have code completion scratchpad \"{}\" compiled in", scratchpad_name));
     }
-    result.apply_model_adaptation_patch(scratchpad_patch, false).await?;
+    result.apply_model_adaptation_patch(scratchpad_patch, HashMap::new()).await?;
     verify_has_send(&result);
     Ok(result)
+}
+
+fn post_tools_to_hashmap(tools: &Option<Vec<serde_json::Value>>) -> Option<HashMap<String, serde_json::Value>> {
+    tools.as_ref().map(|tools_vec| {
+        tools_vec.iter()
+            .filter_map(|tool| {
+                tool.get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(|name| name.as_str())
+                    .map(|name_str| (name_str.to_string(), tool.clone()))
+            })
+            .collect()
+    })
 }
 
 pub async fn create_chat_scratchpad(
@@ -73,10 +88,8 @@ pub async fn create_chat_scratchpad(
     } else {
         return Err(format!("This rust binary doesn't have chat scratchpad \"{}\" compiled in", scratchpad_name));
     }
-    let mut exploration_tools: bool = false;
-    if post.tools.is_some() {
-        exploration_tools = true;
-    }
+    let tools_from_post = post_tools_to_hashmap(&post.tools).unwrap_or_default().keys().cloned().collect::<Vec<_>>();
+    let exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>> = at_tools_merged_and_filtered(global_context.clone()).await.into_iter().filter(|(key, _)|tools_from_post.contains(&key)).collect();
     result.apply_model_adaptation_patch(scratchpad_patch, exploration_tools).await?;
     verify_has_send(&result);
     Ok(result)
