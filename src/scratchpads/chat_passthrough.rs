@@ -1,14 +1,16 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tokenizers::Tokenizer;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_tools::execute_att::run_tools;
+use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, ContextMemory, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
@@ -18,6 +20,7 @@ use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::chat_utils_rag::HasRagResults;
 
 const DEBUG: bool = true;
+const AT_TOP_N: usize = 100;
 
 
 pub struct DeltaSender {
@@ -85,7 +88,7 @@ impl ScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
-        exploration_tools: bool,
+        exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     ) -> Result<(), String> {
         self.default_system_message = default_system_message_from_patch(&patch, self.global_context.clone(), exploration_tools).await;
         Ok(())
@@ -97,14 +100,13 @@ impl ScratchpadAbstract for ChatPassthrough {
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         info!("chat passthrough {} messages at start", &self.post.messages.len());
-        let top_n: usize = 15;
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
-            run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, top_n, &mut self.has_rag_results).await
+            run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, AT_TOP_N, &mut self.has_rag_results).await
         } else {
             (self.post.messages.clone(), self.post.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &messages, top_n, &mut self.has_rag_results).await;
+            (messages, _) = run_tools(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &messages, AT_TOP_N, &mut self.has_rag_results).await;
         };
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);

@@ -1,12 +1,12 @@
 use serde_yaml;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use crate::call_validation::ChatMessage;
 use std::io::Write;
 use std::sync::Arc;
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
-use crate::at_tools::tools::{AtParamDict, make_openai_tool_value};
+use crate::at_tools::tools::{AtParamDict, make_openai_tool_value, Tool};
 
 
 #[derive(Deserialize)]
@@ -224,19 +224,36 @@ pub async fn load_customization(gcx: Arc<ARwLock<GlobalContext>>) -> Result<Tool
     load_and_mix_with_users_config(&user_config_text, &caps_config_text, &caps_default_system_prompt).map_err(|e| e.to_string())
 }
 
-pub async fn get_default_system_prompt(global_context: Arc<ARwLock<GlobalContext>>, have_exploration_tools: bool) -> Result<String, String> {
-    let tconfig = load_customization(global_context.clone()).await?;
-    if have_exploration_tools {
-        match tconfig.system_prompts.get("exploration_tools").and_then(|x|Some(x.text.clone())) {
-            Some(x) => Ok(x),
-            None => Err("no default system prompt found".to_string()),
-        }
-    } else {
-        match tconfig.system_prompts.get("default").and_then(|x|Some(x.text.clone())) {
-            Some(x) => Ok(x),
-            None => Err("no default system prompt found".to_string()),
+pub async fn get_default_system_prompt(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    exploration_tools: HashMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>
+) -> Result<String, String> {
+    let tconfig = load_customization(global_context).await?;
+    
+    if exploration_tools.is_empty() {
+        return tconfig.system_prompts.get("default")
+            .map(|x| x.text.clone())
+            .ok_or_else(|| "No default system prompt found".to_string());
+    }
+
+    let mut prompt = tconfig.system_prompts.get("exploration_tools")
+        .map(|x| x.text.clone())
+        .ok_or_else(|| "No exploration tools system prompt found".to_string())?;
+
+    let tool_use_instruction = "\n\nSPECIAL VERY IMPORTANT INSTRUCTIONS how to use specific tools (MUST BE FOLLOWED TO THE LETTER):";
+    if !prompt.contains(tool_use_instruction) {
+        prompt.push_str(tool_use_instruction);
+    }
+
+    for tool in exploration_tools.values() {
+        if let Some(t_prompt) = tool.lock().await.prompt() {
+            if !prompt.contains(&t_prompt) {
+                prompt.push_str(&format!("\n{}\n", t_prompt));
+            }
         }
     }
+    println!("prompt: {}", prompt);
+    Ok(prompt)
 }
 
 #[cfg(test)]
