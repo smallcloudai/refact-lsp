@@ -75,16 +75,7 @@ pub async fn create_chat_scratchpad(
     }
     let mut exploration_tools: bool = false;
     if post.tools.is_some() {
-        for t in post.tools.as_ref().unwrap() {
-            let tobj = t.as_object().unwrap();
-            if let Some(function) = tobj.get("function") {
-                if let Some(name) = function.get("name") {
-                    if name.as_str() == Some("definition") {
-                        exploration_tools = true;
-                    }
-                }
-            }
-        }
+        exploration_tools = true;
     }
     result.apply_model_adaptation_patch(scratchpad_patch, exploration_tools).await?;
     verify_has_send(&result);

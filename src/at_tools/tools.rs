@@ -156,7 +156,7 @@ tools:
       - "im_going_to_do"
       
   - name: "save-knowledge"
-    description: "Use it when you see something you'd want to remember about user, project or your experience for your future self."
+    description: "You must call it when user mentions valuable information about himself or the project. For example, personal information, tastes, habbits, especially when user corrects you."
     parameters:
       - name: "memory_topic"
         type: "string"
@@ -166,12 +166,12 @@ tools:
         description: "The text of memory you want to save"
       - name: "memory_type"
         type: "string"
-        description: "one of: `consequence` -- the set of actions that caused success / fail; `reflection` -- what can you do better next time; `familirity` -- what new did you get about the project; `relationship` -- what new did you get about the user."
+        description: "one of: `familiarity` -- what new did you get about the project; `relationship` -- what new did you get about the user."
     parameters_required:
       - "memory_topic"
       - "memory_text"
       - "memory_type"
-
+    
 "####;
 
 
