@@ -304,3 +304,13 @@ impl DiffChunk {
         self.lines_add.is_empty() && self.lines_remove.is_empty()
     }
 }
+
+#[derive(Serialize, Clone)]
+pub struct MeteringModelItem {
+    pub model: String,
+    pub pp1000t_prompt: usize,
+    pub pp1000t_generated: usize,
+    pub metering_prompt_tokens_n: usize,
+    pub metering_generated_tokens_n: usize,
+    pub requests_cnt: usize,
+}
