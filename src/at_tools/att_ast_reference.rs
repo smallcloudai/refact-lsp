@@ -96,6 +96,7 @@ impl Tool for AttAstReference {
             content: tool_message.clone(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
         Ok(messages)
     }

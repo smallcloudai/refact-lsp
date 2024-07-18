@@ -102,6 +102,7 @@ impl Tool for AttFilesSkeleton {
                 content: format_context_files_to_message_content(context_files_postprocessed).clone(),
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
+                ..Default::default()
             })
         ])
     }

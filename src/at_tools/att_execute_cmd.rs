@@ -25,6 +25,7 @@ impl Tool for AttExecuteCommand {
             content: format!("Running compile:\n```{}{}```", stdout, stderr),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
         Ok(results)
     }

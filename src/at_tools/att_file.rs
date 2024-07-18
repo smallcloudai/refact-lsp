@@ -90,6 +90,7 @@ impl Tool for AttFile {
             content: content_on_clip,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
 
         Ok(results)

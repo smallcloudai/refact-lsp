@@ -47,6 +47,7 @@ impl Tool for AttTree {
                 content,
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
+                ..Default::default()
             })
         ])
     }

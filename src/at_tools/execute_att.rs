@@ -56,6 +56,7 @@ pub async fn run_tools(
                     content: format!("couldn't deserialize arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
+                    ..Default::default()
                 };
                 generated_tool.push(tool_failed_message.clone());
                 continue;
@@ -69,6 +70,7 @@ pub async fn run_tools(
                     content: e.to_string(),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
+                    ..Default::default()
                 };
                 generated_tool.push(tool_failed_message.clone());
                 continue;
@@ -98,6 +100,7 @@ pub async fn run_tools(
                 content: e.to_string(),
                 tool_calls: None,
                 tool_call_id: t_call.id.to_string(),
+                ..Default::default()
             };
             generated_tool.push(tool_failed_message.clone());
         }

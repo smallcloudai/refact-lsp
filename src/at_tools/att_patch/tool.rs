@@ -33,27 +33,33 @@ impl Tool for ToolPatch {
                 return Err(format!("Cannot parse input arguments: {err}. Try to call `patch` one more time with valid arguments"));
             }
         };
-        let answer = match execute_chat_model(&args, ccx).await {
+        let (answer, usage_mb) = match execute_chat_model(&args, ccx).await {
             Ok(res) => res,
             Err(err) => {
                 return Err(format!("Patch model execution problem: {err}. Try to call `patch` one more time"));
             }
         };
-        info!("Tool patch answer:\n{answer}");
-        match parse_diff_chunks_from_message(ccx, &answer).await {
-            Ok(res) => {
-                info!("Tool patch diff:\n{:?}", res);
-                Ok(vec![(ContextEnum::ChatMessage(ChatMessage {
-                    role: "diff".to_string(),
-                    content: res,
-                    tool_calls: None,
-                    tool_call_id: tool_call_id.clone(),
-                }))])
-            }
-            Err(err) => {
-                warn!(err);
-                Err(format!("{err}. Try to call `patch` one more time to generate a correct diff"))
-            }
-        }
+        
+        let mut results = vec![];
+        
+        let parsed_chunks = parse_diff_chunks_from_message(ccx, &answer).await.map_err(|err| {
+            warn!(err);
+            format!("{err}. Try to call `patch` one more time to generate a correct diff")
+        })?;
+
+        results.push(ContextEnum::ChatMessage(ChatMessage {
+            role: "diff".to_string(),
+            content: parsed_chunks,
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+            usage: usage_mb,
+        }));
+
+
+        // results.push(ContextEnum::ChatMessage(ChatMessage::new(
+        //     "diff".to_string(), parsed_chunks,
+        // )));
+        
+        Ok(results)
     }
 }

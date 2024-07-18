@@ -69,6 +69,7 @@ impl Tool for AtNoteToSelf {
             content: format!("Note saved"),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
         Ok(results)
     }
