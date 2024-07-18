@@ -1,26 +1,30 @@
 use std::collections::HashMap;
-use std::{env, fs};
-use std::fs::File;
+use std::env;
+use std::fs::{self, File};
 use std::io::Write;
 use std::mem::swap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock as ARwLock;
-use axum::Extension;
-use axum::http::{Response, StatusCode};
+
+use async_trait::async_trait;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
-use hyper::Body;
-use itertools::Itertools;
 use log::warn;
 use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::task;
+use tokio::sync::RwLock as ARwLock;
 use url::{Position, Url};
-use crate::custom_error::ScratchError;
+
+use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_tools::tools::AtTool;
+use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::documentation_files::get_docs_dir;
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
+
+pub struct AttDocSources;
 
 #[derive(Serialize, Deserialize)]
 pub struct DocOrigin {
@@ -28,11 +32,6 @@ pub struct DocOrigin {
     pub max_depth: usize,
     pub max_pages: usize,
     pub pages: HashMap<String, String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct DocsProps {
-    source: String,
 }
 
 fn get_directory_and_file_from_url(url: &str) -> Option<(PathBuf, String)> {
@@ -142,15 +141,11 @@ fn find_content(html: String) -> String {
         return node.html();
     }
 
-    if let Some(node) = document.find(Name("main")).next() {
-        return node.html();
-    }
-
     html
 }
 
 // returns a pair of html and markdown
-pub async fn fetch_and_convert_to_md(url: &str) -> Result<(String, String), String> {
+async fn fetch_and_convert_to_md(url: &str) -> Result<(String, String), String> {
     let response = reqwest::get(url)
         .await
         .map_err(|_| format!("Unable to connect to '{url}'"))?;
@@ -267,7 +262,7 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
         pages,
     };
 
-    if let Ok(origin_json) = serde_json::to_string(&origin) {
+    if let Ok(origin_json) = serde_json::to_string_pretty(&origin) {
         let mut file_path = directory.clone();
         file_path.push("origin.json");
         let mut file = File::create(&file_path)
@@ -281,48 +276,46 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
     Ok(origin)
 }
 
-pub async fn handle_v1_list_docs(
-    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    _: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let sources = gcx.read().await.documents_state.documentation_sources.lock().await.clone();
+async fn doc_sources_list(ccx: &mut AtCommandsContext, tool_call_id: &String) -> Result<Vec<ContextEnum>, String> {
+    let sources = ccx.global_context.read().await.documents_state.documentation_sources.lock().await.join(",");
 
-    let body = serde_json::to_string_pretty(&sources).map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("json problem: {}", e)))?;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/json")
-        .body(Body::from(body))
-        .unwrap())
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: format!("[{sources}]"),
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
 }
 
-pub async fn handle_v1_add_docs(
-    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+fn get_source_from_args(args: &HashMap<String, Value>) -> Result<String, String> {
+    match args.get("source") {
+        Some(Value::String(s)) => Ok(s.clone()),
+        Some(v) => Err(format!("argument `source` is not a string: {:?}", v)),
+        None => Err("Missing source argument for doc_sources".to_string()),
+    }
+}
 
+async fn doc_sources_add(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = get_source_from_args(args)?;
+
+    // if the source is an url, download the page and convert it to markdown
     if source.starts_with("http://") || source.starts_with("https://") {
-        task::spawn(add_url_to_documentation(
-            gcx.clone(),
-            source,
-            2,
-            40,
-        ));
-        Ok(Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::from("Started background task to add website to documentation, this may take a few minutes..."))
-            .unwrap())
+        task::spawn(add_url_to_documentation(ccx.global_context.clone(), source, 2, 40));
+        let results = vec![ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: "Started background task to add website to documentation, this may take a few minutes...".to_string(),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+        })];
+        Ok(results)
     } else {
         let abs_source_path = PathBuf::from(source.as_str());
         if fs::canonicalize(abs_source_path).is_err() {
-            return Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("Unable to find source file"))
-                .unwrap())
+            return Err(format!("File or directory '{}' doesn't exist", source));
         }
 
-        let gcx = gcx.write().await;
+        let gcx = ccx.global_context.write().await;
         let mut files = gcx.documents_state.documentation_sources.lock().await;
         let vec_db_module = {
             *gcx.documents_state.cache_dirty.lock().await = true;
@@ -338,51 +331,87 @@ pub async fn handle_v1_add_docs(
             None => {}
         };
 
-        Ok(Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::from("Successfully added source to documentation list."))
-            .unwrap())
+        let results = vec![ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: "Successfully added source to documentation list.".to_string(),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+        })];
+        Ok(results)
     }
 }
 
-pub async fn handle_v1_remove_docs(
-    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+async fn doc_sources_remove(ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = get_source_from_args(args)?;
 
-    let gc = gcx.write().await;
+    let gc = ccx.global_context
+        .write()
+        .await;
 
-    let mut files = gc.documents_state.documentation_sources.lock().await;
+    let mut files = gc
+        .documents_state
+        .documentation_sources
+        .lock()
+        .await;
 
     let Some(i) = files.iter().position(|x| *x == source) else {
-        return Ok(Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Body::from(format!(
-                "Unable to find '{}' in the documentation list",
-                source
-            )))
-            .unwrap())
+        return Err(format!("Unable to find '{}' in the documentation list", source));
     };
     files.remove(i);
 
     if source.starts_with("http://") || source.starts_with("https://") {
         if let Some((dir, _)) = get_directory_and_file_from_url(&source) {
-            if let Err(err) = fs::remove_dir_all(&dir).map_err(|err| {
-                format!("Error while deleting directory '{}': {err}", dir.display())
-            }) {
-                return Ok(Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from(err))
-                    .unwrap())
-            }
+            fs::remove_dir_all(&dir).map_err(|err| format!("Error while deleting directory '{}': {err}", dir.display()))?;
         }
     }
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from("Successfully removed source from the documentation list."))
-        .unwrap())
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: "Successfully removed source from the documentation list.".to_string(),
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
 }
 
+async fn doc_sources_inline(tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    let source = get_source_from_args(args)?;
+
+    // if the source is an url, download the page and convert it to markdown
+    if !source.starts_with("http://") && !source.starts_with("https://") {
+        return Err("Source must be a url for inline documentation requests".to_string());
+    }
+
+    let (_, md) = fetch_and_convert_to_md(&source).await?;
+
+    let results = vec![ContextEnum::ChatMessage(ChatMessage {
+        role: "tool".to_string(),
+        content: md,
+        tool_calls: None,
+        tool_call_id: tool_call_id.clone(),
+    })];
+    Ok(results)
+}
+
+#[async_trait]
+impl AtTool for AttDocSources {
+    async fn execute(
+        &self,
+        ccx: &mut AtCommandsContext,
+        tool_call_id: &String,
+        args: &HashMap<String, Value>,
+    ) -> Result<Vec<ContextEnum>, String> {
+        let action = match args.get("action") {
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `action` is not a string: {:?}", v)),
+            None => return Err("Missing `action` argument for doc_sources".to_string()),
+        };
+        match action.as_str() {
+            "list" => doc_sources_list(ccx, tool_call_id).await,
+            "add" => doc_sources_add(ccx, tool_call_id, args).await,
+            "remove" => doc_sources_remove(ccx, tool_call_id, args).await,
+            "inline" => doc_sources_inline(tool_call_id, args).await,
+            _ => Err(format!("Unknown argument action `{}`. Action must be one of 'add', 'remove', 'list' or 'inline'", action))
+        }
+    }
+}
