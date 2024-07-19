@@ -1,13 +1,9 @@
-use std::collections::HashMap;
-use std::{env, fs};
-use std::fs::File;
-use std::io::Write;
-use std::mem::swap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::RwLock as ARwLock;
-use axum::Extension;
+use crate::custom_error::ScratchError;
+use crate::documentation_files::get_docs_dir;
+use crate::files_in_workspace::Document;
+use crate::global_context::GlobalContext;
 use axum::http::{Response, StatusCode};
+use axum::Extension;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use hyper::Body;
@@ -15,12 +11,16 @@ use itertools::Itertools;
 use log::warn;
 use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::mem::swap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::{env, fs};
+use tokio::sync::RwLock as ARwLock;
 use tokio::task;
 use url::{Position, Url};
-use crate::custom_error::ScratchError;
-use crate::documentation_files::get_docs_dir;
-use crate::files_in_workspace::Document;
-use crate::global_context::GlobalContext;
 
 #[derive(Serialize, Deserialize)]
 pub struct DocOrigin {
@@ -131,7 +131,13 @@ impl TextDecorator for CustomTextConversion {
 fn find_content(html: String) -> String {
     let document = select::document::Document::from(html.as_str());
 
-    let content_ids = vec!["content", "I_content", "main-content", "main_content", "CONTENT"];
+    let content_ids = vec![
+        "content",
+        "I_content",
+        "main-content",
+        "main_content",
+        "CONTENT",
+    ];
     for id in content_ids {
         if let Some(node) = document.find(Attr("id", id)).next() {
             return node.html();
@@ -173,7 +179,12 @@ pub async fn fetch_and_convert_to_md(url: &str) -> Result<(String, String), Stri
     Ok((html, md))
 }
 
-async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: String, depth: usize, max_pages: usize) -> Result<DocOrigin, String> {
+async fn add_url_to_documentation(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    url_str: String,
+    depth: usize,
+    max_pages: usize,
+) -> Result<DocOrigin, String> {
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
     let mut pages = HashMap::default();
@@ -208,8 +219,12 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
             let mut file_path = dir_path.clone();
             file_path.push(file_name);
             let directory = Path::new(&file_path).parent().unwrap();
-            fs::create_dir_all(directory)
-                .map_err(|e| format!("Unable to create directory {:?} {directory:?}: {e:?}", env::current_dir()))?;
+            fs::create_dir_all(directory).map_err(|e| {
+                format!(
+                    "Unable to create directory {:?} {directory:?}: {e:?}",
+                    env::current_dir()
+                )
+            })?;
             let mut file = File::create(&file_path)
                 .map_err(|_| format!("Unable to create file {}", file_path.display()))?;
             file.write_all(text.as_bytes())
@@ -239,9 +254,10 @@ async fn add_url_to_documentation(gcx: Arc<ARwLock<GlobalContext>>, url_str: Str
                 .find(Name("a"))
                 .filter_map(|n| n.attr("href"))
                 .for_each(|link| {
-                    let Ok(link) = base_parser.parse(link) else {
+                    let Ok(mut link) = base_parser.parse(link) else {
                         return;
                     };
+                    link.set_fragment(None);
                     let link = link.as_str();
                     if !link.starts_with(&base_url.to_string()) {
                         return;
@@ -285,9 +301,21 @@ pub async fn handle_v1_list_docs(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let sources = gcx.read().await.documents_state.documentation_sources.lock().await.clone();
+    let sources = gcx
+        .read()
+        .await
+        .documents_state
+        .documentation_sources
+        .lock()
+        .await
+        .clone();
 
-    let body = serde_json::to_string_pretty(&sources).map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("json problem: {}", e)))?;
+    let body = serde_json::to_string_pretty(&sources).map_err(|e| {
+        ScratchError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("json problem: {}", e),
+        )
+    })?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json")
@@ -299,16 +327,15 @@ pub async fn handle_v1_add_docs(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes).map_err(|e| {
+        ScratchError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("JSON problem: {}", e),
+        )
+    })?;
 
     if source.starts_with("http://") || source.starts_with("https://") {
-        task::spawn(add_url_to_documentation(
-            gcx.clone(),
-            source,
-            2,
-            40,
-        ));
+        task::spawn(add_url_to_documentation(gcx.clone(), source, 2, 40));
         Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Body::from("Started background task to add website to documentation, this may take a few minutes..."))
@@ -319,7 +346,7 @@ pub async fn handle_v1_add_docs(
             return Ok(Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .body(Body::from("Unable to find source file"))
-                .unwrap())
+                .unwrap());
         }
 
         let gcx = gcx.write().await;
@@ -340,7 +367,9 @@ pub async fn handle_v1_add_docs(
 
         Ok(Response::builder()
             .status(StatusCode::OK)
-            .body(Body::from("Successfully added source to documentation list."))
+            .body(Body::from(
+                "Successfully added source to documentation list.",
+            ))
             .unwrap())
     }
 }
@@ -349,8 +378,12 @@ pub async fn handle_v1_remove_docs(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes).map_err(|e| {
+        ScratchError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("JSON problem: {}", e),
+        )
+    })?;
 
     let gc = gcx.write().await;
 
@@ -363,25 +396,27 @@ pub async fn handle_v1_remove_docs(
                 "Unable to find '{}' in the documentation list",
                 source
             )))
-            .unwrap())
+            .unwrap());
     };
     files.remove(i);
 
     if source.starts_with("http://") || source.starts_with("https://") {
         if let Some((dir, _)) = get_directory_and_file_from_url(&source) {
-            if let Err(err) = fs::remove_dir_all(&dir).map_err(|err| {
-                format!("Error while deleting directory '{}': {err}", dir.display())
-            }) {
+            if let Err(err) = fs::remove_dir_all(&dir)
+                .map_err(|err| format!("Error while deleting directory '{}': {err}", dir.display()))
+            {
                 return Ok(Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Body::from(err))
-                    .unwrap())
+                    .unwrap());
             }
         }
     }
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from("Successfully removed source from the documentation list."))
+        .body(Body::from(
+            "Successfully removed source from the documentation list.",
+        ))
         .unwrap())
 }
