@@ -7,7 +7,7 @@ use axum::Extension;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use hyper::Body;
-use log::warn;
+use log::{info, warn};
 use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -228,6 +228,7 @@ async fn add_url_to_documentation(
             // create file
             let dir_path = get_directory_from_url(&url_str);
             let Some(file_name) = get_file_name_from_url(&url) else {
+                warn!("Couldn't get the file name from {url}, skipping this url...");
                 continue; // skip this url
             };
             let mut file_path = dir_path.clone();
@@ -256,6 +257,8 @@ async fn add_url_to_documentation(
                 Some(ref mut db) => db.vectorizer_enqueue_files(&vec![document], false).await,
                 None => {}
             };
+
+            info!("Added {url} to the documentation.");
 
             if is_last_iteration {
                 continue;
