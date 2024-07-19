@@ -385,4 +385,3 @@ pub async fn handle_v1_remove_docs(
         .body(Body::from("Successfully removed source from the documentation list."))
         .unwrap())
 }
-
