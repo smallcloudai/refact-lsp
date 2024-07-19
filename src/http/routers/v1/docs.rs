@@ -7,7 +7,6 @@ use axum::Extension;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use hyper::Body;
-use itertools::Itertools;
 use log::warn;
 use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
@@ -20,7 +19,7 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock as ARwLock;
 use tokio::task;
-use url::{Position, Url};
+use url::Url;
 
 #[derive(Serialize, Deserialize)]
 pub struct DocOrigin {
@@ -35,9 +34,17 @@ struct DocsProps {
     source: String,
 }
 
-fn get_directory_and_file_from_url(url: &str) -> Option<(PathBuf, String)> {
+fn get_directory_from_url(url: &str) -> PathBuf {
     let url_without_http = url.split("://").nth(1).unwrap();
-    let (site_name, mut site_path) = url_without_http.split_once("/")?;
+    let dir_name = format!("{}", url_without_http.replace("/", "_"));
+    let mut site_dir = get_docs_dir();
+    site_dir.push(dir_name);
+    site_dir
+}
+
+fn get_file_name_from_url(url: &str) -> Option<String> {
+    let url_without_http = url.split("://").nth(1).unwrap();
+    let (_, mut site_path) = url_without_http.split_once("/")?;
     if site_path == "" {
         site_path = "index";
     }
@@ -45,9 +52,7 @@ fn get_directory_and_file_from_url(url: &str) -> Option<(PathBuf, String)> {
         site_path = &site_path[..site_path.len() - 1];
     }
     let file_name = format!("{}.md", site_path.replace("/", "_"));
-    let mut site_dir = get_docs_dir();
-    site_dir.push(site_name);
-    Some((site_dir, file_name))
+    Some(file_name)
 }
 
 #[derive(Clone, Copy)]
@@ -188,9 +193,13 @@ async fn add_url_to_documentation(
     let mut visited_pages = HashSet::new();
     let mut queue = vec![];
     let mut pages = HashMap::default();
-    let url = Url::parse(&url_str).map_err(|_| format!("Invalid url '{url_str}'"))?;
-    let base_url = Url::parse(&url[..Position::BeforePath])
-        .map_err(|_| format!("Unable to find base url of '{url_str}'"))?;
+    let mut base_url = Url::parse(&url_str).map_err(|_| format!("Invalid url '{url_str}'"))?;
+
+    if url_str.ends_with("index.html") {
+        if let Ok(mut path_segments) = base_url.path_segments_mut() {
+            path_segments.pop();
+        }
+    }
 
     queue.push(url_str.to_string());
     visited_pages.insert(url_str.to_string());
@@ -208,12 +217,17 @@ async fn add_url_to_documentation(
         let is_last_iteration = iteration == depth;
 
         for url in queue {
-            let Ok((html, text)) = fetch_and_convert_to_md(&url).await else {
-                continue;
+            let (html, text) = match fetch_and_convert_to_md(&url).await {
+                Ok(x) => x,
+                Err(e) => {
+                    warn!("{e}");
+                    continue;
+                }
             };
 
             // create file
-            let Some((dir_path, file_name)) = get_directory_and_file_from_url(&url) else {
+            let dir_path = get_directory_from_url(&url_str);
+            let Some(file_name) = get_file_name_from_url(&url) else {
                 continue; // skip this url
             };
             let mut file_path = dir_path.clone();
@@ -274,7 +288,7 @@ async fn add_url_to_documentation(
         swap(&mut queue, &mut new_urls);
     }
 
-    let (directory, _) = get_directory_and_file_from_url(&url_str).unwrap();
+    let directory = get_directory_from_url(&url_str);
 
     let origin = DocOrigin {
         url: url_str.clone(),
@@ -401,15 +415,15 @@ pub async fn handle_v1_remove_docs(
     files.remove(i);
 
     if source.starts_with("http://") || source.starts_with("https://") {
-        if let Some((dir, _)) = get_directory_and_file_from_url(&source) {
-            if let Err(err) = fs::remove_dir_all(&dir)
-                .map_err(|err| format!("Error while deleting directory '{}': {err}", dir.display()))
-            {
-                return Ok(Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from(err))
-                    .unwrap());
-            }
+        let dir = get_directory_from_url(&source);
+
+        if let Err(err) = fs::remove_dir_all(&dir)
+            .map_err(|err| format!("Error while deleting directory '{}': {err}", dir.display()))
+        {
+            return Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(err))
+                .unwrap());
         }
     }
 
