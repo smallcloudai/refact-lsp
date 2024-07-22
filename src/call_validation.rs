@@ -267,6 +267,25 @@ impl ChatMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChatUsage {
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChatMessageContentNUsage {
+    pub content: String,
+    pub usage: Option<ChatUsage>,
+}
+
+impl ChatMessageContentNUsage {
+    pub fn new(content: String, usage: Option<ChatUsage>) -> Self {
+        ChatMessageContentNUsage { content, usage }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatPost {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]

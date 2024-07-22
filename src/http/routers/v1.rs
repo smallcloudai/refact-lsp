@@ -29,7 +29,6 @@ use crate::http::routers::v1::toolbox::handle_v1_rewrite_assistant_says_to_at_co
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 use crate::http::routers::v1::diffs::{handle_v1_diff_state, handle_v1_diff_apply};
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list, handle_ongoing_update_or_create};
-use crate::http::routers::v1::metering::handle_v1_metering;
 use crate::http::utils::telemetry_wrapper;
 
 pub mod code_completion;
@@ -48,7 +47,6 @@ mod at_tools;
 mod status;
 mod diffs;
 pub mod handlers_memdb;
-mod metering;
 
 pub fn make_v1_router() -> Router {
     Router::new()
@@ -106,6 +104,4 @@ pub fn make_v1_router() -> Router {
         .route("/mem-block-until-vectorized", telemetry_get!(handle_mem_block_until_vectorized))
         .route("/mem-list", telemetry_get!(handle_mem_list))
         .route("/ongoing-update", telemetry_post!(handle_ongoing_update_or_create))
-    
-        .route("/metering", telemetry_get!(handle_v1_metering))
 }
