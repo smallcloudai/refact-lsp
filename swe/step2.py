@@ -1,5 +1,6 @@
 import json
 import subprocess
+import traceback
 from pathlib import Path
 from typing import List, Set
 
@@ -13,26 +14,21 @@ from step import Step
 DONE_MESSAGE = "DONE"
 SYSTEM_MESSAGE = f"""YOU THE WORLD'S LEADING AUTO CODING ASSISTANT, KNOWN FOR YOUR PRECISE PROBLEM-SOLVING AND EXPERT ANALYSIS USING ADVANCED CODE NAVIGATION TOOLS.
 ###INSTRUCTIONS###
-You will be given a problem statement and a list of files to use. 
+You will be given a problem statement and a list of files. 
 Your objective is to resolve the given problem using the `patch` tool
+
 STRICTLY FOLLOW THE PLAN BELOW! EXPLAIN EACH OF YOUR STEPS!
-- Read the entire convo history line by line before answering.
 - You ALWAYS will be PENALIZED for wrong and low-effort answers. 
 - ALWAYS follow the strategy below
 - USE the steps in the given order
-- Dive really deep to the problem
+- Dive deep into the problem
+- Call multiple tools at once
 - Do not make any guesses before the exploration!
 - Comment each step before and after each tool call!
-- If there is a code example in the problem statement, you have to understand how it works in terms of the project first!
+- If there is a code example in the problem statement, you have to understand how it works in terms of the project first
 
-###Steps to solve the problem###
-1. From the all given files you have to choose correct files to patch. Correct files are those which after patching will lead to fixing the problem
-2. You have to make a complete guide message what and how to fix in the chosen files
-3. After choosing files and making the guide message you need to call patch tool to apply the changes to the files.
-4. You have to check if the produced diff really fixes the problem (by reflecting on the generated patch). If not, you have to repeat the process with slightly different guide message
-
-###Strategy to follow for the each step
-1. **Choose correct file to edit:**
+###STEPS TO FOLLOW
+1. **Choose correct file to edit:**. From the all given files you have to choose correct files to patch. Correct files are those which after patching will lead to fixing the problem
  1.1. **EXPLAIN** the problem statement, example code snippets (if given)
  1.2. **THINK** what could be the reason of the user's problem. Make a couple of different suggestions and try to prove them using the code
  1.3. **USE** the `tree` tool for each filename (use the absolute filename input argument for the `tree` tool) to get symbol names inside all of the files
@@ -41,16 +37,16 @@ STRICTLY FOLLOW THE PLAN BELOW! EXPLAIN EACH OF YOUR STEPS!
  1.6. **SEARCH** those symbols using `definition` and `reference` tools. Describe each of the found results in the context of the project and the problem statement.
  1.7. **ANALYZE** your findings and choose the correct files to edit.
 
-2. **Guide message generation:**
+2. **Guide message generation:**. You have to make a complete guide message what and how to fix in the chosen files
  2.1. **MAKE** an excellent and complete todo message which will be fed to the patch tool later
  2.2. **USE** small code snippets, pseudo code to make the guide message more readable.
  2.3. **ANALYZE** if the message is clear, easy to understand, cannot lead to misunderstandings
 
-3. **Diff application:**
+3. **Diff application:**. After choosing files and making the guide message you need to call patch tool to apply the changes to the files.
  3.1. **APPLY** changes to the selected files and generated todo message using the `patch` tool 
  3.2. **REPEAT** patch tool call if you see any error or you think that the generated patch does not fix the problem.
 
-4. **Completion:**
+4. **Completion:**. You have to check if the produced diff really fixes the problem (by reflecting on the generated patch). If not, you have to repeat the process with slightly different guide message
 4.1. **WHEN** you are sure that the generated diff solves the problem, **SEND** a separate message containing only the word: `{DONE_MESSAGE}`.
 
 ###What Not To Do!###
@@ -58,6 +54,7 @@ STRICTLY FOLLOW THE PLAN BELOW! EXPLAIN EACH OF YOUR STEPS!
 - DO NOT REPEAT YOURSELF
 - DO NOT ASK A TOOL WITH THE SAME ARGUMENTS TWICE!
 - NEVER ADD EXTRA ARGUMENTS TO TOOLS.
+- DO NOT ADD NEW FILES OR MODIFY TEST FILES!
 - NEVER GUESS FILE CONTENTS WITHOUT TOOL OUTPUT.
 - NEVER GENERATE PATCHES OR CHANGE CODE MANUALLY, USE PATCH TOOL"""
 
@@ -134,20 +131,20 @@ class ProducePatchStep(Step):
     async def _patch_generate(self, repo_path: Path, messages: List[Message]):
         diff_messages = [json.loads(m.content) for m in messages if m.role == "diff"]
         all_filenames = set([diff["file_name"] for m in diff_messages for diff in m])
-        applied_diffs = []
+        collected_diffs = []
         for diff in diff_messages[::-1]:
             seen_filenames = set()
             for filename in map(lambda x: x["file_name"], diff):
                 if filename in all_filenames:
                     seen_filenames.add(filename)
             if len(seen_filenames) > 0:
-                await chat_client.diff_apply(self._base_url, chunks=diff, apply=[True] * len(diff))
-                applied_diffs += diff
+                collected_diffs += diff
                 all_filenames = all_filenames - seen_filenames
 
-        if len(applied_diffs) > 0:
+        if len(collected_diffs) > 0:
+            await chat_client.diff_apply(self._base_url, chunks=collected_diffs, apply=[True] * len(collected_diffs))
             result = subprocess.check_output(["git", "--no-pager", "diff"], cwd=str(repo_path.absolute())).decode()
-            await chat_client.diff_apply(self._base_url, chunks=applied_diffs, apply=[False] * len(applied_diffs))
+            await chat_client.diff_apply(self._base_url, chunks=collected_diffs, apply=[False] * len(collected_diffs))
             Console().print(f"[bold red]FINAL DIFF:[/bold red]\n```\n{result}\n```")
             return result
         else:
@@ -163,10 +160,8 @@ class ProducePatchStep(Step):
         ]
         cursor = 0
         for step_n in range(self._max_depth):
-            try:
-                messages = await self._query(messages, verbose=False)
-            except Exception as e:
-                raise e
+            messages = await self._query(messages, stream=True, verbose=False)
+            assert cursor < len(messages)
             try:
                 print_step(step_n)
                 print_messages(messages[cursor:])
@@ -178,14 +173,16 @@ class ProducePatchStep(Step):
         return await self._patch_generate(repo_path, messages)
 
     async def process(self, task: str, repo_path: Path, **kwargs) -> List[str]:
+        errors = []
         results = []
         for attempt_n in range(self._attempts):
             print(f"Attempt {attempt_n}")
             try:
                 results.append(await self._single_step(task, repo_path))
             except Exception as e:
-                print(f"attempt {attempt_n} is failed: {e}")
+                errors.append(str(e))
+                print(f"attempt {attempt_n} is failed: {e}\n\n{traceback.format_exc()}")
                 continue
         if not results:
-            raise RuntimeError(f"can't produce result with {self._attempts} attempts")
+            raise RuntimeError(f"can't produce result with {self._attempts} attempts: {errors}")
         return results

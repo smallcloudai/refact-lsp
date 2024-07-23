@@ -43,18 +43,10 @@ class SWERunner(AgentRunner):
 
     async def _steps(self, base_url: str, repo_path: Path, *args, **kwargs) -> Dict[str, Any]:
         results: Dict[str, Any] = dict()
-        problem_statement = kwargs["problem_statement"]
-
-        data = list(jsonlines.open("/home/svakhreev/projects/refact-lsp/swe/loc_outputs.jsonl"))
-        files = next((item["found_files"] for item in data if item["instance_id"] == kwargs['instance_id']))
-        files = list(map(lambda x: str(full_path(kwargs['instance_id'], x, repo_path)), files))
+        files = list(map(lambda x: str(full_path(kwargs['instance_id'], x, repo_path)), kwargs["step1_data"]))
         for file in files:
             assert os.path.exists(file)
-
-        results["summarized_problem_statement"] = "\n\n".join([
-            problem_statement,
-            kwargs["step1_data"],
-        ])
+        results["summarized_problem_statement"] = kwargs["problem_statement"]
         step = ProducePatchStep(base_url=base_url, model_name=MODEL, attempts=1, files=files)
         try:
             results["model_patches"] = \
@@ -87,6 +79,9 @@ async def main():
         "problem_statement": instance["problem_statement"],
         "problem_patch": instance["patch"],
     }
+    # agentless files
+    data = list(jsonlines.open("/home/svakhreev/projects/refact-lsp/swe/loc_outputs.jsonl"))
+    files = next((item["found_files"] for item in data if item["instance_id"] == args.instance_id))
 
     try:
         if isinstance(args.step1_output, str):
@@ -100,8 +95,7 @@ async def main():
             else:
                 results["step1_data"] = ""
         else:
-            filename: str = patched_file(results["problem_patch"])
-            results["step1_data"] = f"List of files you should change to solve the problem:\n - {filename}"
+            results["step1_data"] = files
 
         print(termcolor.colored(f"using additional step1 data:\n\n{results['step1_data']}", "green"))
 
@@ -113,7 +107,7 @@ async def main():
             **results,
         ))
     except Exception as e:
-        results["error"] = str(e) or traceback.format_exc()
+        results["error"] = f"{e}\n\n{traceback.format_exc()}"
 
     if args.output_dir is not None:
         with open(output_filename, "w") as f:

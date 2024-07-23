@@ -13,7 +13,7 @@ class Step:
             self,
             base_url: str,
             model_name: str,
-            temperature: float = 0.5,
+            temperature: float = 0.6,
             max_depth: int = 10,
             max_tokens: int = 4096):
         self._base_url = base_url
@@ -26,7 +26,7 @@ class Step:
     def _tools(self) -> Set[str]:
         raise NotImplementedError()
 
-    async def _query(self, messages: List[Message], verbose: bool = True) -> List[Message]:
+    async def _query(self, messages: List[Message], stream: bool = False, verbose: bool = True) -> List[Message]:
         tools = await tools_fetch_and_filter(
             base_url=self._base_url,
             tools_turn_on=self._tools
@@ -34,7 +34,7 @@ class Step:
         assistant_choices = await ask_using_http(
             self._base_url, messages, 1, self._model_name,
             tools=tools, verbose=verbose, temperature=self._temperature,
-            stream=False, max_tokens=self._max_tokens,
+            stream=stream, max_tokens=self._max_tokens,
             only_deterministic_messages=False,
         )
         return assistant_choices[0]
