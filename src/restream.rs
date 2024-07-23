@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::sync::RwLock as ARwLock;
 use tracing::{error, info, warn};
 
-use crate::call_validation::{MeteringModelItem, SamplingParameters};
+use crate::call_validation::SamplingParameters;
 use crate::custom_error::ScratchError;
 use crate::forward_to_hf_endpoint;
 use crate::forward_to_openai_endpoint;

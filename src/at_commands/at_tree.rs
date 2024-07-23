@@ -14,7 +14,7 @@ use crate::ast::treesitter::structs::SymbolType;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_file::{at_file_repair_candidates, AtParamFilePath};
 use crate::at_commands::execute_at::{AtCommandMember, correct_at_arg};
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::{ChatMessage, ContextEnum, RChatMessage};
 use crate::files_correction::{canonical_path, paths_from_anywhere};
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
@@ -258,10 +258,10 @@ impl AtCommand for AtTree {
             ccx.global_context.clone(), tree
         ).await {
             Ok(tree) => {
-                ContextEnum::ChatMessage(ChatMessage::new(
+                ContextEnum::RChatMessage(RChatMessage::new(ChatMessage::new(
                     "context_text".to_string(),
                     tree,
-                ))
+                )))
             }
             Err(err) => {
                 info!("{}", err);

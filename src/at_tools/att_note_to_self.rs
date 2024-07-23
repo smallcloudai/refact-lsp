@@ -4,7 +4,7 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, RChatMessage};
 
 
 pub struct AtNoteToSelf {
@@ -12,7 +12,7 @@ pub struct AtNoteToSelf {
 
 #[async_trait]
 impl Tool for AtNoteToSelf {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)>
     {
         let cache_dir = {
             let gcx_locked = ccx.global_context.read().await;
@@ -22,13 +22,13 @@ impl Tool for AtNoteToSelf {
 
         let text = match args.get("text") {
             Some(Value::String(s)) => s,
-            Some(v) => { return Err(format!("argument `text` is not a string: {:?}", v)) },
-            None => { return Err("argument `text` is not a string".to_string()) }
+            Some(v) => { return Err((format!("argument `text` is not a string: {:?}", v), None)) },
+            None => { return Err(("argument `text` is not a string".to_string(), None)) }
         };
 
         let mut shortdesc = match args.get("id") {
             Some(Value::String(s)) => s.clone(),
-            Some(v) => { return Err(format!("argument `shortdesc` is not a string: {:?}", v)) },
+            Some(v) => { return Err((format!("argument `shortdesc` is not a string: {:?}", v), None)) },
             None => { "".to_string() }
         };
 
@@ -51,7 +51,7 @@ impl Tool for AtNoteToSelf {
             let _make_dir_if_not_there = tokio::fs::create_dir_all(notes_dir_path).await;
             let file_maybe = tokio::fs::File::create(fname.clone()).await;
             if file_maybe.is_err() {
-                return Err(format!("Error creating file {}", fname.clone().display()));
+                return Err((format!("Error creating file {}", fname.clone().display()), None));
             }
 
             let mut buf = String::new();
@@ -59,17 +59,17 @@ impl Tool for AtNoteToSelf {
             buf.push_str("\n");
             let did_it_work = file_maybe.unwrap().write_all(buf.as_bytes()).await;
             if did_it_work.is_err() {
-                return Err(format!("Error writing to file {}", fname.clone().display()));
+                return Err((format!("Error writing to file {}", fname.clone().display()), None));
             }
         }
 
         let mut results = vec![];
-        results.push(ContextEnum::ChatMessage(ChatMessage {
+        results.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
             role: "tool".to_string(),
-            content: format!("Note saved"),
+            content: "Note saved".to_string(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
-        }));
+        })));
         Ok(results)
     }
 }

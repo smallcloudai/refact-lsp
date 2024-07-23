@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_tools::execute_att::run_tools;
-use crate::call_validation::{ChatMessage, ChatPost, ContextFile, ContextMemory, SamplingParameters};
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, ContextMemory, RChatMessage, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -101,31 +101,32 @@ impl ScratchpadAbstract for ChatPassthrough {
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, top_n, &mut self.has_rag_results).await
         } else {
-            (self.post.messages.clone(), self.post.messages.len(), false)
+            (self.post.messages.iter().cloned().map(RChatMessage::new).collect::<Vec<_>>(), 
+             self.post.messages.len(), false)
         };
         if self.supports_tools {
             (messages, _) = run_tools(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &messages, top_n, &mut self.has_rag_results).await;
         };
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message).unwrap_or_else(|e| {
+        let limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
         });
         info!("chat passthrough {} messages -> {} messages after applying at-commands and limits, possibly adding the default system message", messages.len(), limited_msgs.len());
-        let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
+        let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
-            if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
-                filtered_msgs.push(msg.clone());
+            if msg.base.role == "assistant" || msg.base.role == "system" || msg.base.role == "user" || msg.base.role == "tool" {
+                filtered_msgs.push(msg.base.clone());
 
-            } else if msg.role == "diff" {
+            } else if msg.base.role == "diff" {
                 filtered_msgs.push(ChatMessage {
                     role: "tool".to_string(),
-                    content: msg.content.clone(),
+                    content: msg.base.content.clone(),
                     tool_calls: None,
-                    tool_call_id: msg.tool_call_id.clone(),
+                    tool_call_id: msg.base.tool_call_id.clone(),
                 });
 
-            } else if msg.role == "context_file" {
-                match serde_json::from_str(&msg.content) {
+            } else if msg.base.role == "context_file" {
+                match serde_json::from_str(&msg.base.content) {
                     Ok(res) => {
                         let vector_of_context_files: Vec<ContextFile> = res;
                         for context_file in &vector_of_context_files {
@@ -141,8 +142,8 @@ impl ScratchpadAbstract for ChatPassthrough {
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
                 }
-            } else if msg.role == "context_memory" {
-                match serde_json::from_str(&msg.content) {
+            } else if msg.base.role == "context_memory" {
+                match serde_json::from_str(&msg.base.content) {
                     Ok(res) => {
                         let mems: Vec<ContextMemory> = res;
                         for mem in mems.iter() {
@@ -155,7 +156,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                     Err(e) => { error!("error parsing context memory: {}", e); }
                 }
             } else {
-                warn!("unknown role: {}", msg.role);
+                warn!("unknown role: {}", msg.base.role);
             }
         }
         let mut big_json = serde_json::json!({

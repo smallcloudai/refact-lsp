@@ -7,13 +7,13 @@ use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::ContextEnum;
+use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::toolbox::toolbox_config::ToolCustDict;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String>;
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)>;
     fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
 }
 

@@ -6,7 +6,7 @@ use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ContextFile, ContextEnum};
+use crate::call_validation::{ContextFile, ContextEnum, RChatMessage};
 use crate::global_context::GlobalContext;
 
 use crate::at_commands::at_workspace::AtWorkspace;
@@ -26,7 +26,7 @@ pub struct AtCommandsContext {
     pub top_n: usize,
     #[allow(dead_code)]
     pub is_preview: bool,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<RChatMessage>,
 }
 
 impl AtCommandsContext {
@@ -34,7 +34,7 @@ impl AtCommandsContext {
         global_context: Arc<ARwLock<GlobalContext>>,
         top_n: usize,
         is_preview: bool,
-        messages: &Vec<ChatMessage>,
+        messages: &Vec<RChatMessage>,
     ) -> Self {
         AtCommandsContext {
             global_context: global_context.clone(),
@@ -116,6 +116,10 @@ pub fn vec_context_file_to_context_tools(x: Vec<ContextFile>) -> Vec<ContextEnum
     x.into_iter().map(|i|ContextEnum::ContextFile(i)).collect::<Vec<ContextEnum>>()
 }
 
+pub fn vec_rchat_msg_to_context_tools(x: Vec<RChatMessage>) -> Vec<ContextEnum> {
+    x.into_iter().map(|i|ContextEnum::RChatMessage(i)).collect::<Vec<ContextEnum>>()
+}
+
 pub fn filter_only_context_file_from_context_tool(tools: &Vec<ContextEnum>) -> Vec<ContextFile> {
     tools.iter()
         .filter_map(|x| {
@@ -123,9 +127,9 @@ pub fn filter_only_context_file_from_context_tool(tools: &Vec<ContextEnum>) -> V
         }).collect::<Vec<ContextFile>>()
 }
 
-pub fn filter_only_chat_messages_from_context_tool(tools: &Vec<ContextEnum>) -> Vec<ChatMessage> {
+pub fn filter_only_chat_messages_from_context_tool(tools: &Vec<ContextEnum>) -> Vec<RChatMessage> {
     tools.iter()
         .filter_map(|x| {
-            if let ContextEnum::ChatMessage(data) = x { Some(data.clone()) } else { None }
-        }).collect::<Vec<ChatMessage>>()
+            if let ContextEnum::RChatMessage(data) = x { Some(data.clone()) } else { None }
+        }).collect::<Vec<_>>()
 }

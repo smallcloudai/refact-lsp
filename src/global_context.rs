@@ -17,7 +17,6 @@ use tokio::sync::RwLock as ARwLock;
 use tracing::{error, info};
 
 use crate::ast::ast_module::AstModule;
-use crate::call_validation::MeteringModelItem;
 use crate::caps::CodeAssistantCaps;
 use crate::completion_cache::CompletionCache;
 use crate::custom_error::ScratchError;

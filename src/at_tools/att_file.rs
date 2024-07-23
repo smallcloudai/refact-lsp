@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::at_file::{at_file_repair_candidates, get_project_paths, text_on_clip};
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, ContextFile, RChatMessage};
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 
 
@@ -54,15 +54,15 @@ pub async fn real_file_path_candidate(
 
 #[async_trait]
 impl Tool for AttFile {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)> {
         let p = match args.get("path") {
             Some(Value::String(s)) => s,
-            Some(v) => { return Err(format!("argument `path` is not a string: {:?}", v)) },
-            None => { return Err("argument `path` is missing".to_string()) }
+            Some(v) => { return Err((format!("argument `path` is not a string: {:?}", v), None)) },
+            None => { return Err(("argument `path` is missing".to_string(), None)) }
         };
 
         let candidates = at_file_repair_candidates(p, ccx, false).await;
-        let candidate = real_file_path_candidate(ccx, p, &candidates, &get_project_paths(ccx).await).await?;
+        let candidate = real_file_path_candidate(ccx, p, &candidates, &get_project_paths(ccx).await).await.map_err(|e|(e, None))?;
         let file_text_mb = get_file_text_from_memory_or_disk(ccx.global_context.clone(), &PathBuf::from(candidate.clone())).await;
 
         let mut results = vec![];
@@ -85,12 +85,12 @@ impl Tool for AttFile {
             Err(e) => e
         };
 
-        results.push(ContextEnum::ChatMessage(ChatMessage {
+        results.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
             role: "tool".to_string(),
             content: content_on_clip,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
-        }));
+        })));
 
         Ok(results)
     }

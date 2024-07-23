@@ -7,7 +7,7 @@ use tracing::{info, warn};
 use tokio::sync::RwLock as ARwLock;
 
 use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_context_file_from_context_tool};
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::call_validation::{ChatMessage, ContextEnum, ContextFile, RChatMessage};
 use crate::global_context::GlobalContext;
 use crate::scratchpads::chat_utils_rag::{count_tokens, HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2};
 
@@ -20,7 +20,7 @@ pub async fn run_at_commands(
     original_messages: &Vec<ChatMessage>,
     top_n: usize,
     stream_back_to_user: &mut HasRagResults,
-) -> (Vec<ChatMessage>, usize, bool) {
+) -> (Vec<RChatMessage>, usize, bool) {
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     info!("reserve_for_context {} tokens", reserve_for_context);
 
@@ -45,7 +45,7 @@ pub async fn run_at_commands(
     // - if there's only 1 user message at the bottom, it receives reserve_for_context tokens for context
     // - if there are N user messages, they receive reserve_for_context/N tokens each (and there's no taking from one to give to the other)
     // This is useful to give prefix and suffix of the same file precisely the position necessary for FIM-like operation of a chat model
-    let mut rebuilt_messages: Vec<ChatMessage> = original_messages.iter().take(user_msg_starts).map(|m| m.clone()).collect();
+    let mut rebuilt_messages = original_messages.iter().take(user_msg_starts).map(|m| RChatMessage::new(m.clone())).collect::<Vec<_>>();
     for msg_idx in user_msg_starts..original_messages.len() {
         let msg = original_messages[msg_idx].clone();
         let role = msg.role.clone();
@@ -68,7 +68,7 @@ pub async fn run_at_commands(
 
         for exec_result in messages_exec_output.iter() {
             // at commands exec() can produce both role="user" and role="assistant" messages
-            if let ContextEnum::ChatMessage(raw_msg) = exec_result {
+            if let ContextEnum::RChatMessage(raw_msg) = exec_result {
                 rebuilt_messages.push(raw_msg.clone());
                 stream_back_to_user.push_in_json(json!(raw_msg));
             }
@@ -91,10 +91,10 @@ pub async fn run_at_commands(
                 json!(p)
             }).collect::<Vec<Value>>();
             if json_vec.len() > 0 {
-                let message = ChatMessage::new(
+                let message = RChatMessage::new(ChatMessage::new(
                     "context_file".to_string(),
                     serde_json::to_string(&json_vec).unwrap_or("".to_string()),
-                );
+                ));
                 rebuilt_messages.push(message.clone());
                 stream_back_to_user.push_in_json(json!(message));
             }
@@ -103,7 +103,7 @@ pub async fn run_at_commands(
 
         if content.trim().len() > 0 {
             // stream back to the user, with at-commands replaced
-            let msg = ChatMessage::new(role.clone(), content);
+            let msg = RChatMessage::new(ChatMessage::new(role.clone(), content));
             rebuilt_messages.push(msg.clone());
             if role == "user" {
                 stream_back_to_user.push_in_json(json!(msg));

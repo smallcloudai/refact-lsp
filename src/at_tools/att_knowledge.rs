@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, RChatMessage};
 use crate::vecdb::vdb_highlev::{memories_search, ongoing_find};
 
 
@@ -15,16 +15,16 @@ pub struct AttGetKnowledge;
 
 #[async_trait]
 impl Tool for AttGetKnowledge {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)> {
         info!("run @get-knowledge {:?}", args);
         let im_going_to_do = match args.get("im_going_to_do") {
             Some(Value::String(s)) => s.clone(),
-            Some(v) => { return Err(format!("argument `im_going_to_do` is not a string: {:?}", v)) },
-            None => { return Err("argument `im_going_to_do` is missing".to_string()) }
+            Some(v) => { return Err((format!("argument `im_going_to_do` is not a string: {:?}", v), None)) },
+            None => { return Err(("argument `im_going_to_do` is missing".to_string(), None)) }
         };
 
         let vec_db = ccx.global_context.read().await.vec_db.clone();
-        let memories: crate::vecdb::vdb_structs::MemoSearchResult = memories_search(vec_db.clone(), &im_going_to_do, ccx.top_n).await?;
+        let memories: crate::vecdb::vdb_structs::MemoSearchResult = memories_search(vec_db.clone(), &im_going_to_do, ccx.top_n).await.map_err(|e|(e, None))?;
 
         let memories_json = memories.results.iter().map(|m| {
             serde_json::json!({
@@ -35,28 +35,28 @@ impl Tool for AttGetKnowledge {
         let memories_str = serde_json::to_string(&memories_json).unwrap();
 
         let mut results = vec![];
-        results.push(ContextEnum::ChatMessage(ChatMessage {
+        results.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
             role: "tool".to_string(),
             content: memories_str,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
-        }));
+        })));
 
-        let ongoing_maybe: Option<crate::vecdb::vdb_structs::OngoingFlow> = ongoing_find(vec_db.clone(), im_going_to_do.clone()).await?;
+        let ongoing_maybe: Option<crate::vecdb::vdb_structs::OngoingFlow> = ongoing_find(vec_db.clone(), im_going_to_do.clone()).await.map_err(|e|(e, None))?;
         if let Some(ongoing) = ongoing_maybe {
-            results.push(ContextEnum::ChatMessage(ChatMessage {
+            results.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
                 role: "user".to_string(),
                 content: format!("💿 An ongoing session with this goal is found. This is your own summary of your progress. Continue with your previous plan:\n\n{}", serde_json::to_string_pretty(&ongoing.ongoing_json).unwrap()),
                 tool_calls: None,
                 tool_call_id: String::new(),
-            }));
+            })));
         } else {
-            results.push(ContextEnum::ChatMessage(ChatMessage {
+            results.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
                 role: "user".to_string(),
-                content: format!("💿 There is no ongoing session with this goal. A new empty ongoing session is created, formulate your plan now."),
+                content: "💿 There is no ongoing session with this goal. A new empty ongoing session is created, formulate your plan now.".to_string(),
                 tool_calls: None,
                 tool_call_id: String::new(),
-            }));
+            })));
         }
 
         Ok(results)

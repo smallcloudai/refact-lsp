@@ -11,18 +11,18 @@ use crate::ast::structs::AstQuerySearchResult;
 use crate::at_commands::at_ast_definition::results2message;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, RChatMessage};
 
 pub struct AttAstReference;
 
 #[async_trait]
 impl Tool for AttAstReference {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)> {
         info!("execute @references {:?}", args);
         let mut symbol = match args.get("symbol") {
             Some(Value::String(s)) => s.clone(),
-            Some(v) => { return Err(format!("argument `symbol` is not a string: {:?}", v)) }
-            None => { return Err("argument `symbol` is missing".to_string()) }
+            Some(v) => { return Err((format!("argument `symbol` is not a string: {:?}", v), None)) }
+            None => { return Err(("argument `symbol` is missing".to_string(), None)) }
         };
 
         if let Some(dot_index) = symbol.find('.') {
@@ -30,7 +30,7 @@ impl Tool for AttAstReference {
         }
 
         let ast_mb = ccx.global_context.read().await.ast_module.clone();
-        let ast = ast_mb.ok_or_else(|| "AST support is turned off".to_string())?;
+        let ast = ast_mb.ok_or_else(|| ("AST support is turned off".to_string(), None))?;
 
         let mut found_by_fuzzy_search: bool = false;
         let mut res: AstQuerySearchResult = ast.read().await.search_by_fullpath(
@@ -38,7 +38,7 @@ impl Tool for AttAstReference {
             RequestSymbolType::Usage,
             false,
             ccx.top_n,
-        ).await?;
+        ).await.map_err(|e|(e, None))?;
         res = if res.search_results.is_empty() {
             found_by_fuzzy_search = true;
             ast.read().await.search_by_fullpath(
@@ -46,12 +46,12 @@ impl Tool for AttAstReference {
                 RequestSymbolType::Usage,
                 true,
                 max(ccx.top_n, 6),
-            ).await?
+            ).await.map_err(|e|(e, None))?
         } else {
             res
         };
         if res.search_results.is_empty() {
-            return Err(format!("There is no `{}` in the syntax tree, and no similar names found :/", symbol).to_string());
+            return Err((format!("There is no `{}` in the syntax tree, and no similar names found :/", symbol).to_string(), None));
         }
 
         let (mut messages, tool_message) = if found_by_fuzzy_search {
@@ -91,12 +91,12 @@ impl Tool for AttAstReference {
             (messages, tool_message)
         };
 
-        messages.push(ContextEnum::ChatMessage(ChatMessage {
+        messages.push(ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
             role: "tool".to_string(),
             content: tool_message.clone(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
-        }));
+        })));
         Ok(messages)
     }
 

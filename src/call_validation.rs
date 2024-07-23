@@ -220,7 +220,7 @@ pub struct ContextMemory {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ContextEnum {
     ContextFile(ContextFile),
-    ChatMessage(ChatMessage),
+    RChatMessage(RChatMessage),
 }
 
 fn default_gradient_type_value() -> i32 {
@@ -252,14 +252,6 @@ pub struct ChatMessage {
     pub tool_call_id: String,
 }
 
-// this converts null to empty string
-fn deserialize_content<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
-}
-
 impl ChatMessage {
     pub fn new(role: String, content: String) -> Self {
         ChatMessage { role, content, tool_calls: None, tool_call_id: "".to_string() }
@@ -274,15 +266,28 @@ pub struct ChatUsage {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChatMessageContentNUsage {
-    pub content: String,
+pub struct RChatMessage {
+    #[serde(flatten)]
+    pub base: ChatMessage,
+    #[serde(default)]
     pub usage: Option<ChatUsage>,
 }
 
-impl ChatMessageContentNUsage {
-    pub fn new(content: String, usage: Option<ChatUsage>) -> Self {
-        ChatMessageContentNUsage { content, usage }
+impl RChatMessage {
+    pub fn new(base: ChatMessage) -> Self {
+        RChatMessage {
+            base, 
+            usage: None,
+        }
     }
+}
+
+// this converts null to empty string
+fn deserialize_content<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -322,14 +327,4 @@ impl DiffChunk {
     pub fn is_empty(&self) -> bool {
         self.lines_add.is_empty() && self.lines_remove.is_empty()
     }
-}
-
-#[derive(Serialize, Clone)]
-pub struct MeteringModelItem {
-    pub model: String,
-    pub pp1000t_prompt: usize,
-    pub pp1000t_generated: usize,
-    pub metering_prompt_tokens_n: usize,
-    pub metering_generated_tokens_n: usize,
-    pub requests_cnt: usize,
 }

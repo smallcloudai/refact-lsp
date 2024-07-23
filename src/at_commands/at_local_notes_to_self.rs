@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::execute_at::AtCommandMember;
-use crate::call_validation::{ChatMessage, ContextEnum, ContextMemory};
-
+use crate::call_validation::{ChatMessage, ContextEnum, ContextMemory, RChatMessage};
 
 fn text_on_clip(from_tool_call: bool) -> String {
     if !from_tool_call {
@@ -55,12 +54,12 @@ impl AtCommand for AtLocalNotesToSelf {
                 memo_text: file_text,
             });
         }
-        let chat_message = ChatMessage::new(
+        let chat_message = RChatMessage::new(ChatMessage::new(
             "context_memory".to_string(),
             serde_json::to_string(&context_memories).unwrap_or("".to_string()),
-        );
+        ));
         let mut result = vec![];
-        result.push(ContextEnum::ChatMessage(chat_message));
+        result.push(ContextEnum::RChatMessage(chat_message));
         let text = text_on_clip(false);
         Ok((result, text))
     }

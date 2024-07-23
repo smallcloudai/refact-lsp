@@ -8,7 +8,7 @@ use tokio::sync::RwLock as ARwLock;
 use tracing::{info, error};
 
 use crate::at_commands::execute_at::run_at_commands;
-use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, RChatMessage, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -99,36 +99,37 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         let (messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, top_n, &mut self.has_rag_results).await
         } else {
-            (self.post.messages.clone(), self.post.messages.len(), false)
+            (self.post.messages.iter().cloned().map(RChatMessage::new).collect::<Vec<_>>(), 
+             self.post.messages.len(), false)
         };
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, self.post.parameters.max_new_tokens, context_size, &self.default_system_message)?;
+        let limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, self.post.parameters.max_new_tokens, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = self.dd.stop_list.clone();
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
         let mut prompt = "".to_string();
         let mut last_role = "assistant".to_string();
         for msg in limited_msgs {
             prompt.push_str(self.token_esc.as_str());
-            if msg.role == "system" {
+            if msg.base.role == "system" {
                 prompt.push_str(self.keyword_syst.as_str());
-                prompt.push_str(msg.content.as_str());
+                prompt.push_str(msg.base.content.as_str());
                 prompt.push_str("\n");
-            } else if msg.role == "user" {
+            } else if msg.base.role == "user" {
                 prompt.push_str(self.keyword_user.as_str());
-                prompt.push_str(msg.content.as_str());
+                prompt.push_str(msg.base.content.as_str());
                 prompt.push_str("\n");
-            } else if msg.role == "assistant" {
+            } else if msg.base.role == "assistant" {
                 prompt.push_str(self.keyword_asst.as_str());
-                prompt.push_str(msg.content.as_str());
+                prompt.push_str(msg.base.content.as_str());
                 prompt.push_str("\n");
-            } else if msg.role == "context_file" {
-                let vector_of_context_files: Vec<ContextFile> = serde_json::from_str(&msg.content).map_err(|e|error!("parsing context_files has failed: {}; content: {}", e, &msg.content)).unwrap_or(vec![]);
+            } else if msg.base.role == "context_file" {
+                let vector_of_context_files: Vec<ContextFile> = serde_json::from_str(&msg.base.content).map_err(|e|error!("parsing context_files has failed: {}; content: {}", e, &msg.base.content)).unwrap_or(vec![]);
                 for context_file in vector_of_context_files {
                     prompt.push_str(format!("{}\n```\n{}```\n\n", context_file.file_name, context_file.file_content).as_str());
                 }
             } else {
-                return Err(format!("role \"{}\"not recognized", msg.role));
+                return Err(format!("role \"{}\"not recognized", msg.base.role));
             }
-            last_role = msg.role.clone();
+            last_role = msg.base.role.clone();
         }
         prompt.push_str(self.token_esc.as_str());
         if last_role == "assistant" || last_role == "system" {

@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use serde_json::Value;
 use uuid::Uuid;
 use tokio::sync::RwLock as ARwLock;
-
+use tracing::warn;
 use crate::ast::ast_index::RequestSymbolType;
 use crate::ast::structs::{AstQuerySearchResult, SymbolsSearchResultStruct};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::cached_tokenizers;
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, ContextFile, RChatMessage};
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::global_context::GlobalContext;
 use crate::scratchpads::chat_utils_rag::postprocess_at_results2;
@@ -74,7 +74,7 @@ pub struct AttAstWorkspaceMap;
 
 #[async_trait]
 impl Tool for AttAstWorkspaceMap {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, (String, Option<ChatUsage>)> {
         // global context copy, tokenizer etc.
         let gx = ccx.global_context.clone();
 
@@ -82,26 +82,26 @@ impl Tool for AttAstWorkspaceMap {
             gx.clone(), 0)
             .await
             .map_err(|e| {
-                format!("No caps: {:?}", e);
-                "Network error communicating with the model (1)".to_string()
+                warn!("No caps: {:?}", e);
+                ("Network error communicating with the model (1)".to_string(), None)
             })?;
 
         let tokenizer = cached_tokenizers::cached_tokenizer(
             caps.clone(), gx.clone(), "gpt-4o".to_string(),
-        ).await?;
+        ).await.map_err(|e|(e, None))?;
 
         // info!("AttAstWorkspaceMap: preparation done");
 
         // parse args
         let symbol_names = match args.get("symbols") {
             Some(Value::String(s)) => Some(s.split(",").map(|x| x.to_string()).collect::<Vec<String>>()),
-            Some(v) => { return Err(format!("argument `symbols` is not a string: {:?}", v)) }
+            Some(v) => { return Err((format!("argument `symbols` is not a string: {:?}", v), None)) }
             None => None
         };
 
         let file_names = match args.get("paths") {
             Some(Value::String(s)) => Some(s.split(",").map(|x| x.to_string()).collect::<Vec<String>>()),
-            Some(v) => { return Err(format!("argument `paths` is not a string: {:?}", v)) }
+            Some(v) => { return Err((format!("argument `paths` is not a string: {:?}", v), None)) }
             None => None
         };
 
@@ -109,7 +109,7 @@ impl Tool for AttAstWorkspaceMap {
 
         // collect context
         let ast_mb = gx.read().await.ast_module.clone();
-        let ast = ast_mb.ok_or_else(|| "AST support is turned off".to_string())?;
+        let ast = ast_mb.ok_or_else(|| ("AST support is turned off".to_string(), None))?;
 
         let mut context_files: Vec<ContextFile> = Vec::new();
         if let Some(file_names) = file_names.clone() {
@@ -119,12 +119,12 @@ impl Tool for AttAstWorkspaceMap {
         }
         if let Some(symbol_names) = symbol_names.clone() {
             for symbol in symbol_names.iter() {
-                let mut res: AstQuerySearchResult = ast.read().await.search_by_fullpath(
+                let res: AstQuerySearchResult = ast.read().await.search_by_fullpath(
                     symbol.clone(),
                     RequestSymbolType::Declaration,
                     false,
                     ccx.top_n,
-                ).await?;
+                ).await.map_err(|e|(e, None))?;
                 for x in res.search_results.iter() {
                     context_files.push(context_msg_from_search_result(gx.clone(), x.clone()).await);
                 }
@@ -141,12 +141,12 @@ impl Tool for AttAstWorkspaceMap {
         ).await;
 
         Ok(vec![
-            ContextEnum::ChatMessage(ChatMessage {
+            ContextEnum::RChatMessage(RChatMessage::new(ChatMessage {
                 role: "tool".to_string(),
                 content: format_context_files_to_message_content(context_files_postprocessed).clone(),
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
-            })
+            }))
         ])
     }
 }

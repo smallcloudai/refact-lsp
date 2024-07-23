@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use tokio::sync::RwLock as ARwLock;
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::call_validation::{ChatMessage, ContextEnum, ContextFile, RChatMessage};
 use crate::global_context::GlobalContext;
 use crate::scratchpads::chat_utils_rag::{HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2};
 
@@ -16,10 +16,10 @@ pub async fn run_tools(
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     n_ctx: usize,
-    original_messages: &Vec<ChatMessage>,
+    original_messages: &Vec<RChatMessage>,
     top_n: usize,
     stream_back_to_user: &mut HasRagResults,
-) -> (Vec<ChatMessage>, bool)
+) -> (Vec<RChatMessage>, bool)
 {
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let context_limit = reserve_for_context;
@@ -31,10 +31,10 @@ pub async fn run_tools(
     let ass_n = original_messages.len() - 1;
     let ass_msg = original_messages.get(ass_n).unwrap();
 
-    if ass_msg.role != "assistant" {
+    if ass_msg.base.role != "assistant" {
         return (original_messages.clone(), false);
     }
-    if ass_msg.tool_calls.is_none() || ass_msg.tool_calls.as_ref().unwrap().len() == 0 {
+    if ass_msg.base.tool_calls.is_none() || ass_msg.base.tool_calls.as_ref().unwrap().len() == 0 {
         return (original_messages.clone(), false);
     }
 
@@ -42,47 +42,48 @@ pub async fn run_tools(
     let at_tools = ccx.at_tools.clone();
 
     let mut for_postprocessing: Vec<ContextFile> = vec![];
-    let mut generated_tool: Vec<ChatMessage> = vec![];  // tool must go first
-    let mut generated_other: Vec<ChatMessage> = vec![];
+    let mut generated_tool = vec![];  // tool must go first
+    let mut generated_other = vec![];
 
-    for t_call in ass_msg.tool_calls.as_ref().unwrap_or(&vec![]).iter() {
+    for t_call in ass_msg.base.tool_calls.as_ref().unwrap_or(&vec![]).iter() {
         if let Some(cmd) = at_tools.get(&t_call.function.name) {
             info!("tool use: trying to run {:?}", &t_call.function.name);
 
             let args_maybe = serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments);
             if let Err(e) = args_maybe {
-                let tool_failed_message = ChatMessage {
+                let tool_failed_message = RChatMessage::new(ChatMessage {
                     role: "tool".to_string(),
                     content: format!("couldn't deserialize arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
-                };
+                });
                 generated_tool.push(tool_failed_message.clone());
                 continue;
             }
             let args = args_maybe.unwrap();
             info!("tool use: args={:?}", args);
             let tool_msg_and_maybe_more_mb = cmd.lock().await.tool_execute(&mut ccx, &t_call.id.to_string(), &args).await;
-            if let Err(e) = tool_msg_and_maybe_more_mb {
-                let tool_failed_message = ChatMessage {
+            if let Err((e, chat_usage_mb)) = tool_msg_and_maybe_more_mb {
+                let mut tool_failed_message = RChatMessage::new(ChatMessage {
                     role: "tool".to_string(),
                     content: e.to_string(),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
-                };
+                });
+                tool_failed_message.usage = chat_usage_mb;
                 generated_tool.push(tool_failed_message.clone());
                 continue;
             }
             let tool_msg_and_maybe_more = tool_msg_and_maybe_more_mb.unwrap();
             let mut have_answer = false;
             for msg in tool_msg_and_maybe_more {
-                if let ContextEnum::ChatMessage(ref raw_msg) = msg {
-                    if (raw_msg.role == "tool" || raw_msg.role == "diff") && raw_msg.tool_call_id == t_call.id {
+                if let ContextEnum::RChatMessage(ref raw_msg) = msg {
+                    if (raw_msg.base.role == "tool" || raw_msg.base.role == "diff") && raw_msg.base.tool_call_id == t_call.id {
                         generated_tool.push(raw_msg.clone());
                         have_answer = true;
                     } else {
                         generated_other.push(raw_msg.clone());
-                        assert!(raw_msg.tool_call_id.is_empty());
+                        assert!(raw_msg.base.tool_call_id.is_empty());
                     }
                 }
                 if let ContextEnum::ContextFile(ref cf) = msg {
@@ -93,12 +94,12 @@ pub async fn run_tools(
         } else {
             let e = format!("tool use: function {:?} not found", &t_call.function.name);
             warn!(e);
-            let tool_failed_message = ChatMessage {
+            let tool_failed_message = RChatMessage::new(ChatMessage {
                 role: "tool".to_string(),
                 content: e.to_string(),
                 tool_calls: None,
                 tool_call_id: t_call.id.to_string(),
-            };
+            });
             generated_tool.push(tool_failed_message.clone());
         }
     }
@@ -117,15 +118,15 @@ pub async fn run_tools(
             json!(p)
         }).collect::<Vec<Value>>();
 
-        let message = ChatMessage::new(
+        let message = RChatMessage::new(ChatMessage::new(
             "context_file".to_string(),
             serde_json::to_string(&json_vec).unwrap_or("".to_string()),
-        );
+        ));
 
         generated_other.push(message.clone());
     }
 
-    let mut all_messages: Vec<ChatMessage> = original_messages.iter().map(|m| m.clone()).collect();
+    let mut all_messages = original_messages.iter().map(|m| m.clone()).collect::<Vec<_>>();
     for msg in generated_tool.iter() {
         all_messages.push(msg.clone());
         stream_back_to_user.push_in_json(json!(msg));

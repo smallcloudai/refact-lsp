@@ -8,7 +8,7 @@ use tokio::sync::RwLock as ARwLock;
 use tracing::{info, error};
 use crate::at_commands::execute_at::run_at_commands;
 
-use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{ChatMessage, ChatPost, ContextFile, RChatMessage, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -83,9 +83,10 @@ impl ScratchpadAbstract for ChatLlama2 {
         let (messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, top_n, &mut self.has_rag_results).await
         } else {
-            (self.post.messages.clone(), self.post.messages.len(), false)
+            (self.post.messages.iter().cloned().map(RChatMessage::new).collect::<Vec<_>>(), 
+             self.post.messages.len(), false)
         };
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message)?;
+        let limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message)?;
         sampling_parameters_to_patch.stop = self.dd.stop_list.clone();
         // loosely adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
         let mut prompt = "".to_string();
@@ -93,7 +94,7 @@ impl ScratchpadAbstract for ChatLlama2 {
         prompt.push_str("[INST] ");
         let mut do_strip = false;
         for msg in limited_msgs {
-            if msg.role == "system" {
+            if msg.base.role == "system" {
                 if !do_strip {
                     prompt.push_str("<<SYS>>\n");
                     prompt.push_str(self.default_system_message.as_str());
@@ -102,20 +103,20 @@ impl ScratchpadAbstract for ChatLlama2 {
             } else {
                 // prompt.push_str("\n\n");
             }
-            if msg.role == "context_file" {
-                let vector_of_context_files: Vec<ContextFile> = serde_json::from_str(&msg.content).map_err(|e|error!("parsing context_files has failed: {}; content: {}", e, &msg.content)).unwrap_or_default();
+            if msg.base.role == "context_file" {
+                let vector_of_context_files: Vec<ContextFile> = serde_json::from_str(&msg.base.content).map_err(|e|error!("parsing context_files has failed: {}; content: {}", e, &msg.base.content)).unwrap_or_default();
                 for context_file in vector_of_context_files {
                     prompt.push_str(format!("{}\n```\n{}```\n\n", context_file.file_name, context_file.file_content).as_str());
                 }
             }
-            if msg.role == "user" {
-                let user_input = if do_strip { msg.content.trim().to_string() } else { msg.content.clone() };
+            if msg.base.role == "user" {
+                let user_input = if do_strip { msg.base.content.trim().to_string() } else { msg.base.content.clone() };
                 prompt.push_str(user_input.as_str());
                 prompt.push_str(" [/INST]");
                 do_strip = true;
             }
-            if msg.role == "assistant" {
-                prompt.push_str(msg.content.trim());
+            if msg.base.role == "assistant" {
+                prompt.push_str(msg.base.content.trim());
                 prompt.push_str(" ");
                 prompt.push_str(&self.keyword_slash_s.as_str());
                 prompt.push_str(&self.keyword_s.as_str());
