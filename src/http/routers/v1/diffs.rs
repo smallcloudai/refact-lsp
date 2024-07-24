@@ -136,12 +136,17 @@ async fn sync_documents_ast_vecdb(global_context: Arc<ARwLock<GlobalContext>>, d
         }
     }
     
-    let mut vecdb_enqueued = false;
-    if let Some(ref vecdb) = *global_context.write().await.vec_db.lock().await {
-        let vservice = vecdb.vectorizer_service.clone();
-        vectorizer_enqueue_files(vservice.clone(), &docs, true).await;
-        vecdb_enqueued = true;
-    }
+    let vecdb_enqueued = if let Some(vservice) = {
+        let cx = global_context.write().await;
+        let vec_db_guard = cx.vec_db.lock().await;
+        vec_db_guard.as_ref().map(|v| v.vectorizer_service.clone())
+    } {
+        vectorizer_enqueue_files(vservice, &docs, true).await;
+        true
+    } else {
+        false
+    };
+    
     if vecdb_enqueued {
         let vecdb = global_context.write().await.vec_db.clone();
         memories_block_until_vectorized(vecdb).await.map_err(|e| 
