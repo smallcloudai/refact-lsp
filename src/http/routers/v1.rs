@@ -19,6 +19,9 @@ use crate::http::routers::v1::caps::handle_v1_ping;
 use crate::http::routers::v1::chat::{handle_v1_chat, handle_v1_chat_completions};
 use crate::http::routers::v1::code_completion::{handle_v1_code_completion_web, handle_v1_code_completion_prompt};
 use crate::http::routers::v1::dashboard::get_dashboard_plots;
+use crate::http::routers::v1::docs::handle_v1_list_docs;
+use crate::http::routers::v1::docs::handle_v1_add_docs;
+use crate::http::routers::v1::docs::handle_v1_remove_docs;
 use crate::http::routers::v1::graceful_shutdown::handle_v1_graceful_shutdown;
 use crate::http::routers::v1::snippet_accepted::handle_v1_snippet_accepted;
 use crate::http::routers::v1::telemetry_network::handle_v1_telemetry_network;
@@ -43,6 +46,7 @@ mod at_commands;
 mod ast;
 mod at_tools;
 mod status;
+pub mod docs;
 
 pub fn make_v1_router() -> Router {
     Router::new()
@@ -63,6 +67,10 @@ pub fn make_v1_router() -> Router {
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
 
         .route("/tools", telemetry_get!(handle_v1_tools_available))
+
+        .route("/docs-list", telemetry_get!(handle_v1_list_docs))
+        .route("/docs-add", telemetry_post!(handle_v1_add_docs))
+        .route("/docs-remove", telemetry_post!(handle_v1_remove_docs))
 
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
         .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
