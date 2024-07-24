@@ -378,6 +378,8 @@ pub async fn handle_v1_add_docs(
     })?;
 
     if source.starts_with("http://") || source.starts_with("https://") {
+        let dir = get_directory_from_url(&source);
+        let _ = fs::remove_dir_all(&dir);
         task::spawn(add_url_to_documentation(
             gcx.clone(),
             source,
