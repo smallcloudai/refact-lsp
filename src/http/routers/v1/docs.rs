@@ -7,6 +7,7 @@ use axum::Extension;
 use hashbrown::HashSet;
 use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 use hyper::Body;
+use itertools::Itertools;
 use log::{info, warn};
 use select::predicate::{Attr, Name};
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ use tokio::sync::RwLock as ARwLock;
 use tokio::task;
 use url::Url;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DocOrigin {
     pub url: String,
     pub max_depth: usize,
@@ -207,9 +208,15 @@ async fn add_url_to_documentation(
     {
         let gcx = gcx.write().await;
         let mut doc_sources = gcx.documents_state.documentation_sources.lock().await;
-        if !doc_sources.contains(&url_str) {
-            doc_sources.push(url_str.clone());
-        }
+        doc_sources.insert(
+            url_str.clone(),
+            DocOrigin {
+                url: url_str.clone(),
+                max_depth: depth,
+                max_pages,
+                pages: HashMap::new(),
+            },
+        );
     }
 
     for iteration in 0..=depth {
@@ -311,6 +318,12 @@ async fn add_url_to_documentation(
         warn!("Unable to convert DocOrigin to json");
     }
 
+    {
+        let gcx = gcx.write().await;
+        let mut doc_sources = gcx.documents_state.documentation_sources.lock().await;
+        doc_sources.insert(url_str.clone(), origin.clone());
+    }
+
     Ok(origin)
 }
 
@@ -325,9 +338,11 @@ pub async fn handle_v1_list_docs(
         .documentation_sources
         .lock()
         .await
-        .clone();
+        .values()
+        .cloned()
+        .collect_vec();
 
-    let body = serde_json::to_string_pretty(&sources).map_err(|e| {
+    let body = serde_json::to_string(&sources).map_err(|e| {
         ScratchError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("json problem: {}", e),
@@ -373,8 +388,16 @@ pub async fn handle_v1_add_docs(
             gcx.vec_db.clone()
         };
 
-        if !files.contains(&source) {
-            files.push(source.clone());
+        if !files.contains_key(&source) {
+            files.insert(
+                source.clone(),
+                DocOrigin {
+                    url: source.clone(),
+                    max_depth: 1,
+                    max_pages: 1,
+                    pages: HashMap::new(),
+                },
+            );
         }
         let document = Document::new(&PathBuf::from(source.as_str()));
         match *vec_db_module.lock().await {
@@ -406,7 +429,7 @@ pub async fn handle_v1_remove_docs(
 
     let mut files = gc.documents_state.documentation_sources.lock().await;
 
-    let Some(i) = files.iter().position(|x| *x == source) else {
+    if files.remove(&source).is_none() {
         return Ok(Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(Body::from(format!(
@@ -414,8 +437,7 @@ pub async fn handle_v1_remove_docs(
                 source
             )))
             .unwrap());
-    };
-    files.remove(i);
+    }
 
     if source.starts_with("http://") || source.starts_with("https://") {
         let dir = get_directory_from_url(&source);
