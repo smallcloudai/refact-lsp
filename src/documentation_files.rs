@@ -1,13 +1,13 @@
-use std::sync::Arc;
+use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
-use tokio::sync::{RwLock as ARwLock};
+use crate::http::routers::v1::docs::DocOrigin;
+use itertools::Itertools;
+use log::{error, warn};
 use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
-use itertools::Itertools;
-use log::{error, warn};
-use crate::files_in_workspace::Document;
-use crate::http::routers::v1::docs::DocOrigin;
+use std::sync::Arc;
+use tokio::sync::RwLock as ARwLock;
 
 pub fn get_docs_dir() -> PathBuf {
     let mut home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
@@ -28,7 +28,6 @@ pub async fn enqueue_all_documentation_files(gcx: Arc<ARwLock<GlobalContext>>) {
             continue;
         };
 
-
         let mut path = path.path();
         path.push("origin.json");
         let Ok(file) = fs::File::open(path.clone()) else {
@@ -41,7 +40,11 @@ pub async fn enqueue_all_documentation_files(gcx: Arc<ARwLock<GlobalContext>>) {
             continue;
         };
 
-        let documents = doc_origin.pages.values().map(|file_path| Document::new(&PathBuf::from(file_path))).collect_vec();
+        let documents = doc_origin
+            .pages
+            .values()
+            .map(|file_path| Document::new(&PathBuf::from(file_path)))
+            .collect_vec();
         let gcx = gcx.write().await;
         let vec_db_module = {
             *gcx.documents_state.cache_dirty.lock().await = true;
@@ -52,8 +55,8 @@ pub async fn enqueue_all_documentation_files(gcx: Arc<ARwLock<GlobalContext>>) {
             None => {}
         };
         let mut sources = gcx.documents_state.documentation_sources.lock().await;
-        if !sources.contains(&doc_origin.url) {
-            sources.push(doc_origin.url.clone());
+        if !sources.contains_key(&doc_origin.url) {
+            sources.insert(doc_origin.url.clone(), doc_origin.clone());
         }
     }
 }

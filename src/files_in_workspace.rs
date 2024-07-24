@@ -1,14 +1,15 @@
+use crate::global_context::GlobalContext;
+use crate::http::routers::v1::docs::DocOrigin;
+use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use ropey::Rope;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::path::PathBuf;
-use std::sync::{Arc, Weak, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Instant;
-use crate::global_context::GlobalContext;
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
-use ropey::Rope;
 use tokio::process::Command;
-use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use tracing::info;
 use walkdir::WalkDir;
@@ -17,7 +18,6 @@ use which::which;
 use crate::telemetry;
 use crate::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS};
 
-
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct Document {
     pub path: PathBuf,
@@ -25,22 +25,32 @@ pub struct Document {
     pub text: Option<Rope>,
 }
 
-
 // FIXME: make sure error printed, not unwrap_or_default
-pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String>
-{
-    if let Some(doc) = global_context.read().await.documents_state.memory_document_map.get(file_path) {
+pub async fn get_file_text_from_memory_or_disk(
+    global_context: Arc<ARwLock<GlobalContext>>,
+    file_path: &PathBuf,
+) -> Result<String, String> {
+    if let Some(doc) = global_context
+        .read()
+        .await
+        .documents_state
+        .memory_document_map
+        .get(file_path)
+    {
         let doc = doc.read().await;
         if doc.text.is_some() {
             return Ok(doc.text.as_ref().unwrap().to_string());
         }
     }
-    read_file_from_disk(&file_path).await.map(|x|x.to_string())
+    read_file_from_disk(&file_path).await.map(|x| x.to_string())
 }
 
 impl Document {
     pub fn new(path: &PathBuf) -> Self {
-        Self { path: path.clone(), text: None }
+        Self {
+            path: path.clone(),
+            text: None,
+        }
     }
 
     pub async fn update_text_from_disk(&mut self) -> Result<(), String> {
@@ -48,10 +58,8 @@ impl Document {
             Ok(res) => {
                 self.text = Some(res);
                 return Ok(());
-            },
-            Err(e) => {
-                return Err(e)
             }
+            Err(e) => return Err(e),
         }
     }
 
@@ -59,7 +67,7 @@ impl Document {
         if self.text.is_some() {
             return Ok(self.text.as_ref().unwrap().to_string());
         }
-        read_file_from_disk(&self.path).await.map(|x|x.to_string())
+        read_file_from_disk(&self.path).await.map(|x| x.to_string())
     }
 
     pub fn update_text(&mut self, text: &String) {
@@ -89,7 +97,10 @@ impl Document {
         let total_spaces = r.chars().filter(|x| x.is_whitespace()).count();
         let spaces_percentage = total_spaces as f32 / total_chars as f32;
         if total_lines >= 5 && spaces_percentage <= 0.05 {
-            return Err(format!("generated or compressed, {:.1}% spaces < 5%", 100.0*spaces_percentage));
+            return Err(format!(
+                "generated or compressed, {:.1}% spaces < 5%",
+                100.0 * spaces_percentage
+            ));
         }
 
         Ok(())
@@ -101,13 +112,13 @@ pub struct DocumentsState {
     pub workspace_files: Arc<StdMutex<Vec<PathBuf>>>,
     pub last_accessed_file: Arc<StdMutex<Option<PathBuf>>>,
     pub jsonl_files: Arc<StdMutex<Vec<PathBuf>>>,
-    pub documentation_sources: Arc<AMutex<Vec<String>>>,
+    pub documentation_sources: Arc<AMutex<HashMap<String, DocOrigin>>>,
     // document_map on windows: c%3A/Users/user\Documents/file.ext
     // query on windows: C:/Users/user/Documents/file.ext
-    pub memory_document_map: HashMap<PathBuf, Arc<ARwLock<Document>>>,   // if a file is open in IDE, and it's outside workspace dirs, it will be in this map and not in workspace_files
+    pub memory_document_map: HashMap<PathBuf, Arc<ARwLock<Document>>>, // if a file is open in IDE, and it's outside workspace dirs, it will be in this map and not in workspace_files
     pub cache_dirty: Arc<AMutex<bool>>,
-    pub cache_correction: Arc<HashMap<String, HashSet<String>>>,  // map dir3/file.ext -> to /dir1/dir2/dir3/file.ext
-    pub cache_fuzzy: Arc<Vec<String>>,                   // slow linear search
+    pub cache_correction: Arc<HashMap<String, HashSet<String>>>, // map dir3/file.ext -> to /dir1/dir2/dir3/file.ext
+    pub cache_fuzzy: Arc<Vec<String>>,                           // slow linear search
     pub fs_watcher: Arc<ARwLock<RecommendedWatcher>>,
     pub total_reset: bool,
     pub total_reset_ts: std::time::SystemTime,
@@ -116,13 +127,17 @@ pub struct DocumentsState {
 
 async fn overwrite_or_create_document(
     global_context: Arc<ARwLock<GlobalContext>>,
-    document: Document
+    document: Document,
 ) -> (Arc<ARwLock<Document>>, Arc<AMutex<bool>>, bool) {
     let mut cx = global_context.write().await;
     let doc_map = &mut cx.documents_state.memory_document_map;
     if let Some(existing_doc) = doc_map.get_mut(&document.path) {
         *existing_doc.write().await = document;
-        (existing_doc.clone(), cx.documents_state.cache_dirty.clone(), false)
+        (
+            existing_doc.clone(),
+            cx.documents_state.cache_dirty.clone(),
+            false,
+        )
     } else {
         let path = document.path.clone();
         let darc = Arc::new(ARwLock::new(document));
@@ -132,16 +147,14 @@ async fn overwrite_or_create_document(
 }
 
 impl DocumentsState {
-    pub async fn new(
-        workspace_dirs: Vec<PathBuf>,
-    ) -> Self {
-        let watcher = RecommendedWatcher::new(|_|{}, Default::default()).unwrap();
+    pub async fn new(workspace_dirs: Vec<PathBuf>) -> Self {
+        let watcher = RecommendedWatcher::new(|_| {}, Default::default()).unwrap();
         Self {
             workspace_folders: Arc::new(StdMutex::new(workspace_dirs)),
             workspace_files: Arc::new(StdMutex::new(Vec::new())),
             last_accessed_file: Arc::new(StdMutex::new(None)),
             jsonl_files: Arc::new(StdMutex::new(Vec::new())),
-            documentation_sources: Arc::new(AMutex::new(Vec::new())),
+            documentation_sources: Arc::new(AMutex::new(HashMap::new())),
             memory_document_map: HashMap::new(),
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
             cache_correction: Arc::new(HashMap::<String, HashSet<String>>::new()),
@@ -153,7 +166,11 @@ impl DocumentsState {
         }
     }
 
-    pub fn init_watcher(&mut self, gcx_weak: Weak<ARwLock<GlobalContext>>, rt: tokio::runtime::Handle) {
+    pub fn init_watcher(
+        &mut self,
+        gcx_weak: Weak<ARwLock<GlobalContext>>,
+        rt: tokio::runtime::Handle,
+    ) {
         let event_callback = move |res| {
             rt.block_on(async {
                 let mut new_total_reset = false;
@@ -213,11 +230,16 @@ pub async fn file_watcher_total_reset(gcx_weak: Weak<ARwLock<GlobalContext>>) {
 }
 
 pub async fn read_file_from_disk(path: &PathBuf) -> Result<Rope, String> {
-    tokio::fs::read_to_string(path).await
-        .map(|x|Rope::from_str(&x))
-        .map_err(|e|
-            format!("failed to read file {}: {}", crate::nicer_logs::last_n_chars(&path.display().to_string(), 30), e)
-        )
+    tokio::fs::read_to_string(path)
+        .await
+        .map(|x| Rope::from_str(&x))
+        .map_err(|e| {
+            format!(
+                "failed to read file {}: {}",
+                crate::nicer_logs::last_n_chars(&path.display().to_string(), 30),
+                e
+            )
+        })
 }
 
 pub fn read_file_from_disk_sync(path: &PathBuf) -> Result<Rope, String> {
@@ -328,7 +350,10 @@ async fn ls_files_under_version_control_recursive(path: PathBuf) -> Vec<PathBuf>
                     paths.push(local_path.clone());
                 }
                 Err(e) => {
-                    rejected_reasons.entry(e.to_string()).and_modify(|x| *x += 1).or_insert(1);
+                    rejected_reasons
+                        .entry(e.to_string())
+                        .and_modify(|x| *x += 1)
+                        .or_insert(1);
                     continue;
                 }
             }
@@ -347,12 +372,16 @@ async fn ls_files_under_version_control_recursive(path: PathBuf) -> Vec<PathBuf>
                             paths.push(x.clone());
                         }
                         Err(e) => {
-                            rejected_reasons.entry(e.to_string()).and_modify(|x| *x += 1).or_insert(1);
+                            rejected_reasons
+                                .entry(e.to_string())
+                                .and_modify(|x| *x += 1)
+                                .or_insert(1);
                         }
                     }
                 }
             } else {
-                let local_paths: Vec<PathBuf> = WalkDir::new(local_path.clone()).max_depth(1)
+                let local_paths: Vec<PathBuf> = WalkDir::new(local_path.clone())
+                    .max_depth(1)
                     .into_iter()
                     .filter_map(|e| e.ok())
                     .map(|e| e.path().to_path_buf())
@@ -369,7 +398,10 @@ async fn ls_files_under_version_control_recursive(path: PathBuf) -> Vec<PathBuf>
     if rejected_reasons.is_empty() {
         info!("    no bad files at all");
     }
-    info!("also the loop bumped into {} blacklisted dirs", blacklisted_dirs_cnt);
+    info!(
+        "also the loop bumped into {} blacklisted dirs",
+        blacklisted_dirs_cnt
+    );
     paths
 }
 
@@ -382,14 +414,13 @@ async fn retrieve_files_by_proj_folders(proj_folders: Vec<PathBuf>) -> Vec<PathB
     all_files
 }
 
-async fn enqueue_some_docs(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    docs: &Vec<Document>,
-    force: bool,
-) {
+async fn enqueue_some_docs(gcx: Arc<ARwLock<GlobalContext>>, docs: &Vec<Document>, force: bool) {
     info!("detected {} modified or added files", docs.len());
     for d in docs.iter().take(5) {
-        info!("    added/modified {}", crate::nicer_logs::last_n_chars(&d.path.display().to_string(), 30));
+        info!(
+            "    added/modified {}",
+            crate::nicer_logs::last_n_chars(&d.path.display().to_string(), 30)
+        );
     }
     if docs.len() > 5 {
         info!("    ...");
@@ -402,7 +433,10 @@ async fn enqueue_some_docs(
         db.vectorizer_enqueue_files(&docs, force).await;
     }
     if let Some(ast) = &ast_module {
-        ast.read().await.ast_indexer_enqueue_files(&docs, force).await;
+        ast.read()
+            .await
+            .ast_indexer_enqueue_files(&docs, force)
+            .await;
     }
 }
 
@@ -411,30 +445,53 @@ pub async fn enqueue_all_files_from_workspace_folders(
     force: bool,
     vecdb_only: bool,
 ) -> i32 {
-    let folders: Vec<PathBuf> = gcx.read().await.documents_state.workspace_folders.lock().unwrap().clone();
+    let folders: Vec<PathBuf> = gcx
+        .read()
+        .await
+        .documents_state
+        .workspace_folders
+        .lock()
+        .unwrap()
+        .clone();
 
-    info!("enqueue_all_files_from_workspace_folders started files search with {} folders", folders.len());
+    info!(
+        "enqueue_all_files_from_workspace_folders started files search with {} folders",
+        folders.len()
+    );
     let paths = retrieve_files_by_proj_folders(folders).await;
-    info!("enqueue_all_files_from_workspace_folders found {} files => workspace_files", paths.len());
+    info!(
+        "enqueue_all_files_from_workspace_folders found {} files => workspace_files",
+        paths.len()
+    );
     let newset: HashSet<PathBuf> = paths.iter().cloned().collect();
 
     let mut documents: Vec<Document> = vec![];
     for d in paths.iter() {
-        documents.push(Document { path: d.clone(), text: None });
+        documents.push(Document {
+            path: d.clone(),
+            text: None,
+        });
     }
 
     let (vec_db_module, ast_module, removed_old) = {
         let cx = gcx.write().await;
         *cx.documents_state.cache_dirty.lock().await = true;
         let workspace_files = &mut cx.documents_state.workspace_files.lock().unwrap();
-        let removed_old: HashSet<PathBuf> = workspace_files.iter().filter(|p|!newset.contains(*p)).cloned().collect();
+        let removed_old: HashSet<PathBuf> = workspace_files
+            .iter()
+            .filter(|p| !newset.contains(*p))
+            .cloned()
+            .collect();
         workspace_files.clear();
         workspace_files.extend(paths);
         (cx.vec_db.clone(), cx.ast_module.clone(), removed_old)
     };
     info!("detected {} deleted files", removed_old.len());
     for p in removed_old.iter().take(5) {
-        info!("    deleted {}", crate::nicer_logs::last_n_chars(&p.display().to_string(), 30));
+        info!(
+            "    deleted {}",
+            crate::nicer_logs::last_n_chars(&p.display().to_string(), 30)
+        );
     }
     if removed_old.len() > 5 {
         info!("    ...");
@@ -456,8 +513,7 @@ pub async fn enqueue_all_files_from_workspace_folders(
     documents.len() as i32
 }
 
-pub async fn on_workspaces_init(gcx: Arc<ARwLock<GlobalContext>>) -> i32
-{
+pub async fn on_workspaces_init(gcx: Arc<ARwLock<GlobalContext>>) -> i32 {
     // Called from lsp and lsp_like
     // Not called from main.rs as part of initialization
     enqueue_all_files_from_workspace_folders(gcx.clone(), false, false).await
@@ -471,7 +527,10 @@ pub async fn on_did_open(
 ) {
     let mut doc = Document::new(cpath);
     doc.update_text(text);
-    info!("on_did_open {}", crate::nicer_logs::last_n_chars(&cpath.display().to_string(), 30));
+    info!(
+        "on_did_open {}",
+        crate::nicer_logs::last_n_chars(&cpath.display().to_string(), 30)
+    );
     let (_doc_arc, dirty_arc, mark_dirty) = overwrite_or_create_document(gcx.clone(), doc).await;
     if mark_dirty {
         (*dirty_arc.lock().await) = true;
@@ -479,16 +538,13 @@ pub async fn on_did_open(
     *gcx.read().await.documents_state.last_accessed_file.lock().unwrap() = Some(cpath.clone());
 }
 
-pub async fn on_did_change(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    path: &PathBuf,
-    text: &String,
-) {
+pub async fn on_did_change(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf, text: &String) {
     let t0 = Instant::now();
     let (doc_arc, dirty_arc, mark_dirty) = {
         let mut doc = Document::new(path);
         doc.update_text(text);
-        let (doc_arc, dirty_arc, set_mark_dirty) = overwrite_or_create_document(gcx.clone(), doc).await;
+        let (doc_arc, dirty_arc, set_mark_dirty) =
+            overwrite_or_create_document(gcx.clone(), doc).await;
         (doc_arc, dirty_arc, set_mark_dirty)
     };
 
@@ -505,7 +561,10 @@ pub async fn on_did_change(
         }
     }
 
-    let doc = Document { path: doc_arc.read().await.path.clone(), text: None };
+    let doc = Document {
+        path: doc_arc.read().await.path.clone(),
+        text: None,
+    };
     if go_ahead {
         enqueue_some_docs(gcx.clone(), &vec![doc], false).await;
     }
@@ -514,19 +573,30 @@ pub async fn on_did_change(
         gcx.clone(),
         &path.to_string_lossy().to_string(),
         text,
-    ).await;
+    )
+    .await;
 
-    info!("on_did_change {}, total time {:.3}s", crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30), t0.elapsed().as_secs_f32());
+    info!(
+        "on_did_change {}, total time {:.3}s",
+        crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30),
+        t0.elapsed().as_secs_f32()
+    );
 }
 
-pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
-{
-    info!("on_did_delete {}", crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30));
+pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
+    info!(
+        "on_did_delete {}",
+        crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30)
+    );
 
     let (vec_db_module, ast_module, dirty_arc) = {
         let mut cx = gcx.write().await;
         cx.documents_state.memory_document_map.remove(path);
-        (cx.vec_db.clone(), cx.ast_module.clone(), cx.documents_state.cache_dirty.clone())
+        (
+            cx.vec_db.clone(),
+            cx.ast_module.clone(),
+            cx.documents_state.cache_dirty.clone(),
+        )
     };
 
     (*dirty_arc.lock().await) = true;
@@ -536,50 +606,68 @@ pub async fn on_did_delete(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
         None => {}
     }
     match &ast_module {
-        Some(ast) => {
-            match ast.write().await.ast_remove_file(path).await {
-                Ok(_) => {}
-                Err(err) => {
-                    info!(
-                        "cannot remove file {}, {}",
-                        crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30),
-                        err
-                    );
-                }
+        Some(ast) => match ast.write().await.ast_remove_file(path).await {
+            Ok(_) => {}
+            Err(err) => {
+                info!(
+                    "cannot remove file {}, {}",
+                    crate::nicer_logs::last_n_chars(&path.to_string_lossy().to_string(), 30),
+                    err
+                );
             }
         },
         None => {}
     };
 }
 
-pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
-{
+pub async fn add_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     {
         let documents_state = &mut gcx.write().await.documents_state;
-        documents_state.workspace_folders.lock().unwrap().push(path.clone());
-        let _ = documents_state.fs_watcher.write().await.watch(&path.clone(), RecursiveMode::Recursive);
+        documents_state
+            .workspace_folders
+            .lock()
+            .unwrap()
+            .push(path.clone());
+        let _ = documents_state
+            .fs_watcher
+            .write()
+            .await
+            .watch(&path.clone(), RecursiveMode::Recursive);
     }
     let paths = retrieve_files_by_proj_folders(vec![path.clone()]).await;
-    let docs: Vec<Document> = paths.into_iter().map(|p| Document { path: p, text: None }).collect();
+    let docs: Vec<Document> = paths
+        .into_iter()
+        .map(|p| Document {
+            path: p,
+            text: None,
+        })
+        .collect();
     enqueue_some_docs(gcx, &docs, false).await;
 }
 
-pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
-{
+pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf) {
     {
         let documents_state = &mut gcx.write().await.documents_state;
-        documents_state.workspace_folders.lock().unwrap().retain(|p| p != path);
-        let _ = documents_state.fs_watcher.write().await.unwatch(&path.clone());
+        documents_state
+            .workspace_folders
+            .lock()
+            .unwrap()
+            .retain(|p| p != path);
+        let _ = documents_state
+            .fs_watcher
+            .write()
+            .await
+            .unwatch(&path.clone());
     }
     enqueue_all_files_from_workspace_folders(gcx.clone(), false, false).await;
 }
 
-pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalContext>>) -> bool
-{
+pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalContext>>) -> bool {
     async fn on_create_modify(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut docs = vec![];
         for p in &event.paths {
-            if is_this_inside_blacklisted_dir(&p) {  // important to filter BEFORE canonical_path
+            if is_this_inside_blacklisted_dir(&p) {
+                // important to filter BEFORE canonical_path
                 continue;
             }
 
@@ -593,8 +681,12 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
             }
 
             if go_ahead {
-                let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
-                docs.push(Document { path: cpath, text: None });
+                let cpath =
+                    crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
+                docs.push(Document {
+                    path: cpath,
+                    text: None,
+                });
             }
         }
         if docs.is_empty() {
@@ -621,7 +713,9 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
                         if is_this_inside_blacklisted_dir(&p) {
                             continue;
                         }
-                        let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
+                        let cpath = crate::files_correction::canonical_path(
+                            &p.to_string_lossy().to_string(),
+                        );
                         for p in wf_locked.iter() {
                             if *p == cpath {
                                 a_known_file = true;
@@ -629,10 +723,22 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
                             }
                         }
                         if a_known_file {
-                            info!("    found {} was indexed previously => rebuild index", crate::nicer_logs::last_n_chars(&cpath.to_string_lossy().to_string(), 30));
+                            info!(
+                                "    found {} was indexed previously => rebuild index",
+                                crate::nicer_logs::last_n_chars(
+                                    &cpath.to_string_lossy().to_string(),
+                                    30
+                                )
+                            );
                             return true;
                         } else {
-                            info!("    deleted file {} wasn't in the index, ignore", crate::nicer_logs::last_n_chars(&cpath.to_string_lossy().to_string(), 30));
+                            info!(
+                                "    deleted file {} wasn't in the index, ignore",
+                                crate::nicer_logs::last_n_chars(
+                                    &cpath.to_string_lossy().to_string(),
+                                    30
+                                )
+                            );
                         }
                     }
                 }
@@ -643,9 +749,12 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
     }
 
     match event.kind {
-        EventKind::Any => {},
-        EventKind::Access(_) => {},
-        EventKind::Create(CreateKind::File) | EventKind::Modify(ModifyKind::Data(DataChange::Content)) => on_create_modify(gcx_weak.clone(), event).await,
+        EventKind::Any => {}
+        EventKind::Access(_) => {}
+        EventKind::Create(CreateKind::File)
+        | EventKind::Modify(ModifyKind::Data(DataChange::Content)) => {
+            on_create_modify(gcx_weak.clone(), event).await
+        }
         EventKind::Remove(RemoveKind::File) => return on_remove(gcx_weak.clone(), event).await,
         EventKind::Other => {}
         _ => {}
