@@ -48,12 +48,9 @@ mod at_commands;
 mod ast;
 mod at_tools;
 mod status;
-<<<<<<< HEAD
 mod diffs;
 pub mod handlers_memdb;
-=======
 pub mod docs;
->>>>>>> d0a902a... refactor: moved documentation tools to http api
 
 pub fn make_v1_router() -> Router {
     Router::new()
