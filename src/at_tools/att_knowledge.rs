@@ -15,7 +15,7 @@ pub struct AttGetKnowledge;
 
 #[async_trait]
 impl Tool for AttGetKnowledge {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&mut self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         info!("run @get-knowledge {:?}", args);
         let im_going_to_do = match args.get("im_going_to_do") {
             Some(Value::String(s)) => s.clone(),

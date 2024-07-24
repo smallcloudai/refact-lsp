@@ -54,7 +54,7 @@ pub async fn real_file_path_candidate(
 
 #[async_trait]
 impl Tool for AttFile {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&mut self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         let p = match args.get("path") {
             Some(Value::String(s)) => s,
             Some(v) => { return Err(format!("argument `path` is not a string: {:?}", v)) },

@@ -53,7 +53,7 @@ pub struct AttFilesSkeleton;
 
 #[async_trait]
 impl Tool for AttFilesSkeleton {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&mut self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         // global context copy, tokenizer etc.
         let gx = ccx.global_context.clone();
 

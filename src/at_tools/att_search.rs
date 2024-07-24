@@ -45,7 +45,7 @@ async fn execute_att_search(ccx: &mut AtCommandsContext, query: &String, scope: 
 
 #[async_trait]
 impl Tool for AttSearch {
-    async fn tool_execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&mut self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
         let query = match args.get("query") {
             Some(Value::String(s)) => s.clone(),
             Some(v) => return Err(format!("argument `query` is not a string: {:?}", v)),
