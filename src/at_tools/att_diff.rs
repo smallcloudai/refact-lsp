@@ -43,6 +43,7 @@ impl Tool for AttDiff {
             content: json!(diff_chunks).to_string(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
 
         Ok(results)

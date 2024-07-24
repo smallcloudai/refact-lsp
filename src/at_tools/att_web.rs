@@ -25,6 +25,7 @@ impl Tool for AttWeb {
             content: text,
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
         
         Ok(results)
