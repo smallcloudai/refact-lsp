@@ -31,8 +31,15 @@ pub struct DocOrigin {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct DocsSource {
+    source: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct DocsProps {
     source: String,
+    max_depth: usize,
+    max_pages: usize,
 }
 
 fn get_directory_from_url(url: &str) -> PathBuf {
@@ -359,7 +366,11 @@ pub async fn handle_v1_add_docs(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes).map_err(|e| {
+    let DocsProps {
+        source,
+        max_depth,
+        max_pages,
+    } = serde_json::from_slice::<DocsProps>(&body_bytes).map_err(|e| {
         ScratchError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("JSON problem: {}", e),
@@ -367,7 +378,12 @@ pub async fn handle_v1_add_docs(
     })?;
 
     if source.starts_with("http://") || source.starts_with("https://") {
-        task::spawn(add_url_to_documentation(gcx.clone(), source, 2, 40));
+        task::spawn(add_url_to_documentation(
+            gcx.clone(),
+            source,
+            max_depth,
+            max_pages,
+        ));
         Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Body::from("Started background task to add website to documentation, this may take a few minutes..."))
@@ -418,7 +434,7 @@ pub async fn handle_v1_remove_docs(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let DocsProps { source } = serde_json::from_slice::<DocsProps>(&body_bytes).map_err(|e| {
+    let DocsSource { source } = serde_json::from_slice::<DocsSource>(&body_bytes).map_err(|e| {
         ScratchError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("JSON problem: {}", e),
