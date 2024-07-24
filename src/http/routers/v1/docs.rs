@@ -141,8 +141,8 @@ impl TextDecorator for CustomTextConversion {
     }
 }
 
-fn find_content(html: String) -> String {
-    let document = select::document::Document::from(html.as_str());
+fn find_content(html: &str) -> String {
+    let document = select::document::Document::from(html);
 
     let content_ids = vec![
         "content",
@@ -165,7 +165,7 @@ fn find_content(html: String) -> String {
         return node.html();
     }
 
-    html
+    html.to_string()
 }
 
 // returns a pair of html and markdown
@@ -183,10 +183,10 @@ pub async fn fetch_and_convert_to_md(url: &str) -> Result<(String, String), Stri
         .await
         .map_err(|_| "Unable to convert page to text".to_string())?;
 
-    let html = find_content(html);
+    let content_html = find_content(&html);
 
     let md = html2text::config::with_decorator(CustomTextConversion)
-        .string_from_read(&html.as_bytes()[..], 200)
+        .string_from_read(&content_html.as_bytes()[..], 200)
         .map_err(|_| "Unable to convert html to text".to_string())?;
 
     Ok((html, md))
