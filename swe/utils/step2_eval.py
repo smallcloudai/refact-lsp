@@ -25,12 +25,17 @@ class SWERunner(AgentRunner):
         results: Dict[str, Any] = dict()
         problem_statement = kwargs["problem_statement"]
         found_files = kwargs["found_files"]
+        filename = patched_file(kwargs["problem_patch"])
         step = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.8)
         try:
             results["model_patches"] = await step.process(
                 problem_statement=problem_statement,
                 related_files=found_files,
                 repo_path=repo_path)
+            results["patched_file_in_model_patches"] = any([
+                filename in model_patch
+                for model_patch in results["model_patches"]
+            ])
         except Exception as e:
             results["error"] = f"step2: {type(e)} {str(e) or traceback.format_exc()}"
         results["model_name"] = step.model_name

@@ -57,6 +57,10 @@ class SWERunner(AgentRunner):
                 problem_statement=problem_statement,
                 related_files=results["found_files"],
                 repo_path=repo_path)
+            results["patched_file_in_model_patches"] = any([
+                filename in model_patch
+                for model_patch in results["model_patches"]
+            ])
         except Exception as e:
             results["error"] = f"step2: {type(e)} {str(e) or traceback.format_exc()}"
 
@@ -74,6 +78,7 @@ class SWERunner(AgentRunner):
                 related_files=results["found_files"],
                 model_patches=results["model_patches"],
                 repo_path=repo_path)
+            results["patched_file_in_model_patch"] = filename in results["model_patch"]
         except Exception as e:
             results["error"] = f"step3: {type(e)} {str(e) or traceback.format_exc()}"
 
