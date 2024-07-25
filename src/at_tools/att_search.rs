@@ -9,6 +9,7 @@ use crate::at_commands::at_search::{execute_at_search, text_on_clip};
 use crate::at_tools::att_file::real_file_path_candidate;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
+use crate::documentation_files::get_docs_dir;
 
 
 pub struct AttSearch;
@@ -28,6 +29,12 @@ async fn execute_att_search(ccx: &mut AtCommandsContext, query: &String, scope: 
     return match scope.as_str() {
         "workspace" => {
             Ok(execute_at_search(ccx, &query, None).await?)
+        },
+        "documentation" => {
+            let docs_dir = get_docs_dir();
+            let scope = docs_dir.display();
+            let filter = format!("(file_path LIKE '{}%')", scope);
+            Ok(execute_at_search(ccx, &query, Some(filter)).await?)
         },
         _ if is_scope_a_file(scope) => {
             let candidates = at_file_repair_candidates(scope, ccx, false).await;

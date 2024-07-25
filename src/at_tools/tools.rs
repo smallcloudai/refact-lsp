@@ -83,7 +83,7 @@ tools:
         description: "Single line, paragraph or code sample to search for similar content."
       - name: "scope"
         type: "string"
-        description: "'workspace' to search all files in workspace, 'dir/subdir/' to search in files within a directory, 'dir/file.ext' to search in a single file."
+        description: "'workspace' to search all files in workspace, 'documentation' to search in the documentation, 'dir/subdir/' to search in files within a directory, 'dir/file.ext' to search in a single file."
     parameters_required:
       - "query"
       - "scope"
