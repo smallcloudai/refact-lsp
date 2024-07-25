@@ -4,6 +4,7 @@ import subprocess
 
 from refact import chat_client
 from refact.chat_client import print_block
+from refact.chat_client import print_exception
 from refact.chat_client import print_messages
 from swe.steps import Step
 
@@ -31,9 +32,9 @@ How patch tool's todo argument must looks like:
 
 class ProducePatchStep(Step):
 
-    def __init__(self, attempts: int, *args, **kwargs):
+    def __init__(self, choices: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._attempts = attempts
+        self._choices = choices
 
     @property
     def _tools(self) -> Set[str]:
@@ -58,20 +59,13 @@ class ProducePatchStep(Step):
         await chat_client.diff_apply(self._base_url, chunks=formatted_diff, apply=[False] * len(formatted_diff))
         return result.decode()
 
-    async def _attempt(self, messages: List[chat_client.Message], repo_name: Path) -> str:
-        for idx in range(self._max_depth):
-            self._trajectory.append(print_block("iteration", idx + 1))
-
-            new_messages = await self._query(messages)
-            self._trajectory.extend(print_messages(new_messages))
-
-            for message in new_messages:
-                try:
-                    return await self._patch_generate(message, repo_name)
-                except:
-                    pass
-            messages.extend(new_messages)
-        raise RuntimeError(f"can't solve the problem with {self._max_depth} iterations")
+    async def _attempt(self, message: chat_client.Message, repo_name: Path) -> str:
+        patch_tool_messages = await self._query([message], only_deterministic_messages=True)
+        self._trajectory.extend(print_messages(patch_tool_messages))
+        for message in patch_tool_messages:
+            if message.role == "diff":
+                return await self._patch_generate(message, repo_name)
+        raise RuntimeError(f"expected a diff message")
 
     async def process(self, problem_statement: str, related_files: List[str], repo_path: Path, **kwargs) -> List[str]:
         paths = ",".join([str(repo_path / filename) for filename in related_files])
@@ -84,13 +78,17 @@ class ProducePatchStep(Step):
             chat_client.Message(role="user", content=f"Problem statement:\n\n{problem_statement}"),
             chat_client.Message(role="assistant", finish_reason="tool_calls", tool_calls=[files_tool_call_dict]),
         ]
+        tree_tool_messages = await self._query(messages, only_deterministic_messages=True)
+        assert len(tree_tool_messages) == 1 and tree_tool_messages[0].role == "tool"
+        messages.extend(tree_tool_messages)
         self._trajectory.extend(print_messages(messages))
 
-        results = []
-        for idx in range(self._attempts):
-            self._trajectory.append(print_block("attempt", idx + 1))
+        results = set()
+        for idx, new_messages in enumerate(await self._query_choices(messages, self._choices)):
+            self._trajectory.append(print_block("choice", idx + 1))
+            self._trajectory.extend(print_messages(new_messages))
             try:
-                results.append(await self._attempt(messages, repo_path.absolute()))
-            except RuntimeError:
-                continue
-        return results
+                results.add(await self._attempt(new_messages[-1], repo_path.absolute()))
+            except Exception as e:
+                self._trajectory.append(print_exception(e, trace=True))
+        return list(results)

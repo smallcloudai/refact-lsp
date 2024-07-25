@@ -39,6 +39,7 @@ def checkpoint_preds(output: Path):
 
     stats = {
         "instances": len(preds),
+        "found_files": len([p for p in preds if p.get("patched_file_is_found", "no") == "fully"]),
         "patched": len([p for p in preds if p["model_patch"]]),
         "prompt_tokens": 0,
         "completion_tokens": 0,

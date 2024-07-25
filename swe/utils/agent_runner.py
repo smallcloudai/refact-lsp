@@ -76,7 +76,4 @@ class AgentRunner:
                     async with timeout(self._timeout):
                         return await self._steps(base_url=runner.base_url, repo_path=repo_path, **kwargs)
         except Exception as e:
-            raise e
-            return {
-                "error": f"run: {str(e) or traceback.format_exc()}",
-            }
+            return {"error": f"run: {str(e) or traceback.format_exc()}"}, ""
