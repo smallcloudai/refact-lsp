@@ -78,9 +78,9 @@ class ProducePatchStep(Step):
             chat_client.Message(role="user", content=f"Problem statement:\n\n{problem_statement}"),
             chat_client.Message(role="assistant", finish_reason="tool_calls", tool_calls=[files_tool_call_dict]),
         ]
-        tree_tool_messages = await self._query(messages, only_deterministic_messages=True)
-        assert len(tree_tool_messages) == 1 and tree_tool_messages[0].role == "tool"
-        messages.extend(tree_tool_messages)
+        tool_messages = await self._query(messages, only_deterministic_messages=True)
+        assert len(tool_messages) == 1 and tool_messages[0].role == "tool"
+        messages.extend(tool_messages)
         self._trajectory.extend(print_messages(messages))
 
         results = set()
