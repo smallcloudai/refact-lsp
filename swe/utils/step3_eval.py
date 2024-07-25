@@ -2,21 +2,19 @@ import json
 import asyncio
 import traceback
 
-import termcolor
-
 from argparse import ArgumentParser
 
 from swe.utils import AgentRunner
 from swe.utils import get_swe_bench_lite_instance
-from swe.steps import ProducePatchStep
+from swe.steps import ChooseSolutionStep
 from swe.utils.common import patched_file
 
 from pathlib import Path
 from typing import Dict, Any, Tuple
 
 
-# MODEL = "gpt-4o"
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4o"
+# MODEL = "gpt-4o-mini"
 
 
 class SWERunner(AgentRunner):
@@ -25,19 +23,18 @@ class SWERunner(AgentRunner):
         results: Dict[str, Any] = dict()
         problem_statement = kwargs["problem_statement"]
         found_files = kwargs["found_files"]
+        model_patches = kwargs["model_patches"]
         filename = patched_file(kwargs["problem_patch"])
-        step = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.8)
+        step = ChooseSolutionStep(base_url=base_url, model_name=MODEL, choices=5, temperature=0.4)
         try:
-            results["model_patches"] = await step.process(
+            results["model_patch"] = await step.process(
                 problem_statement=problem_statement,
                 related_files=found_files,
+                model_patches=model_patches,
                 repo_path=repo_path)
-            results["patched_file_in_model_patches"] = any([
-                filename in model_patch
-                for model_patch in results["model_patches"]
-            ])
+            results["patched_file_in_model_patch"] = filename in results["model_patch"]
         except Exception as e:
-            results["error"] = f"step2: {type(e)} {str(e) or traceback.format_exc()}"
+            raise RuntimeError(f"step3: {type(e)} {str(e) or traceback.format_exc()}")
         results["model_name"] = step.model_name
         results["usage"] = step.usage
         return results, step.trajectory
@@ -48,7 +45,7 @@ async def main():
     parser.add_argument("instance_id", type=str, help="SWE instance id")
     parser.add_argument("--timeout", type=float, default=None, help="processing timeout")
     parser.add_argument("--output-dir", type=Path, default=None, help="output directory")
-    parser.add_argument("--step1-output", type=Path, default=None, help="step1 output filename")
+    parser.add_argument("--step2-output", type=Path, required=True, help="step2 output filename")
     args = parser.parse_args()
 
     if args.output_dir is not None:
@@ -69,16 +66,11 @@ async def main():
     }
     traj = ""
 
+    data = json.loads(args.step2_output.read_text())
+    results["found_files"] = data["found_files"]
+    results["model_patches"] = data["model_patches"]
+
     try:
-        if args.step1_output is not None:
-            data = json.loads(args.step1_output.read_text())
-            results["found_files"] = data["found_files"]
-        else:
-            results["found_files"] = [patched_file(results["problem_patch"])]
-
-        found_files_info = "\n".join([f"using additional step1 data:", *results["found_files"]])
-        print(termcolor.colored(found_files_info, "green"))
-
         runner = SWERunner(
             timeout=args.timeout)
         r, traj = await runner.run(

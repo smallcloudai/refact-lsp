@@ -6,30 +6,54 @@ from refact.chat_client import print_block
 from refact.chat_client import print_messages
 
 from pathlib import Path
+from collections import Counter
 from typing import List, Set
 
 
-DONE_MESSAGE = "=====PATCH====="
 SYSTEM_MESSAGE = f"""
 You are Refact Dev, an auto coding assistant.
 
-You'll receive a problem statement with several solutions.
-Your aim is to choose one solution that more accurately solves the problem.
-Use tools to get access to the codebase. Use each tool exact in it's format do not add any extra args.
+You plan is to:
+- Look through the user's problem statement, given code context and the solutions.
+- Speculate about given solutions and choose one that perfectly solves the problem.
 
-A good strategy to solve the issue is:
-1. Build context. Before you move to the next step, make sure you collect all needed context: file names, code, etc.
-2. Speculate about given solutions and choose the best one. Your last message should start with {DONE_MESSAGE} mark and should contain solution name only (for example Solution 99).
+Your answer should contain speculation and result solution name (e.g. Solution 55, Solution 9, etc.)
+Result should be at the end of the answer.
+For example:
 
-Explain your plan briefly before calling the tools in parallel.
-IT IS FORBIDDEN TO JUST CALL TOOLS WITHOUT EXPLAINING. EXPLAIN FIRST! USE TOOLS IN PARALLEL!
+Speculation about solution
+...
+Result
+```
+Solution 99
+```
 """
 
 
 class ChooseSolutionStep(Step):
+    def __init__(self, choices: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._choices = choices
+
     @property
     def _tools(self) -> Set[str]:
         return set()
+
+    @staticmethod
+    def _extract_solution(message: chat_client.Message, n_solutions: int) -> int:
+        if message.role != "assistant":
+            raise RuntimeError(f"unexpected message role '{message.role}' for answer")
+        if not isinstance(message.content, str):
+            raise RuntimeError(f"unexpected content type '{type(message.content)}' for answer")
+        result_text = message.content.lower().split("result")[-1]
+        for line in result_text.split("\n"):
+            line = line.strip()
+            if not line.startswith("solution"):
+                continue
+            solution_idx = int(line.split("solution")[1].strip()) - 1
+            if 0 <= solution_idx < n_solutions:
+                return solution_idx
+        raise RuntimeError(f"can't extract solution from '{message.content}'")
 
     async def process(
             self,
@@ -54,6 +78,7 @@ class ChooseSolutionStep(Step):
                 model_patch,
             ])
 
+        # TODO: I'm not sure we need to add files that are not in given patches
         paths = ",".join([str(repo_path / filename) for filename in related_files])
         files_tool_call_dict = chat_client.ToolCallDict(
             id=chat_client.gen_function_call_id(),
@@ -64,24 +89,21 @@ class ChooseSolutionStep(Step):
             chat_client.Message(role="user", content="\n\n".join(user_message_parts)),
             chat_client.Message(role="assistant", finish_reason="tool_calls", tool_calls=[files_tool_call_dict]),
         ]
+        tool_messages = await self._query(messages, only_deterministic_messages=True)
+        assert len(tool_messages) == 1 and tool_messages[0].role == "tool"
+        messages.extend(tool_messages)
         self._trajectory.extend(print_messages(messages))
 
-        # NOTE: 1 step should be enough to solve the problem
-        for idx in range(self._max_depth):
-            self._trajectory.append(print_block("iteration", idx + 1))
-
-            new_messages = await self._query(messages)
+        counter = Counter()
+        for idx, new_messages in enumerate(await self._query_choices(messages, self._choices)):
+            self._trajectory.append(print_block("choice", idx + 1))
             self._trajectory.extend(print_messages(new_messages))
+            try:
+                counter.update([self._extract_solution(new_messages[-1], len(model_patches))])
+            except:
+                continue
 
-            last_message = messages[-1]
-            if last_message.role == "assistant" \
-                    and last_message.content \
-                    and DONE_MESSAGE in last_message.content:
-                result = messages[-1].content.split(DONE_MESSAGE)[1].strip()
-                for idx, model_patch in enumerate(model_patches, start=1):
-                    if str(idx) in result:
-                        return model_patch
-                raise RuntimeError("can't choose a solution")
-            messages.extend(new_messages)
+        if not counter:
+            raise RuntimeError("can't choose a solution")
 
-        raise RuntimeError(f"can't solve the problem with {self._max_depth} iterations")
+        return model_patches[counter.most_common()[0][0]]
