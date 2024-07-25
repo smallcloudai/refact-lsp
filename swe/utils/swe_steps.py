@@ -34,7 +34,7 @@ class SWERunner(AgentRunner):
         # step1: explore repo, find files that can be useful for the problem
         results["patched_file"] = filename
         results["patched_file_mentioned_in_problem"] = filename_mentioned(filename, problem_statement)
-        step1 = ExploreRepoStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.4)
+        step1 = ExploreRepoStep(base_url=base_url, model_name=MODEL, choices=5, temperature=0.4)
         try:
             traj.append(print_block("step", 1))
             results["found_files"] = await step1.process(
@@ -50,7 +50,7 @@ class SWERunner(AgentRunner):
             return results, "\n\n".join(traj)
 
         # step2: produce patches for the problem with given files from step1
-        step2 = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.8)
+        step2 = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=5, temperature=0.8)
         try:
             traj.append(print_block("step", 2))
             results["model_patches"] = await step2.process(
@@ -66,7 +66,7 @@ class SWERunner(AgentRunner):
             return results, "\n\n".join(traj)
 
         # step3: choose the best solution from the list of patches
-        step3 = ChooseSolutionStep(base_url=base_url, model_name=MODEL)
+        step3 = ChooseSolutionStep(base_url=base_url, model_name=MODEL, choices=5, temperature=0.4)
         try:
             traj.append(print_block("step", 3))
             results["model_patch"] = await step3.process(
