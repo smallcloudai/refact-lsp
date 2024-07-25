@@ -349,7 +349,7 @@ pub async fn handle_v1_list_docs(
         .cloned()
         .collect_vec();
 
-    let body = serde_json::to_string(&sources).map_err(|e| {
+    let body = serde_json::to_string_pretty(&sources).map_err(|e| {
         ScratchError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("json problem: {}", e),
