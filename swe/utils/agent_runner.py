@@ -103,7 +103,4 @@ class AgentRunner:
                         results["lsp_log_fn"] = lsp_log_fn
                         return results, trajectory
         except Exception as e:
-            raise e
-            return {
-                "error": f"run: {str(e) or traceback.format_exc()}",
-            }
+            return {"error": f"run: {str(e) or traceback.format_exc()}"}, ""

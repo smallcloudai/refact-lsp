@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 from swe.utils import AgentRunner
 from swe.utils import get_swe_bench_lite_instance
-from swe.steps import ExploreRepoStep, Locate
+from swe.steps import ExploreRepoStep
 from swe.utils.common import patched_file
 from swe.utils.common import filename_mentioned
 
@@ -37,7 +37,6 @@ class SWERunner(AgentRunner):
             results["patched_file_is_found"] = filename_mentioned(filename, "\n".join(results["found_files"]))
             results["to_change_file_is_found"] = filename_mentioned(filename, "\n".join(results["to_change_files"]))
         except Exception as e:
-            raise e
             results["error"] = f"step1: {type(e)} {str(e) or traceback.format_exc()}"
         results["model_name"] = step.model_name
         results["usage"] = step.usage
@@ -82,7 +81,6 @@ async def main():
         )
         results.update(**r, **results)
     except Exception as e:
-        raise e
         results["error"] = str(e) or traceback.format_exc()
 
     if args.output_dir is not None:

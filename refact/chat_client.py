@@ -443,6 +443,21 @@ def print_block(
     return message
 
 
+def print_exception(e: Exception, trace: bool = False) -> str:
+    def _wrap_color(s: str, color: str = "red") -> str:
+        return f"[bold {color}]{s}[/bold {color}]"
+
+    message_str = [f"EXCEPTION: {str(e) or type(e)}"]
+    console = Console()
+    console.print(_wrap_color(message_str[-1]))
+
+    if trace:
+        message_str.append(traceback.format_exc())
+        console.print(message_str[-1])
+
+    return "\n\n".join(message_str)
+
+
 def print_messages(
     messages: List[Message],
     also_print_to_console: bool = True,
