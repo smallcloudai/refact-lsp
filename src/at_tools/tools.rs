@@ -89,7 +89,7 @@ tools:
       - "scope"
 
   - name: "file"
-    description: "Read the file, the same as cat shell command, but skeletonizes files that are too large. Doesn't work on dirs."
+    description: "Read the file, the same as cat shell command, but skeletonizes files that are too large. Doesn't work on dirs or documentation."
     parameters:
       - name: "path"
         type: "string"
