@@ -26,7 +26,7 @@ class SWERunner(AgentRunner):
         filename: str = patched_file(kwargs["problem_patch"])
         results["patched_file"] = filename
         results["patched_file_mentioned_in_problem"] = filename_mentioned(filename, problem_statement)
-        step = ExploreRepoStep(base_url=base_url, model_name=MODEL, attempts=1)
+        step = ExploreRepoStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.4)
         try:
             results["found_files"] = await step.process(
                 problem_statement=problem_statement,

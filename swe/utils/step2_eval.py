@@ -25,7 +25,7 @@ class SWERunner(AgentRunner):
         results: Dict[str, Any] = dict()
         problem_statement = kwargs["problem_statement"]
         found_files = kwargs["found_files"]
-        step = ProducePatchStep(base_url=base_url, model_name=MODEL, attempts=3)
+        step = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.8)
         try:
             results["model_patches"] = await step.process(
                 problem_statement=problem_statement,
