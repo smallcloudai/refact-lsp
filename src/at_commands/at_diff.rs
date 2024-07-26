@@ -3,14 +3,13 @@ use std::path::PathBuf;
 use tracing::info;
 
 use async_trait::async_trait;
-use serde_json::json;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_file::AtParamFilePath;
 use crate::at_commands::execute_at::AtCommandMember;
-use crate::call_validation::{ContextEnum, DiffChunk, ChatMessage};
+use crate::call_validation::{ContextEnum, ChatMessage};
 use crate::files_in_workspace::detect_vcs_in_dir;
 
 
@@ -18,75 +17,31 @@ pub struct AtDiff {
     pub params: Vec<Arc<AMutex<dyn AtParam>>>,
 }
 
-impl AtDiff {
-    pub fn new() -> Self {
-        AtDiff { params: vec![] }
-    }
-}
-
-fn process_diff_line(line: &str, current_chunk: &mut DiffChunk) {
-    if line.starts_with('-') {
-        current_chunk.lines_remove.push_str(&line[1..]);
-        current_chunk.lines_remove.push('\n');
-    } else if line.starts_with('+') {
-        current_chunk.lines_add.push_str(&line[1..]);
-        current_chunk.lines_add.push('\n');
-    } else if line.starts_with(' ') {
-        current_chunk.lines_remove.push_str(&line[1..]);
-        current_chunk.lines_remove.push('\n');
-        current_chunk.lines_add.push_str(&line[1..]);
-        current_chunk.lines_add.push('\n');
-    }
-}
-
-fn process_diff_stdout(stdout: &str) -> Vec<DiffChunk> {
-    let mut diff_chunks = Vec::new();
-    let mut current_chunk = DiffChunk::default();
-    let mut file_name = String::new();
+fn process_diff_stdout(stdout: &str) -> Vec<String> {
+    let mut diff_pieces = Vec::new();
+    let mut current_piece = String::new();
     let mut in_diff_block = false;
 
     for line in stdout.lines() {
         if line.starts_with("diff --git") || line.starts_with("Index:") || line.starts_with("diff -r") {
-            file_name = line.split_whitespace().last().unwrap_or("").to_string();
             if in_diff_block {
-                diff_chunks.push(current_chunk);
+                diff_pieces.push(current_piece.clone());
+                current_piece.clear();
             }
-            current_chunk = DiffChunk {
-                file_name: file_name.clone(),
-                file_action: "edit".to_string(),
-                ..Default::default()
-            };
             in_diff_block = true;
-        } else if line.starts_with("@@") {
-            if !current_chunk.lines_remove.is_empty() || !current_chunk.lines_add.is_empty() {
-                current_chunk.lines_add = current_chunk.lines_add.trim_end_matches('\n').to_string();
-                current_chunk.lines_remove = current_chunk.lines_remove.trim_end_matches('\n').to_string();
-                diff_chunks.push(current_chunk);
-                current_chunk = DiffChunk {
-                    file_name: file_name.clone(),
-                    file_action: "edit".to_string(),
-                    ..Default::default()
-                };
-            }
-            let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() > 2 {
-                let l1_numbers = parts[1].split(',').collect::<Vec<_>>();
-                let l2_numbers = parts[2].split(',').collect::<Vec<_>>();
-                if !l1_numbers.is_empty() && l2_numbers.len() > 1 {
-                    current_chunk.line1 = l1_numbers[0].trim_start_matches('-').parse().unwrap_or(0);
-                    current_chunk.line2 = current_chunk.line1 + l2_numbers[1].trim_start_matches('+').trim_start_matches(',').parse().unwrap_or(0);
-                }
-            }
         }
-        process_diff_line(line, &mut current_chunk);
+        if in_diff_block {
+            current_piece.push_str(line);
+            current_piece.push('\n');
+        }
     }
-    if in_diff_block && (!current_chunk.lines_remove.is_empty() || !current_chunk.lines_add.is_empty()) {
-        diff_chunks.push(current_chunk);
+    if in_diff_block && !current_piece.is_empty() {
+        diff_pieces.push(current_piece);
     }
-    diff_chunks
+    diff_pieces
 }
 
-async fn execute_diff(vcs: &str, parent_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_diff(vcs: &str, parent_dir: &str, args: &[&str]) -> Result<Vec<String>, String> {
     let output = Command::new(vcs)
         .arg("diff")
         .args(args)
@@ -104,19 +59,19 @@ async fn execute_diff(vcs: &str, parent_dir: &str, args: &[&str]) -> Result<Vec<
     Ok(process_diff_stdout(&stdout))
 }
 
-async fn execute_git_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_git_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<String>, String> {
     execute_diff("git", parent_dir, args).await
 }
 
-async fn execute_svn_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_svn_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<String>, String> {
     execute_diff("svn", parent_dir, args).await
 }
 
-async fn execute_hg_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+async fn execute_hg_diff(parent_dir: &str, args: &[&str]) -> Result<Vec<String>, String> {
     execute_diff("hg", parent_dir, args).await
 }
 
-pub async fn execute_diff_for_vcs(parent_dir: &str, args: &[&str]) -> Result<Vec<DiffChunk>, String> {
+pub async fn execute_diff_for_vcs(parent_dir: &str, args: &[&str]) -> Result<Vec<String>, String> {
     if let Some(res) = detect_vcs_in_dir(&PathBuf::from(parent_dir)).await {
         match res {
             "git" => execute_git_diff(parent_dir, args).await,
@@ -131,8 +86,8 @@ pub async fn execute_diff_for_vcs(parent_dir: &str, args: &[&str]) -> Result<Vec
 
 pub fn text_on_clip(args: &Vec<AtCommandMember>) -> String {
     let text = match args.len() { 
-        0 => "executed: git diff".to_string(),
-        1 => format!("executed: git diff {}", args[0].text),
+        0 => "executed: diff".to_string(),
+        1 => format!("executed: diff {}", args[0].text),
         _ => "".to_string(),
     };
     text
@@ -197,11 +152,14 @@ impl AtCommand for AtDiff {
 
         info!("executed @diff {:?}", args.iter().map(|x|x.text.clone()).collect::<Vec<_>>().join(" "));
         
-        let message = ChatMessage::new(
-            "diff".to_string(),
-            json!(diff_chunks).to_string(),
-        );
-        Ok((vec![ContextEnum::ChatMessage(message)], text_on_clip(args)))
+        let mut results = vec![];
+        for chunk in diff_chunks {
+            results.push(ContextEnum::ChatMessage(ChatMessage::new(
+                "plain_text".to_string(), chunk
+            )));
+        }
+        
+        Ok((results, text_on_clip(args)))
     }
 
     fn depends_on(&self) -> Vec<String> {
@@ -209,7 +167,7 @@ impl AtCommand for AtDiff {
     }
 }
 
-async fn execute_diff_with_revs(parent_dir: &PathBuf, rev1: &str, rev2: &str, file_path: &PathBuf) -> Result<Vec<DiffChunk>, String> {
+async fn execute_diff_with_revs(parent_dir: &PathBuf, rev1: &str, rev2: &str, file_path: &PathBuf) -> Result<Vec<String>, String> {
     let mut command = match detect_vcs_in_dir(parent_dir).await {
         Some("git") => {
             let mut cmd = Command::new("git");
@@ -285,14 +243,16 @@ impl AtCommand for AtDiffRev {
         args.truncate(3);
         
         let diff_chunks = execute_diff_with_revs(&parent_path, &rev1.text, &rev2.text, &file_path).await?;
-        
-        let message = ChatMessage::new(
-            "diff".to_string(),
-            json!(diff_chunks).to_string(),
-        );
+
+        let mut results = vec![];
+        for chunk in diff_chunks {
+            results.push(ContextEnum::ChatMessage(ChatMessage::new(
+                "plain_text".to_string(), chunk
+            )));
+        }
 
         info!("executed @diff-rev {} {} {:?}", rev1.text, rev2.text, file_path);
-        Ok((vec![ContextEnum::ChatMessage(message)], text_on_clip(args)))
+        Ok((results, text_on_clip(args)))
     }
 
     fn depends_on(&self) -> Vec<String> {
