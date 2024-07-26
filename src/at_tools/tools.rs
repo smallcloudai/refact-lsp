@@ -35,7 +35,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         ("patch".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_patch::tool::ToolPatch::new()) as Box<dyn Tool + Send>))),
         // ("save_knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttSaveKnowledge{}) as Box<dyn Tool + Send>))),
         ("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_knowledge::AttGetKnowledge{}) as Box<dyn Tool + Send>))),
-        // ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn Tool + Send>))),
+        ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn Tool + Send>))),
         ("web".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_web::AttWeb{}) as Box<dyn Tool + Send>))),
         ("files_skeleton".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_files_skeleton::AttFilesSkeleton{}) as Box<dyn Tool + Send>))),
     ]);
@@ -163,6 +163,15 @@ tools:
         description: "String that contains list of file names separated by commas. Use absolute file paths."
     parameters_required:
       - "paths"
+      
+  - name: "diff"
+    description: "Perform a `vcs` diff operation. Provide a project path to list all changes or a file_path to show changes of this file only. Hint: use tree function to list projects available."
+    parameters:
+      - name: "path"
+        type: "string"
+        description: "project path or file path"
+    parameters_required:
+      - "path"
 "####;
 
 #[allow(dead_code)]
@@ -175,14 +184,6 @@ const NOT_READY_TOOLS: &str = r####"
         description: "Put your intent there: 'debug file1.cpp', 'install project1', 'gather info about MyClass'"
     parameters_required:
       - "im_going_to_do"
-
-  - name: "diff"
-    description: "Perform a diff operation. Can be used to get git diff for a project (no arguments) or git diff for a specific file (file_path)"
-    parameters:
-      - name: "file_path"
-        type: "string"
-        description: "Path to the specific file to diff (optional)."
-    parameters_required:
 "####;
 
 
