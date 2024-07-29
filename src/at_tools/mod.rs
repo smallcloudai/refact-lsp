@@ -14,3 +14,4 @@ mod att_web;
 mod att_tree;
 pub mod att_knowledge;
 mod att_files_skeleton;
+mod subchat;
