@@ -7,8 +7,7 @@ use tracing::{info, warn};
 
 use tokenizers::Tokenizer;
 
-use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatPost, ChatUsage, SamplingParameters};
+use crate::call_validation::{ChatMessage, ChatPost, ChatToolCall, ChatUsage, SamplingParameters};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -33,19 +32,23 @@ fn limit_messages(
             messages_take.push(idx)
         }
     }
-    
     let mut messages_new = vec![];
     for (idx, m) in messages.iter().cloned().enumerate().rev() {
         if messages_take.contains(&idx) {
             messages_new.push(m.clone());
+            println!("keeping message_idx (S||U): {}", idx);
             continue;
         }
         let tokens = 3 + count_tokens(&t_guard, m.content.as_str());
         if tokens_used + tokens < tokens_limit {
             messages_new.push(m.clone());
+            println!("keeping message_idx: {}", idx);
+        } else {
+            println!("dropping message_idx: {} (OOT)", idx);
         }
     }
-    
+    messages_new.reverse();
+
     // msg that called a tool was dropped -> drop tool
     let tool_call_ids = messages_new.iter().filter_map(|x|x.tool_calls.clone()).flatten().map(|x|x.id).collect::<HashSet<_>>();
     messages_new.retain(|x| x.tool_call_id.is_empty() || tool_call_ids.contains(&x.tool_call_id));
@@ -54,7 +57,7 @@ fn limit_messages(
 }
 
 async fn create_chat_post_and_scratchpad(
-    ccx: &mut AtCommandsContext,
+    global_context: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
     messages: Vec<&ChatMessage>,
     stream: bool,
@@ -64,14 +67,14 @@ async fn create_chat_post_and_scratchpad(
     tool_choice: Option<String>,
 ) -> Result<(ChatPost, Box<dyn ScratchpadAbstract>), String> {
     let caps = try_load_caps_quickly_if_not_present(
-        ccx.global_context.clone(), 0,
+        global_context.clone(), 0,
     ).await.map_err(|e| { 
         warn!("no caps: {:?}", e);
         "no caps".to_string()
     })?;
 
     let tokenizer = cached_tokenizers::cached_tokenizer(
-        caps.clone(), ccx.global_context.clone(), model_name.to_string(),
+        caps.clone(), global_context.clone(), model_name.to_string(),
     ).await?;
 
     let mut chat_post = ChatPost {
@@ -102,15 +105,16 @@ async fn create_chat_post_and_scratchpad(
         tokenizer,
         messages,
         max_new_tokens,
-        chat_post.max_tokens,
+        n_ctx,
     )?;
 
+    // chat_post.messages = messages.iter().cloned().cloned().collect::<Vec<_>>();
     chat_post.messages = messages;
     chat_post.max_tokens = n_ctx;
     chat_post.scratchpad = scratchpad_name.clone();
     
     let scratchpad = scratchpads::create_chat_scratchpad(
-        ccx.global_context.clone(),
+        global_context.clone(),
         caps,
         model_name.to_string(),
         &chat_post,
@@ -134,7 +138,7 @@ async fn chat_interaction_non_stream(
     chat_post: &ChatPost,
     client: Client,
     api_key: &String,
-) -> Result<((String, Option<ChatUsage>)), String> {
+) -> Result<(Vec<ChatMessage>, Option<ChatUsage>), String> {
     let t1 = std::time::Instant::now();
     let messages = crate::restream::scratchpad_interaction_not_stream_json(
         global_context.clone(),
@@ -151,7 +155,9 @@ async fn chat_interaction_non_stream(
         "network error communicating with the model (2)".to_string()
     })?;
     info!("non stream generation took {:?}ms", t1.elapsed().as_millis() as i32);
-
+    
+    // println!("messages: {:#?}", messages);
+    
     let usage_mb = messages.get("usage")
         .and_then(|value| match value {
             Value::Object(o) => Some(o),
@@ -167,27 +173,62 @@ async fn chat_interaction_non_stream(
                 None
             }
         });
-    
-    let choice0_message_content = messages["choices"]
-        .as_array()
+
+    let choice0_msg = messages["choices"].as_array()
         .and_then(|array| array.get(0))
         .and_then(|choice0| choice0.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_str());
+        .ok_or(
+        "error parsing model's output: choice0.message doesn't exist".to_string()
+    )?;
+
+    let det_messages = messages.get("deterministic_messages")
+        .and_then(|value| value.as_array())
+        .and_then(|arr| {
+            serde_json::from_value::<Vec<ChatMessage>>(Value::Array(arr.clone())).ok()
+        }).unwrap_or_else(Vec::new);
     
-    match choice0_message_content {
-        Some(content) => Ok((content.to_string(), usage_mb)),
-        None => Err("error parsing model's output: choice[0].message.content doesn't exist or is not a string".to_string()),
-    }
+    let (role, content, tool_calls, tool_call_id) = {
+        (
+            choice0_msg.get("role")
+                .and_then(|v| v.as_str())
+                .ok_or("error parsing model's output: choice0.message.role doesn't exist or is not a string".to_string())?.to_string(),
+            choice0_msg.get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("").to_string(),
+            choice0_msg.get("tool_calls")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    serde_json::from_value::<Vec<ChatToolCall>>(Value::Array(arr.clone()))
+                        .map_err(|_| "error parsing model's output: choice0.message.tool_calls is not a valid ChatToolCall array".to_string())
+                        .ok()
+                }),
+            choice0_msg.get("tool_call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("").to_string()
+        )
+    };
+    let msg = ChatMessage {
+        role,
+        content,
+        tool_calls,
+        tool_call_id,
+        ..Default::default()
+    };
+
+    let mut results = vec![];
+    results.extend(det_messages);
+    results.push(msg);
+    
+    Ok((results, usage_mb))
 }
 
 async fn chat_interaction(
-    ccx: &mut AtCommandsContext,
+    global_context: Arc<ARwLock<GlobalContext>>,
     mut spad: Box<dyn ScratchpadAbstract>,
     chat_post: &mut ChatPost,
-) -> Result<(String, Option<ChatUsage>), String> {
+) -> Result<(Vec<ChatMessage>, Option<ChatUsage>), String> {
     let (client, api_key) = {
-        let cx_locked = ccx.global_context.write().await;
+        let cx_locked = global_context.write().await;
         (cx_locked.http_client.clone(), cx_locked.cmdline.api_key.clone())
     };
     let prompt = spad.prompt(chat_post.max_tokens, &mut chat_post.parameters).await?;
@@ -197,7 +238,7 @@ async fn chat_interaction(
         todo!();
     } else {
         Ok(chat_interaction_non_stream(
-            ccx.global_context.clone(),
+            global_context.clone(),
             spad,
             &prompt,
             chat_post,
@@ -207,10 +248,12 @@ async fn chat_interaction(
     }
 }
 
-async fn execute_subchat(
-    ccx: &mut AtCommandsContext,
+pub async fn execute_subchat(
+    global_context: Arc<ARwLock<GlobalContext>>,
     messages: Vec<ChatMessage>,
     depth: usize,
+    tools: Option<Vec<Value>>,
+    tool_choice: Option<String>,
     max_new_tokens: usize,
 ) -> Result<Vec<ChatMessage>, String> {
     
@@ -226,32 +269,29 @@ async fn execute_subchat(
                 break;
             }
         }
-        // TODO: support tools
         // TODO: support stream = true
-        // TODO: support N
         let (mut chat_post, spad) = create_chat_post_and_scratchpad(
-            ccx, "gpt-4o-mini",
+            global_context.clone(), "gpt-4o",
             messages.iter().collect::<Vec<_>>(),
-            false, None, max_new_tokens, None, None
+            false, Some(0.2), max_new_tokens, tools.clone(), tool_choice.clone()
         ).await?;
         messages = chat_post.messages.clone();
 
-        let (chat_response, usage_mb) = chat_interaction(ccx, spad, &mut chat_post).await?;
+        let (chat_response_msgs, usage_mb) = chat_interaction(global_context.clone(), spad, &mut chat_post).await?;
         if let Some(usage) = usage_mb {
             chat_usage.completion_tokens += usage.completion_tokens;
             chat_usage.prompt_tokens += usage.prompt_tokens;
             chat_usage.total_tokens += usage.total_tokens;
         }
         
-        messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: chat_response,
-            tool_calls: None,
-            tool_call_id: "".to_string(),
-            ..Default::default()
-        });
+        messages.extend(chat_response_msgs);
+
         step_n += 1;
     }
-    
+    if let Some(last_message) = messages.last_mut() {
+        if chat_usage.total_tokens != 0 {
+            last_message.usage = Some(chat_usage);
+        }
+    }
     Ok(messages)
 }
