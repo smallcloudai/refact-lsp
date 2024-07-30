@@ -12,13 +12,15 @@ use crate::global_context::GlobalContext;
 
 #[derive(Deserialize)]
 struct SubChatPost {
+    model_name: String,
     messages: Vec<ChatMessage>,
     depth: usize,
     #[serde(default)]
     tools: Option<Vec<Value>>,
     #[serde(default)]
     tool_choice: Option<String>,
-    max_new_tokens: usize,
+    #[serde(default)]
+    wrap_up_tokens_cnt: Option<usize>,
 }
 
 pub async fn handle_v1_subchat(
@@ -30,11 +32,12 @@ pub async fn handle_v1_subchat(
     
     let new_messages = execute_subchat(
         global_context.clone(), 
+        post.model_name.as_str(),
         post.messages.clone(),
         post.depth,
         post.tools,
         post.tool_choice,
-        post.max_new_tokens,
+        post.wrap_up_tokens_cnt,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
     
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();

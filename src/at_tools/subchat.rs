@@ -15,12 +15,16 @@ use crate::{cached_tokenizers, scratchpads};
 use crate::scratchpads::chat_utils_rag::count_tokens;
 
 
+const TEMP: f32 = 0.2;
+const MAX_NEW_TOKENS: usize = 4096;
+
+
 fn limit_messages(
     t: Arc<RwLock<Tokenizer>>,
     messages: Vec<&ChatMessage>,
     max_new_tokens: usize,
     context_size: usize,
-) -> Result<Vec<ChatMessage>, String> {
+) -> Result<(Vec<ChatMessage>, usize), String> {
     let tokens_limit= context_size.saturating_sub(max_new_tokens);
     let mut tokens_used = 0;
     let t_guard = t.read().unwrap();
@@ -42,9 +46,10 @@ fn limit_messages(
         let tokens = 3 + count_tokens(&t_guard, m.content.as_str());
         if tokens_used + tokens < tokens_limit {
             messages_new.push(m.clone());
-            println!("keeping message_idx: {}", idx);
+            tokens_used += tokens;
+            println!("keeping message_idx: {}: +{} tokens", idx, tokens);
         } else {
-            println!("dropping message_idx: {} (OOT)", idx);
+            println!("dropping message_idx: {} (OOT): {} tokens", idx, tokens);
         }
     }
     messages_new.reverse();
@@ -53,7 +58,7 @@ fn limit_messages(
     let tool_call_ids = messages_new.iter().filter_map(|x|x.tool_calls.clone()).flatten().map(|x|x.id).collect::<HashSet<_>>();
     messages_new.retain(|x| x.tool_call_id.is_empty() || tool_call_ids.contains(&x.tool_call_id));
     
-    Ok(messages_new)
+    Ok((messages_new, tokens_used))
 }
 
 async fn create_chat_post_and_scratchpad(
@@ -65,6 +70,7 @@ async fn create_chat_post_and_scratchpad(
     max_new_tokens: usize,
     tools: Option<Vec<Value>>,
     tool_choice: Option<String>,
+    wrap_up_tokens_cnt_mb: Option<usize>,
 ) -> Result<(ChatPost, Box<dyn ScratchpadAbstract>), String> {
     let caps = try_load_caps_quickly_if_not_present(
         global_context.clone(), 0,
@@ -96,17 +102,31 @@ async fn create_chat_post_and_scratchpad(
         chat_id: "".to_string(),
     };
 
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, mut supports_tools) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await?;
     
-    let messages = limit_messages(
+    let (mut messages, tok_used) = limit_messages(
         tokenizer,
         messages,
         max_new_tokens,
         n_ctx,
     )?;
+    
+    if let Some(wrap_up_tokens_cnt) = wrap_up_tokens_cnt_mb {
+        if tok_used > wrap_up_tokens_cnt {
+            if let Some(last_message) = messages.last_mut() {
+                last_message.tool_calls = None;
+            }
+            messages.push(ChatMessage::new(
+                "user".to_string(), "You are out of tokens for additional context. You must formulate your answer right now.".to_string(),
+            ));
+            chat_post.tools = None;
+            chat_post.tool_choice = None;
+            supports_tools = false;
+        }
+    }
 
     // chat_post.messages = messages.iter().cloned().cloned().collect::<Vec<_>>();
     chat_post.messages = messages;
@@ -127,7 +147,8 @@ async fn create_chat_post_and_scratchpad(
     Ok((chat_post, scratchpad))
 }
 
-async fn chat_iteraction_stream() {
+#[allow(dead_code)]
+async fn chat_interaction_stream() {
     todo!();
 }
 
@@ -250,11 +271,12 @@ async fn chat_interaction(
 
 pub async fn execute_subchat(
     global_context: Arc<ARwLock<GlobalContext>>,
+    model_name: &str,
     messages: Vec<ChatMessage>,
-    depth: usize,
+    max_depth: usize,
     tools: Option<Vec<Value>>,
     tool_choice: Option<String>,
-    max_new_tokens: usize,
+    wrap_up_tokens_cnt: Option<usize>, // when reached max_tokens_allowed -> insert "user" with text "wrap it up, tokens are over"; tools are disabled
 ) -> Result<Vec<ChatMessage>, String> {
     
     let mut messages = messages;
@@ -262,7 +284,7 @@ pub async fn execute_subchat(
     let mut step_n = 0;
     loop {
         if let Some(last_message) = messages.last() {
-            if step_n >= depth {
+            if step_n >= max_depth {
                 break;
             }
             if last_message.role == "assistant" && last_message.tool_calls.is_none() {
@@ -271,9 +293,12 @@ pub async fn execute_subchat(
         }
         // TODO: support stream = true
         let (mut chat_post, spad) = create_chat_post_and_scratchpad(
-            global_context.clone(), "gpt-4o",
+            global_context.clone(), 
+            model_name,
             messages.iter().collect::<Vec<_>>(),
-            false, Some(0.2), max_new_tokens, tools.clone(), tool_choice.clone()
+            false, Some(TEMP), MAX_NEW_TOKENS, 
+            tools.clone(), tool_choice.clone(),
+            wrap_up_tokens_cnt,
         ).await?;
         messages = chat_post.messages.clone();
 
