@@ -12,6 +12,7 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 
 const TEMPERATURE: f32 = 0.2;
 const MAX_NEW_TOKENS: usize = 4096;
+const ALLOW_AT: bool = true;
 
 
 async fn create_chat_post_and_scratchpad(
@@ -68,7 +69,7 @@ async fn create_chat_post_and_scratchpad(
         &chat_post,
         &scratchpad_name,
         &scratchpad_patch,
-        false,
+        ALLOW_AT,
         supports_tools,
     ).await?;
 
@@ -105,7 +106,7 @@ async fn chat_interaction_non_stream(
     })?;
     info!("non stream generation took {:?}ms", t1.elapsed().as_millis() as i32);
 
-    // println!("messages: {:#?}", messages);
+    info!("j: {:#?}", j);
 
     let usage_mb = j.get("usage")
         .and_then(|value| match value {
@@ -236,13 +237,16 @@ pub async fn execute_subchat(
             tools.clone(),
             tool_choice.clone(),
         ).await?;
-
+        info!("messages: {:?}", messages);
         let chat_response_msgs = chat_interaction(global_context.clone(), spad, &mut chat_post).await?;
-        while let Some(message) = messages.last() {
-            if message.role != "user" {
-                break;
+        info!("chat_response_msgs: {:?}", chat_response_msgs);
+        if ALLOW_AT {
+            while let Some(message) = messages.last() {
+                if message.role != "user" {
+                    break;
+                }
+                messages.pop();
             }
-            messages.pop();
         }
         messages.extend(chat_response_msgs);
 
