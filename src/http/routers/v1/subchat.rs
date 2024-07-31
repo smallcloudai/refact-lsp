@@ -3,7 +3,6 @@ use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
 use serde::Deserialize;
-use serde_json::Value;
 use tokio::sync::RwLock as ARwLock;
 use crate::at_tools::subchat::execute_subchat;
 use crate::call_validation::ChatMessage;
@@ -16,10 +15,7 @@ struct SubChatPost {
     messages: Vec<ChatMessage>,
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,
-    #[serde(default)]
-    tools: Option<Vec<Value>>,
-    #[serde(default)]
-    tool_choice: Option<String>,
+    tools_turn_on: Vec<String>,
 }
 
 pub async fn handle_v1_subchat(
@@ -32,11 +28,10 @@ pub async fn handle_v1_subchat(
     let new_messages = execute_subchat(
         global_context.clone(),
         post.model_name.as_str(),
-        post.messages.clone(),
+        &post.messages.clone(),
+        &post.tools_turn_on,
         post.wrap_up_depth,
         post.wrap_up_tokens_cnt,
-        post.tools,
-        post.tool_choice,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();

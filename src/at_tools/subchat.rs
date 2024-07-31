@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::collections::HashSet;
 use reqwest::Client;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::Value;
@@ -23,6 +24,7 @@ async fn create_chat_post_and_scratchpad(
     max_new_tokens: usize,
     tools: Option<Vec<Value>>,
     tool_choice: Option<String>,
+    only_deterministic_messages: bool,
 ) -> Result<(ChatPost, Box<dyn ScratchpadAbstract>), String> {
     let caps = try_load_caps_quickly_if_not_present(
         global_context.clone(), 0,
@@ -46,7 +48,7 @@ async fn create_chat_post_and_scratchpad(
         max_tokens: 0,
         tools,
         tool_choice,
-        only_deterministic_messages: false,
+        only_deterministic_messages: only_deterministic_messages,
         chat_id: "".to_string(),
     };
 
@@ -199,16 +201,61 @@ async fn chat_interaction(
     }
 }
 
-pub async fn execute_subchat(
-    global_context: Arc<ARwLock<GlobalContext>>,
+pub async fn execute_subchat_single_iteration(
+    gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
-    messages: Vec<ChatMessage>,
+    messages: &Vec<ChatMessage>,
+    tools_turn_on: &Vec<String>,
+    tool_choice: Option<String>,
+    only_deterministic_messages: bool,
+) -> Result<Vec<ChatMessage>, String> {
+    // this ignores customized tools
+    let tools_turned_on_by_cmdline = crate::at_tools::tools::at_tools_merged_and_filtered(gcx.clone()).await.keys().cloned().collect::<Vec<_>>();
+    let tools_turn_on_set: HashSet<String> = tools_turn_on.iter().cloned().collect();
+    let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.into_iter().collect();
+    let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
+    let tools_compiled_in_only = crate::at_tools::tools::tools_compiled_in(&tools_on_intersection).unwrap_or_else(|e|{
+        tracing::error!("Error loading compiled_in_tools: {:?}", e);
+        vec![]
+    });
+    let tools = tools_compiled_in_only.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>();
+    info!("tools_turned_on_by_cmdline_set {:?}", tools_turned_on_by_cmdline_set);
+    info!("tools_turn_on {:?}", tools_turn_on);
+    info!("XXXX {:?}", tools);
+
+    let (mut chat_post, spad) = create_chat_post_and_scratchpad(
+        gcx.clone(),
+        model_name,
+        messages.iter().collect::<Vec<_>>(),
+        Some(TEMPERATURE),
+        MAX_NEW_TOKENS,
+        Some(tools),
+        tool_choice.clone(),
+        only_deterministic_messages,
+    ).await?;
+    let chat_response_msgs = chat_interaction(gcx.clone(), spad, &mut chat_post).await?;
+    let mut result = messages.clone();
+    if ALLOW_AT {
+        while let Some(message) = result.last() {
+            if message.role != "user" {
+                break;
+            }
+            result.pop();
+        }
+    }
+    result.extend(chat_response_msgs);
+    Ok(result)
+}
+
+pub async fn execute_subchat(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    model_name: &str,
+    messages: &Vec<ChatMessage>,
+    tools_turn_on: &Vec<String>,
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,  // when reached wrap_up_tokens_cnt -> insert "user" with text "wrap it up, tokens are over"; tools are disabled
-    tools: Option<Vec<Value>>,
-    tool_choice: Option<String>,
 ) -> Result<Vec<ChatMessage>, String> {
-    let mut messages = messages;
+    let mut messages = messages.clone();
     // let mut chat_usage = ChatUsage { ..Default::default() };
     let mut step_n = 0;
     loop {
@@ -228,28 +275,14 @@ pub async fn execute_subchat(
                 }
             }
         }
-        let (mut chat_post, spad) = create_chat_post_and_scratchpad(
-            global_context.clone(),
+        messages = execute_subchat_single_iteration(
+            gcx.clone(),
             model_name,
-            messages.iter().collect::<Vec<_>>(),
-            Some(TEMPERATURE),
-            MAX_NEW_TOKENS,
-            tools.clone(),
-            tool_choice.clone(),
+            &messages,
+            tools_turn_on,
+            Some("auto".to_string()),
+            false,
         ).await?;
-        info!("messages: {:?}", messages);
-        let chat_response_msgs = chat_interaction(global_context.clone(), spad, &mut chat_post).await?;
-        info!("chat_response_msgs: {:?}", chat_response_msgs);
-        if ALLOW_AT {
-            while let Some(message) = messages.last() {
-                if message.role != "user" {
-                    break;
-                }
-                messages.pop();
-            }
-        }
-        messages.extend(chat_response_msgs);
-
         step_n += 1;
     }
     Ok(messages)
