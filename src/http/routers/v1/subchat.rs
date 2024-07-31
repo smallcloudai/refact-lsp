@@ -14,13 +14,12 @@ use crate::global_context::GlobalContext;
 struct SubChatPost {
     model_name: String,
     messages: Vec<ChatMessage>,
-    depth: usize,
+    wrap_up_depth: usize,
+    wrap_up_tokens_cnt: usize,
     #[serde(default)]
     tools: Option<Vec<Value>>,
     #[serde(default)]
     tool_choice: Option<String>,
-    #[serde(default)]
-    wrap_up_tokens_cnt: Option<usize>,
 }
 
 pub async fn handle_v1_subchat(
@@ -29,17 +28,17 @@ pub async fn handle_v1_subchat(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<SubChatPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    
+
     let new_messages = execute_subchat(
-        global_context.clone(), 
+        global_context.clone(),
         post.model_name.as_str(),
         post.messages.clone(),
-        post.depth,
+        post.wrap_up_depth,
+        post.wrap_up_tokens_cnt,
         post.tools,
         post.tool_choice,
-        post.wrap_up_tokens_cnt,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
-    
+
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();
     Ok(
         Response::builder()
