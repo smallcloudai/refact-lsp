@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use reqwest::Client;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::Value;
-use tracing::{info, warn};
-
+use tracing::{error, info, warn};
+use crate::at_tools::tools::{at_tools_merged_and_filtered, tools_compiled_in};
 use crate::call_validation::{ChatMessage, ChatPost, ChatToolCall, ChatUsage, SamplingParameters};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
@@ -48,7 +48,7 @@ async fn create_chat_post_and_scratchpad(
         max_tokens: 0,
         tools,
         tool_choice,
-        only_deterministic_messages: only_deterministic_messages,
+        only_deterministic_messages,
         chat_id: "".to_string(),
     };
 
@@ -58,7 +58,7 @@ async fn create_chat_post_and_scratchpad(
     ).await?;
 
     if !supports_tools {
-        tracing::warn!("supports_tools is false");
+        warn!("supports_tools is false");
     }
 
     chat_post.max_tokens = n_ctx;
@@ -103,13 +103,11 @@ async fn chat_interaction_non_stream(
         &chat_post.parameters,
         chat_post.only_deterministic_messages,
     ).await.map_err(|e| {
-        warn!("network error communicating with the (2): {:?}", e);
-        "network error communicating with the model (2)".to_string()
+        warn!("network error communicating with the model (2): {:?}", e);
+        format!("network error communicating with the model (2): {:?}", e)
     })?;
     info!("non stream generation took {:?}ms", t1.elapsed().as_millis() as i32);
-
-    info!("j: {:#?}", j);
-
+    
     let usage_mb = j.get("usage")
         .and_then(|value| match value {
             Value::Object(o) => Some(o),
@@ -210,18 +208,17 @@ pub async fn execute_subchat_single_iteration(
     only_deterministic_messages: bool,
 ) -> Result<Vec<ChatMessage>, String> {
     // this ignores customized tools
-    let tools_turned_on_by_cmdline = crate::at_tools::tools::at_tools_merged_and_filtered(gcx.clone()).await.keys().cloned().collect::<Vec<_>>();
+    let tools_turned_on_by_cmdline = at_tools_merged_and_filtered(gcx.clone()).await.keys().cloned().collect::<Vec<_>>();
     let tools_turn_on_set: HashSet<String> = tools_turn_on.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.into_iter().collect();
     let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
-    let tools_compiled_in_only = crate::at_tools::tools::tools_compiled_in(&tools_on_intersection).unwrap_or_else(|e|{
-        tracing::error!("Error loading compiled_in_tools: {:?}", e);
+    let tools_compiled_in_only = tools_compiled_in(&tools_on_intersection).unwrap_or_else(|e|{
+        error!("Error loading compiled_in_tools: {:?}", e);
         vec![]
     });
     let tools = tools_compiled_in_only.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>();
     info!("tools_turned_on_by_cmdline_set {:?}", tools_turned_on_by_cmdline_set);
     info!("tools_turn_on {:?}", tools_turn_on);
-    info!("XXXX {:?}", tools);
 
     let (mut chat_post, spad) = create_chat_post_and_scratchpad(
         gcx.clone(),
@@ -259,18 +256,20 @@ pub async fn execute_subchat(
     // let mut chat_usage = ChatUsage { ..Default::default() };
     let mut step_n = 0;
     loop {
-        let last_message = messages.last().unwrap();
+        let last_message = messages.last_mut().unwrap();
         if last_message.role == "assistant" && last_message.tool_calls.is_none() {
             // don't have tool calls, exit the loop unconditionally, model thinks it has finished the work
             break;
         }
-        if last_message.role == "assistant" && !last_message.tool_calls.is_none() {
+        if last_message.role == "assistant" && last_message.tool_calls.is_some() {
             // have tool calls, let's see if we need to wrap up or not
             if step_n >= wrap_up_depth {
+                last_message.tool_calls = None;
                 break;
             }
             if let Some(usage) = &last_message.usage {
                 if usage.prompt_tokens + usage.completion_tokens > wrap_up_tokens_cnt {
+                    last_message.tool_calls = None;
                     break;
                 }
             }
