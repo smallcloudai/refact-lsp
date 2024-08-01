@@ -28,8 +28,8 @@ pub async fn handle_v1_subchat(
     let new_messages = execute_subchat(
         global_context.clone(),
         post.model_name.as_str(),
-        &post.messages.clone(),
-        &post.tools_turn_on,
+        post.messages,
+        post.tools_turn_on,
         post.wrap_up_depth,
         post.wrap_up_tokens_cnt,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;

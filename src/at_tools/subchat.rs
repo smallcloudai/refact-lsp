@@ -202,8 +202,8 @@ async fn chat_interaction(
 pub async fn execute_subchat_single_iteration(
     gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
-    messages: &Vec<ChatMessage>,
-    tools_turn_on: &Vec<String>,
+    messages: Vec<ChatMessage>,
+    tools_turn_on: Vec<String>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
 ) -> Result<Vec<ChatMessage>, String> {
@@ -247,8 +247,8 @@ pub async fn execute_subchat_single_iteration(
 pub async fn execute_subchat(
     gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
-    messages: &Vec<ChatMessage>,
-    tools_turn_on: &Vec<String>,
+    messages: Vec<ChatMessage>,
+    tools_turn_on: Vec<String>,
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,  // when reached wrap_up_tokens_cnt -> insert "user" with text "wrap it up, tokens are over"; tools are disabled
 ) -> Result<Vec<ChatMessage>, String> {
@@ -281,8 +281,8 @@ pub async fn execute_subchat(
             messages = execute_subchat_single_iteration(
                 gcx.clone(),
                 model_name,
-                &messages,
-                tools_turn_on,
+                messages.clone(),
+                tools_turn_on.clone(),
                 Some("auto".to_string()),
                 false,
             ).await?;
