@@ -5,7 +5,7 @@ use tokio::sync::RwLock as ARwLock;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::at_tools::subchat::execute_subchat;
+use crate::at_tools::subchat::{execute_subchat, execute_subchat_single_iteration};
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::global_context::GlobalContext;
@@ -19,10 +19,10 @@ impl Tool for AttRelevantFiles {
         let problem = ccx.messages.iter().filter(|m| m.role == "user").last().map(|x|x.content.clone()).ok_or(
             "execute_subchat: unable to find user problem description".to_string()
         )?;
-        
+
         let res = find_relevant_files(ccx.global_context.clone(), problem.as_str()).await?;
         let relevant_files = res.output.keys().cloned().collect::<Vec<String>>();
-        
+
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
@@ -41,11 +41,13 @@ impl Tool for AttRelevantFiles {
 
 
 const RF_OUTPUT_FILES: usize = 6;
-const RF_ATTEMPTS: usize = 3;
+const RF_ATTEMPTS: usize = 1;
+const RF_WRAP_UP_DEPTH: usize = 5;
+const RF_WRAP_UP_TOKENS_CNT: usize = 8000;
 
 
 async fn find_relevant_files(
-    global_context: Arc<ARwLock<GlobalContext>>,
+    gcx: Arc<ARwLock<GlobalContext>>,
     user_query: &str,
 ) -> Result<PleaseWriteMem, String> {
     let sys = RF_SYSTEM_PROMPT
@@ -58,36 +60,43 @@ async fn find_relevant_files(
 
     let tools_turn_on = vec!["definition", "references", "tree", "knowledge", "file", "search"].iter().map(|x|x.to_string()).collect();
 
-    let mut sub_conversation = execute_subchat(
-        global_context.clone(),
-        "gpt-4o",
-        &messages,
-        &tools_turn_on,
-        RF_ATTEMPTS,
-        8192,
-    ).await?;
+    // for strategy:
+        let mut sub_conversation = execute_subchat(
+            gcx.clone(),
+            "gpt-4o-mini",
+            &messages,
+            &tools_turn_on,
+            RF_WRAP_UP_DEPTH,
+            RF_WRAP_UP_TOKENS_CNT,
+            // result prompt
+        ).await?;  // don't wait
 
+    // wait all strategies
+
+    // move into execute_subchat
     sub_conversation.push(ChatMessage::new("user".to_string(), PLEASE_WRITE_MEM.to_string()));
-
-    let results = execute_subchat(
-        global_context.clone(),
-        "gpt-4o",
+    let results = execute_subchat_single_iteration(
+        gcx.clone(),
+        "gpt-4o-mini",
         &sub_conversation,
         &vec![],
-        1,
-        8192,
+        Some("none".to_string()),
+        false,
     ).await?;
 
-    let result_content = results.last().map(|m| m.content.to_string()).ok_or_else(|| "find_relevant_files: no results".to_string())?;
+    // reduce execute_subchat_single_iteration
+    // write prompt
 
+    // parse reduce result
+    let result_content = results.last().map(|m| m.content.to_string()).ok_or_else(|| "find_relevant_files: no results".to_string())?;
     let mem: PleaseWriteMem = match serde_json::from_str(&result_content) {
         Ok(mem) => mem,
         Err(e) => {
             sub_conversation.push(ChatMessage::new("user".to_string(), format!("find_relevant_files: cannot parse result: {}. Try again.", e)));
 
             let retry_results = execute_subchat(
-                global_context.clone(),
-                "gpt-4o",
+                gcx.clone(),
+                "gpt-4o-mini",
                 &sub_conversation,
                 &vec![],
                 1,

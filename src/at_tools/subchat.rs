@@ -107,7 +107,7 @@ async fn chat_interaction_non_stream(
         format!("network error communicating with the model (2): {:?}", e)
     })?;
     info!("non stream generation took {:?}ms", t1.elapsed().as_millis() as i32);
-    
+
     let usage_mb = j.get("usage")
         .and_then(|value| match value {
             Value::Object(o) => Some(o),
@@ -252,37 +252,44 @@ pub async fn execute_subchat(
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,  // when reached wrap_up_tokens_cnt -> insert "user" with text "wrap it up, tokens are over"; tools are disabled
 ) -> Result<Vec<ChatMessage>, String> {
-    let mut messages = messages.clone();
-    // let mut chat_usage = ChatUsage { ..Default::default() };
-    let mut step_n = 0;
-    loop {
-        let last_message = messages.last_mut().unwrap();
-        if last_message.role == "assistant" && last_message.tool_calls.is_none() {
-            // don't have tool calls, exit the loop unconditionally, model thinks it has finished the work
-            break;
-        }
-        if last_message.role == "assistant" && last_message.tool_calls.is_some() {
-            // have tool calls, let's see if we need to wrap up or not
-            if step_n >= wrap_up_depth {
-                last_message.tool_calls = None;
+    // execute_subchat_single_iteration generate knowledge() call
+    // Answer with session
+
+    // for attempt in attempt_n
+        let mut messages = messages.clone();
+        // let mut chat_usage = ChatUsage { ..Default::default() };
+        let mut step_n = 0;
+        loop {
+            let last_message = messages.last_mut().unwrap();
+            if last_message.role == "assistant" && last_message.tool_calls.is_none() {
+                // don't have tool calls, exit the loop unconditionally, model thinks it has finished the work
                 break;
             }
-            if let Some(usage) = &last_message.usage {
-                if usage.prompt_tokens + usage.completion_tokens > wrap_up_tokens_cnt {
+            if last_message.role == "assistant" && last_message.tool_calls.is_some() {
+                // have tool calls, let's see if we need to wrap up or not
+                if step_n >= wrap_up_depth {
                     last_message.tool_calls = None;
                     break;
                 }
+                if let Some(usage) = &last_message.usage {
+                    if usage.prompt_tokens + usage.completion_tokens > wrap_up_tokens_cnt {
+                        last_message.tool_calls = None;
+                        break;
+                    }
+                }
             }
+            messages = execute_subchat_single_iteration(
+                gcx.clone(),
+                model_name,
+                &messages,
+                tools_turn_on,
+                Some("auto".to_string()),
+                false,
+            ).await?;
+            step_n += 1;
         }
-        messages = execute_subchat_single_iteration(
-            gcx.clone(),
-            model_name,
-            &messages,
-            tools_turn_on,
-            Some("auto".to_string()),
-            false,
-        ).await?;
-        step_n += 1;
-    }
+        // result => session
+    // loop over
+    // return final result
     Ok(messages)
 }
