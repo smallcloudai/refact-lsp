@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashSet;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use reqwest::Client;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::Value;
@@ -199,6 +201,21 @@ async fn chat_interaction(
     }
 }
 
+async fn write_dumps(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    logfn: String,
+    content: &str,
+) {
+    let cache_dir = {
+        let gcx_locked = gcx.read().await;
+        gcx_locked.cache_dir.clone()
+    };
+    let dump_dir = cache_dir.join("dumps");
+    let _ = fs::create_dir_all(&dump_dir);
+    let pathbuf = dump_dir.join(logfn);
+    let _ = fs::write(&pathbuf, content);
+}
+
 pub async fn execute_subchat_single_iteration(
     gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
@@ -206,6 +223,7 @@ pub async fn execute_subchat_single_iteration(
     tools_subset: Vec<String>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
+    logfn: String,
 ) -> Result<Vec<ChatMessage>, String> {
     // this ignores customized tools
     let tools_turned_on_by_cmdline = at_tools_merged_and_filtered(gcx.clone()).await.keys().cloned().collect::<Vec<_>>();
@@ -242,6 +260,7 @@ pub async fn execute_subchat_single_iteration(
         }
     }
     result.extend(chat_response_msgs);
+    write_dumps(gcx.clone(), logfn, serde_json::to_string_pretty(&result).unwrap().as_str()).await;
     Ok(result)
 }
 
@@ -253,6 +272,7 @@ pub async fn execute_subchat(
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,
     wrap_up_prompt: &str,
+    logfn: String,
 ) -> Result<Vec<ChatMessage>, String> {
     let mut messages = messages.clone();
     // let mut chat_usage = ChatUsage { ..Default::default() };
@@ -284,6 +304,7 @@ pub async fn execute_subchat(
                 tools_subset.clone(),
                 Some("auto".to_string()),
                 false,
+                logfn.clone(),
             ).await?;
             step_n += 1;
         }
@@ -299,6 +320,7 @@ pub async fn execute_subchat(
                 vec![],
                 Some("none".to_string()),
                 true,   // <-- only runs tool calls
+                logfn.clone(),
             ).await?;
         }
     }
@@ -310,6 +332,7 @@ pub async fn execute_subchat(
         vec![],
         Some("none".to_string()),
         false,
+        logfn.clone(),
     ).await?;
     Ok(messages)
 }
