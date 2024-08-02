@@ -4,7 +4,6 @@ use std::io::Write;
 use std::string::ToString;
 use std::sync::Arc;
 use async_trait::async_trait;
-use futures_util::future::join_all;
 use tokio::sync::RwLock as ARwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,7 +14,11 @@ use crate::call_validation::{ChatMessage, ContextEnum};
 use crate::global_context::GlobalContext;
 
 
-const MODEL_NAME: &str = "gpt-4o";
+const RF_MODEL_NAME: &str = "gpt-4o-mini";
+const RF_OUTPUT_FILES: usize = 6;
+const RF_ATTEMPTS: usize = 1;
+const RF_WRAP_UP_DEPTH: usize = 5;
+const RF_WRAP_UP_TOKENS_CNT: usize = 8000;
 
 
 async fn write_dumps(
@@ -77,90 +80,67 @@ impl Tool for AttRelevantFiles {
 }
 
 
-const OUTPUT_FILES: usize = 6;
-const ATTEMPTS: usize = 1;
-const WRAP_UP_DEPTH: usize = 5;
-const WRAP_UP_TOKENS_CNT: usize = 8000;
-
 
 async fn find_relevant_files(
     gcx: Arc<ARwLock<GlobalContext>>,
     user_query: &str,
 ) -> Result<Vec<ReduceFileItem>, String> {
     let sys = RF_SYSTEM_PROMPT
-        .replace("{ATTEMPTS}", &format!("{}", ATTEMPTS))
-        .replace("{OUTPUT_FILES}", &format!("{}", OUTPUT_FILES));
+        .replace("{ATTEMPTS}", &format!("{}", RF_ATTEMPTS))
+        .replace("{OUTPUT_FILES}", &format!("{}", RF_OUTPUT_FILES));
 
     let mut messages = vec![];
     messages.push(ChatMessage::new("system".to_string(), sys.to_string()));
     messages.push(ChatMessage::new("user".to_string(), user_query.to_string()));
 
-    let tools_turn_on = vec!["definition", "references", "tree", "knowledge", "file", "search"].iter().map(|x|x.to_string()).collect::<Vec<_>>();
-    
+    let tools_subset = vec!["definition", "references", "tree", "knowledge", "file", "search"].iter().map(|x|x.to_string()).collect::<Vec<_>>();
+
     let strategies = vec!["CATFILES", "GOTODEF", "GOTOREF", "VECDBSEARCH", "CUSTOM"];
     let mut futures = vec![];
     for strategy in strategies {
         let mut messages_copy = messages.clone();
         messages_copy.push(ChatMessage::new("user".to_string(), USE_STRATEGY_PROMPT.replace("{USE_STRATEGY}", &strategy)));
-        
         let f = execute_subchat(
             gcx.clone(),
-            MODEL_NAME,
+            RF_MODEL_NAME,
             messages_copy,
-            tools_turn_on.clone(),
-            WRAP_UP_DEPTH,
-            WRAP_UP_TOKENS_CNT,
+            tools_subset.clone(),
+            RF_WRAP_UP_DEPTH,
+            RF_WRAP_UP_TOKENS_CNT,
+            RF_PLEASE_WRITE_MEM,
         );
         futures.push(f);
     }
-    let results = join_all(futures).await;
 
-    let mut futures = vec![];
-    for (idx, r) in results.into_iter().enumerate() {
-        if let Ok(mut conv) = r {
-            write_dumps(gcx.clone(), &format!("strategy_{}.log", idx), serde_json::to_string_pretty(&conv).unwrap().as_str(), "w").await;
-            conv.push(ChatMessage::new("user".to_string(), PLEASE_WRITE_MEM.to_string()));
-            let f = execute_subchat_single_iteration(
-                gcx.clone(),
-                MODEL_NAME,
-                conv,
-                vec![],
-                None,
-                false
-            );
-            futures.push(f);
-        }
-    }
-    
-    let results = join_all(futures).await.into_iter().filter_map(|x|x.ok()).collect::<Vec<_>>();
+    let results = futures_util::future::join_all(futures).await.into_iter().filter_map(|x|x.ok()).collect::<Vec<_>>();
     let only_last_messages = results.into_iter()
-        .filter_map(|mut x| x.pop()) // Use `pop` to take ownership of the last element
+        .filter_map(|mut x| x.pop())
         .filter(|x| x.role == "assistant").collect::<Vec<_>>();
     write_dumps(gcx.clone(), "only_last_messages.log", serde_json::to_string_pretty(&only_last_messages).unwrap().as_str(), "w").await;
-    
+
     let mut messages = vec![];
-    messages.push(ChatMessage::new("system".to_string(), REDUCE_STRATEGY_RESULTS.to_string()));
+    messages.push(ChatMessage::new("system".to_string(), RF_REDUCE_STRATEGY_RESULTS.to_string()));
     messages.push(ChatMessage::new("user".to_string(), only_last_messages.into_iter().map(|x|x.content).collect::<Vec<_>>().join("\n----\n")));
     messages.push(ChatMessage::new("user".to_string(), format!("{}\n\nthou must return a message that is JSON and is deserializable, without backquotes or other code formatting!", user_query)));
-    
+
     let result = execute_subchat_single_iteration(
         gcx.clone(),
-        MODEL_NAME,
+        RF_MODEL_NAME,
         messages,
         vec![],
         None,
         false,
     ).await?;
     write_dumps(gcx.clone(), "reduce_result.log", serde_json::to_string_pretty(&result).unwrap().as_str(), "w").await;
-    
+
     let answer: Vec<ReduceFileItem> = serde_json::from_str(result.last().unwrap().content.as_str())
         .map_err(|e|format!("Unable to parse result: {:?}", e))?;
-    
+
     Ok(answer)
 }
 
 
-const REDUCE_STRATEGY_RESULTS: &str = r###"
+const RF_REDUCE_STRATEGY_RESULTS: &str = r###"
 You will receive several pieces of memory generated by other chats that were following own strategy each.
 A memory may be of the following format:
 {
@@ -200,8 +180,8 @@ Follow the instruction step by step:
 
 At least 6 different files must be chosen!
 // The output is array<hashmap<string, any>>
-[ 
-    {                       
+[
+    {
         "FILE_PATH": "dir/dir/file.ext",  // Here you need a strict absolute path with no ambiguity at all.
         "SYMBOLS": "symbol1,symbol2",     // Comma-separated list of functions/classes/types/variables/etc defined within this file that are actually relevant, for example "MyClass::my_function". List all symbols that are relevant, not just some of them. Write "*" to indicate the whole file is necessary. Write "TBD" to indicate you didn't look inside yet.
         "WHY_CODE": "string",             // Write down the reason to include this file in output, pick one of: TOCHANGE, DEFINITIONS, HIGHLEV, USERCODE. Put TBD if you didn't look inside.
@@ -252,7 +232,7 @@ well between chat restarts and they are always in English. Answer in the languag
 EXPLAIN YOUR ACTIONS BEFORE CALLING ANY FUNCTIONS. IT'S FORBIDDEN TO CALL TOOLS UNTIL YOU EXPLAINED WHAT YOU ARE GOING TO DO.
 "###;
 
-const PLEASE_WRITE_MEM: &str = r###"You are out of turns or tokens for this chat. Now you need to save your progress, such that a new chat can pick up from there. Use this structure:
+const RF_PLEASE_WRITE_MEM: &str = r###"You are out of turns or tokens for this chat. Now you need to save your progress, such that a new chat can pick up from there. Use this structure:
 {
   "PROGRESS": {
     "UNFINISHED_STRATEGY": "string",             // Maybe you've got interrupted at a worst possible moment, you were in the middle of executing a good plan! Write down your strategy, which is it? "I was calling this and this tool and looking for this". This is a text field, feel free to write a paragraph. Leave an empty string to try something else on the next attempt.

@@ -16,6 +16,7 @@ struct SubChatPost {
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,
     tools_turn_on: Vec<String>,
+    wrap_up_prompt: String,
 }
 
 pub async fn handle_v1_subchat(
@@ -32,6 +33,7 @@ pub async fn handle_v1_subchat(
         post.tools_turn_on,
         post.wrap_up_depth,
         post.wrap_up_tokens_cnt,
+        post.wrap_up_prompt.as_str(),
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();

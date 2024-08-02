@@ -203,13 +203,13 @@ pub async fn execute_subchat_single_iteration(
     gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
     messages: Vec<ChatMessage>,
-    tools_turn_on: Vec<String>,
+    tools_subset: Vec<String>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
 ) -> Result<Vec<ChatMessage>, String> {
     // this ignores customized tools
     let tools_turned_on_by_cmdline = at_tools_merged_and_filtered(gcx.clone()).await.keys().cloned().collect::<Vec<_>>();
-    let tools_turn_on_set: HashSet<String> = tools_turn_on.iter().cloned().collect();
+    let tools_turn_on_set: HashSet<String> = tools_subset.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.into_iter().collect();
     let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
     let tools_compiled_in_only = tools_compiled_in(&tools_on_intersection).unwrap_or_else(|e|{
@@ -217,8 +217,9 @@ pub async fn execute_subchat_single_iteration(
         vec![]
     });
     let tools = tools_compiled_in_only.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>();
+    info!("tools_subset {:?}", tools_subset);
     info!("tools_turned_on_by_cmdline_set {:?}", tools_turned_on_by_cmdline_set);
-    info!("tools_turn_on {:?}", tools_turn_on);
+    info!("tools_on_intersection {:?}", tools_on_intersection);
 
     let (mut chat_post, spad) = create_chat_post_and_scratchpad(
         gcx.clone(),
@@ -248,19 +249,19 @@ pub async fn execute_subchat(
     gcx: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
     messages: Vec<ChatMessage>,
-    tools_turn_on: Vec<String>,
+    tools_subset: Vec<String>,
     wrap_up_depth: usize,
-    wrap_up_tokens_cnt: usize,  // when reached wrap_up_tokens_cnt -> insert "user" with text "wrap it up, tokens are over"; tools are disabled
+    wrap_up_tokens_cnt: usize,
+    wrap_up_prompt: &str,
 ) -> Result<Vec<ChatMessage>, String> {
-    // execute_subchat_single_iteration generate knowledge() call
-    // Answer with session
-
+    let mut messages = messages.clone();
+    // let mut chat_usage = ChatUsage { ..Default::default() };
     // for attempt in attempt_n
-        let mut messages = messages.clone();
-        // let mut chat_usage = ChatUsage { ..Default::default() };
+    {
+        // keep session
         let mut step_n = 0;
         loop {
-            let last_message = messages.last_mut().unwrap();
+            let last_message = messages.last().unwrap();
             if last_message.role == "assistant" && last_message.tool_calls.is_none() {
                 // don't have tool calls, exit the loop unconditionally, model thinks it has finished the work
                 break;
@@ -268,12 +269,10 @@ pub async fn execute_subchat(
             if last_message.role == "assistant" && last_message.tool_calls.is_some() {
                 // have tool calls, let's see if we need to wrap up or not
                 if step_n >= wrap_up_depth {
-                    last_message.tool_calls = None;
                     break;
                 }
                 if let Some(usage) = &last_message.usage {
                     if usage.prompt_tokens + usage.completion_tokens > wrap_up_tokens_cnt {
-                        last_message.tool_calls = None;
                         break;
                     }
                 }
@@ -282,14 +281,35 @@ pub async fn execute_subchat(
                 gcx.clone(),
                 model_name,
                 messages.clone(),
-                tools_turn_on.clone(),
+                tools_subset.clone(),
                 Some("auto".to_string()),
                 false,
             ).await?;
             step_n += 1;
         }
         // result => session
-    // loop over
-    // return final result
+    }
+    let last_message = messages.last().unwrap();
+    if let Some(tool_calls) = &last_message.tool_calls {
+        if !tool_calls.is_empty() {
+            messages = execute_subchat_single_iteration(
+                gcx.clone(),
+                model_name,
+                messages,
+                vec![],
+                Some("none".to_string()),
+                true,   // <-- only runs tool calls
+            ).await?;
+        }
+    }
+    messages.push(ChatMessage::new("user".to_string(), wrap_up_prompt.to_string()));
+    messages = execute_subchat_single_iteration(
+        gcx.clone(),
+        model_name,
+        messages,
+        vec![],
+        Some("none".to_string()),
+        false,
+    ).await?;
     Ok(messages)
 }
