@@ -158,6 +158,10 @@ tools:
     parameters_required:
       - "url"
 
+"####;
+
+#[allow(dead_code)]
+const NOT_READY_TOOLS: &str = r####"
   - name: "knowledge"
     description: "What kind of knowledge you will need to accomplish this task? Call each time you have a new task or topic."
     parameters:
@@ -171,10 +175,7 @@ tools:
     description: "Get a list of files that are relevant to solve a particular task."
     parameters:
     parameters_required:
-"####;
 
-#[allow(dead_code)]
-const NOT_READY_TOOLS: &str = r####"
   - name: "files_skeleton"
     description: "Collects limited files context with AST"
     parameters:
