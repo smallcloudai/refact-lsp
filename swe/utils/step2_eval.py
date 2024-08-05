@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Dict, Any, Tuple
 
 
-# MODEL = "gpt-4o"
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4o"
+# MODEL = "gpt-4o-mini"
 
 
 class SWERunner(AgentRunner):
@@ -26,12 +26,14 @@ class SWERunner(AgentRunner):
         problem_statement = kwargs["problem_statement"]
         found_files = kwargs["found_files"]
         filename = patched_file(kwargs["problem_patch"])
-        step = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=3, temperature=0.8)
+        step = ProducePatchStep(
+            base_url=base_url, model_name=MODEL, context_choices=7, patch_choices=7, temperature=0.8)
         try:
             results["model_patches"] = await step.process(
                 problem_statement=problem_statement,
                 related_files=found_files,
                 repo_path=repo_path)
+            results["model_patch"] = "" if not results["model_patches"] else results["model_patches"][0]
             results["patched_file_in_model_patches"] = any([
                 filename in model_patch
                 for model_patch in results["model_patches"]

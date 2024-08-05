@@ -50,7 +50,8 @@ class SWERunner(AgentRunner):
             return results, "\n\n".join(traj)
 
         # step2: produce patches for the problem with given files from step1
-        step2 = ProducePatchStep(base_url=base_url, model_name=MODEL, choices=5, temperature=0.8)
+        step2 = ProducePatchStep(
+            base_url=base_url, model_name=MODEL, context_choices=7, patch_choices=7, temperature=0.8)
         try:
             traj.append(print_block("step", 2))
             results["model_patches"] = await step2.process(

@@ -21,6 +21,9 @@ class FunctionDict(BaseModel):
     arguments: str
     name: str
 
+    def __hash__(self):
+        return hash((self.name, self.arguments))
+
 
 class ToolCallDict(BaseModel):
     id: str
