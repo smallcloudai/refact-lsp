@@ -55,8 +55,17 @@ async def main():
     step2_error = 0
     patch_produced = 0
     problem_solved = 0
+
+    repo_counters = {}
     with jsonlines.open(predictions_path, "r") as reader:
         for instance in reader:
+            repo_name = instance["instance_id"].split("__")[0]
+            if repo_name not in repo_counters:
+                repo_counters[repo_name] = {
+                    "total": 0,
+                    "solved": 0,
+                }
+            repo_counters[repo_name]["total"] += 1
             instance_processed += 1
 
             if instance.get("error") is not None:
@@ -76,6 +85,7 @@ async def main():
             solved = all_tests_passed(instance["instance_id"], log_dir)
             if not solved:
                 continue
+            repo_counters[repo_name]["solved"] += 1
             problem_solved += 1
     total_errors = step1_error + step2_error + other_error
     no_error_no_patch = total_instances - total_errors - patch_produced
@@ -89,6 +99,9 @@ async def main():
     print(f"produced {patch_produced} ({patch_produced / instance_processed * 100:.2f}%) patches")
     print(f"solved {problem_solved} ({problem_solved / instance_processed * 100:.2f}%) problems")
     print(f"solved {problem_solved / patch_produced * 100:.2f}% of patched problems")
+
+    for repo, counters in repo_counters.items():
+        print(f"{repo:<15} {counters['solved']:<10} {counters['total']:<10} {counters['solved'] / counters['total'] * 100:.2f}%")
 
 
 if __name__ == "__main__":
