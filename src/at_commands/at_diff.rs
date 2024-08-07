@@ -142,12 +142,13 @@ pub async fn get_last_accessed_file(
     ccx: Arc<AMutex<AtCommandsContext>>,
 ) -> Result<PathBuf, String> {
     let gcx = ccx.lock().await.global_context.clone();
-    let r = match gcx.read().await.documents_state.last_accessed_file.lock().unwrap().clone() {
+    let last_accessed_file: Arc<std::sync::Mutex<Option<PathBuf>>> = gcx.read().await.documents_state.last_accessed_file.clone();
+    let r = last_accessed_file.lock().unwrap().clone();
+    match r {
         Some(file) => Ok(file),
         // TODO: improve error text?
         None => Err("Couldn't find last used file. Try again later".to_string())
-    };
-    r;
+    }
 }
 
 async fn validate_and_complete_file_path(

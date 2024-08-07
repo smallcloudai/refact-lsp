@@ -122,7 +122,7 @@ async fn chat(
     } else {
         crate::restream::scratchpad_interaction_stream(
             ccx.clone(),
-            &mut scratchpad,
+            scratchpad,
             "chat-stream".to_string(),
             model_name,
             client1,
