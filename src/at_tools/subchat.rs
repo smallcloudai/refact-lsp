@@ -338,6 +338,7 @@ pub async fn subchat(
     wrap_up_prompt: &str,
     temperature: Option<f32>,
     logfn_mb: Option<String>,
+    // something streamable
 ) -> Result<Vec<ChatMessage>, String> {
     let mut messages = messages.clone();
     // let mut chat_usage = ChatUsage { ..Default::default() };

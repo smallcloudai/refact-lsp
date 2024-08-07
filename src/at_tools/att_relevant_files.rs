@@ -28,7 +28,7 @@ impl Tool for AttRelevantFiles {
             "relevant_files: unable to find user problem description".to_string()
         )?;
 
-        let res = find_relevant_files(ccx.global_context.clone(), problem.as_str()).await?;
+        let res = find_relevant_files(ccx, problem.as_str()).await?;
 
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
@@ -205,9 +205,10 @@ async fn find_relevant_files_det(
 
 #[allow(dead_code)]
 async fn find_relevant_files(
-    gcx: Arc<ARwLock<GlobalContext>>,
+    ccx: &mut AtCommandsContext,
     user_query: &str,
 ) -> Result<Value, String> {
+    let gcx: Arc<ARwLock<GlobalContext>> = ccx.global_context.clone();
     let vecdb_on = {
         let gcx = gcx.read().await;
         let vecdb = gcx.vec_db.lock().await;
