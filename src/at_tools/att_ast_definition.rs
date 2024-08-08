@@ -1,7 +1,9 @@
 use std::cmp::max;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::Mutex as AMutex;
 use itertools::Itertools;
 use serde_json::Value;
 
@@ -12,11 +14,17 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum};
 
+
 pub struct AttAstDefinition;
 
 #[async_trait]
 impl Tool for AttAstDefinition {
-    async fn execute(&self, ccx: &mut AtCommandsContext, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(
+        &mut self,
+        ccx: Arc<AMutex<AtCommandsContext>>,
+        tool_call_id: &String,
+        args: &HashMap<String, Value>,
+    ) -> Result<Vec<ContextEnum>, String> {
         let mut symbol = match args.get("symbol") {
             Some(Value::String(s)) => s.clone(),
             Some(v) => { return Err(format!("argument `symbol` is not a string: {:?}", v)) }
@@ -27,7 +35,12 @@ impl Tool for AttAstDefinition {
             symbol = symbol[dot_index + 1..].to_string();
         }
 
-        let ast_mb = ccx.global_context.read().await.ast_module.clone();
+        let (gcx, top_n) = {
+            let ccx_locked = ccx.lock().await;
+            (ccx_locked.global_context.clone(), ccx_locked.top_n)
+        };
+
+        let ast_mb = gcx.read().await.ast_module.clone();
         let ast = ast_mb.ok_or_else(|| "AST support is turned off".to_string())?;
 
         let mut found_by_fuzzy_search: bool = false;
@@ -35,7 +48,7 @@ impl Tool for AttAstDefinition {
             symbol.clone(),
             RequestSymbolType::Declaration,
             false,
-            ccx.top_n,
+            top_n,
         ).await?;
         res = if res.search_results.is_empty() {
             found_by_fuzzy_search = true;
@@ -43,7 +56,7 @@ impl Tool for AttAstDefinition {
                 symbol.clone(),
                 RequestSymbolType::Declaration,
                 true,
-                max(ccx.top_n, 6),
+                max(top_n, 6),
             ).await?
         } else {
             res
@@ -68,11 +81,11 @@ impl Tool for AttAstDefinition {
                 .unique()
                 .collect::<Vec<String>>();
             let mut tool_message = format!(
-                "Definition of `{symbol}` haven't found by exact name, but found the close result`{found_path}`. \
-                You can call again with one of these other names:\n"
+                "When trying to find definition of `{symbol}`, a problem occurred: there's no symbol spelled exactly like that, but here's the closest fuzzy match: `{found_path}`. \
+                You can call again with that name or with one of these:\n\n"
             ).to_string();
             for x in other_names.into_iter() {
-                tool_message.push_str(&format!("{}\n", x));
+                tool_message.push_str(&format!("`{}`\n", x));
             }
             (messages, tool_message)
         } else {
@@ -82,7 +95,7 @@ impl Tool for AttAstDefinition {
                 .collect::<Vec<ContextEnum>>();
             let mut tool_message = format!("Definition of `{}` found at:\n", symbol).to_string();
             for r in res.search_results.iter() {
-                let file_path_str = r.symbol_declaration.symbol_path.to_string();
+                let file_path_str = r.symbol_declaration.file_path.to_string_lossy();
                 let decl_range = &r.symbol_declaration.full_range;
                 tool_message.push_str(&format!("{}:{}-{}\n", file_path_str, decl_range.start_point.row + 1, decl_range.end_point.row + 1));
             }
@@ -94,11 +107,12 @@ impl Tool for AttAstDefinition {
             content: tool_message.clone(),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
+            ..Default::default()
         }));
         Ok(messages)
     }
 
-    fn depends_on(&self) -> Vec<String> {
+    fn tool_depends_on(&self) -> Vec<String> {
         vec!["ast".to_string()]
     }
 }

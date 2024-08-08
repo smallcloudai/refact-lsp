@@ -5,9 +5,11 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
+use tokio::sync::Mutex as AMutex;
 use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
+use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::execute_att::run_tools;
 use crate::call_validation::{ChatMessage, ChatPost, ContextFile, ContextMemory, SamplingParameters};
 use crate::global_context::GlobalContext;
@@ -93,50 +95,59 @@ impl ScratchpadAbstract for ChatPassthrough {
 
     async fn prompt(
         &mut self,
-        context_size: usize,
+        ccx: Arc<AMutex<AtCommandsContext>>,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         info!("chat passthrough {} messages at start", &self.post.messages.len());
-        let top_n: usize = 7;
+
+        // let subchat_tx = ccx.lock().await.subchat_tx.clone();
+        // let _ = subchat_tx.lock().await.send(serde_json::json!({"hello": "world"}));
+
+        let n_ctx = ccx.lock().await.n_ctx;
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
-            run_at_commands(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &self.post.messages, top_n, &mut self.has_rag_results).await
+            run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.post.messages, &mut self.has_rag_results).await
         } else {
             (self.post.messages.clone(), self.post.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(self.global_context.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, context_size, &messages, top_n, &mut self.has_rag_results).await;
+            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results).await;
         };
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, context_size, &self.default_system_message).unwrap_or_else(|e| {
+        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
         });
         info!("chat passthrough {} messages -> {} messages after applying at-commands and limits, possibly adding the default system message", messages.len(), limited_msgs.len());
-        let mut filtered_msgs: Vec<ChatMessage> = Vec::<ChatMessage>::new();
+        let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
-                filtered_msgs.push(msg.clone());
+                filtered_msgs.push(msg.into_real());
 
             } else if msg.role == "diff" {
-                filtered_msgs.push(ChatMessage {
+                let tool_msg = ChatMessage {
                     role: "tool".to_string(),
                     content: msg.content.clone(),
                     tool_calls: None,
                     tool_call_id: msg.tool_call_id.clone(),
-                });
-
-            } else if msg.role == "context_file" {
-                match serde_json::from_str(&msg.content) {
-                    Ok(res) => {
-                        let vector_of_context_files: Vec<ContextFile> = res;
-                        for context_file in &vector_of_context_files {
+                    ..Default::default()
+                };
+                filtered_msgs.push(tool_msg.into_real());
+            } else if msg.role == "plain_text" {
+                filtered_msgs.push(ChatMessage::new(
+                    "user".to_string(),
+                    msg.content.clone(),
+                ).into_real());
+            }else if msg.role == "context_file" {
+                match serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
+                    Ok(vector_of_context_files) => {
+                        for context_file in vector_of_context_files {
                             filtered_msgs.push(ChatMessage::new(
                                 "user".to_string(),
                                 format!("{}:{}-{}\n```\n{}```",
-                                    context_file.file_name,
-                                    context_file.line1,
-                                    context_file.line2,
-                                    context_file.file_content),
-                            ));
+                                        context_file.file_name,
+                                        context_file.line1,
+                                        context_file.line2,
+                                        context_file.file_content),
+                            ).into_real());
                         }
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
@@ -149,7 +160,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                             filtered_msgs.push(ChatMessage::new(
                                 "assistant".to_string(),
                                 format!("Note to self: {}", mem.memo_text.clone())
-                            ));
+                            ).into_real());
                         }
                     }
                     Err(e) => { error!("error parsing context memory: {}", e); }
@@ -173,7 +184,8 @@ impl ScratchpadAbstract for ChatPassthrough {
                 None
             };
             big_json["tools"] = serde_json::json!(tools);
-            info!("PASSTHROUGH TOOLS {:?}", tools);
+            big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
+            info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());
         } else {
             info!("PASSTHROUGH TOOLS NOT SUPPORTED");
         }

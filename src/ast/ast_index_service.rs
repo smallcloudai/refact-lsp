@@ -40,7 +40,7 @@ impl AstEvent {
 pub struct AstIndexService {
     ast_delayed_requests_q: Arc<AMutex<VecDeque<Arc<AstEvent>>>>,
     ast_immediate_q: Arc<AMutex<VecDeque<Arc<AstEvent>>>>,
-    ast_hold_off_indexes_rebuild_notify: Arc<Notify>,
+    pub ast_hold_off_indexes_rebuild_notify: Arc<Notify>,
     ast_index: Arc<AMutex<AstIndex>>,
     status: Arc<AMutex<AstIndexStatus>>
 }
@@ -52,7 +52,7 @@ async fn cooldown_queue_thread(
 ) {
     let mut latest_events: HashMap<PathBuf, Arc<AstEvent>> = HashMap::new();
     loop {
-        let mut have_service_events: bool = false;
+        // let mut have_service_events: bool = false;
         {
             let mut queue_locked = ast_delayed_requests_q.lock().await;
             while let Some(e) = queue_locked.pop_front() {
@@ -63,7 +63,7 @@ async fn cooldown_queue_thread(
                         }
                     }
                     AstEventType::AstReset => {
-                        have_service_events = true;
+                        // have_service_events = true;
                         latest_events = latest_events
                             .into_iter()
                             .filter(|(_, e)| e.typ != AstEventType::Add)
@@ -75,7 +75,7 @@ async fn cooldown_queue_thread(
                     }
                     AstEventType::AddDummy => {
                         ast_immediate_q.lock().await.push_back(e);
-                        have_service_events = true;
+                        // have_service_events = true;
                         break;
                     }
                 }
@@ -131,6 +131,7 @@ async fn ast_indexer_thread(
     ast_immediate_q: Arc<AMutex<VecDeque<Arc<AstEvent>>>>,
     ast_index: Arc<AMutex<AstIndex>>,
     ast_hold_off_indexes_rebuild_notify: Arc<Notify>,
+    ast_max_files: usize,
     status: Arc<AMutex<AstIndexStatus>>,
 ) {
     let mut reported_stats = true;
@@ -191,9 +192,9 @@ async fn ast_indexer_thread(
                 break;
             };
             let left_docs_count: usize = events.iter().map(|e| e.docs.len()).sum();
-            let (ast_index_files_total, ast_index_symbols_total) = {
+            let (ast_index_files_total, ast_index_symbols_total, is_ast_full) = {
                 let ast_ref = ast_index.lock().await;
-                (ast_ref.total_files(), ast_ref.total_symbols())
+                (ast_ref.total_files(), ast_ref.total_symbols(), ast_ref.is_overflowed())
             };
             {
                 let mut locked_status = status.lock().await;
@@ -202,6 +203,7 @@ async fn ast_indexer_thread(
                 locked_status.ast_index_files_total = ast_index_files_total;
                 locked_status.ast_index_symbols_total = ast_index_symbols_total;
                 locked_status.state = "parsing".to_string();
+                locked_status.ast_max_files_hit |= is_ast_full;
             }
             let gcx = match gcx_weak.upgrade() {
                 Some(x) => x,
@@ -211,8 +213,6 @@ async fn ast_indexer_thread(
                 }
             };
 
-
-            let is_ast_full = ast_index.lock().await.is_overflowed();
             let mut docs_with_text: Vec<Document> = Vec::new();
             for doc in processing_events.iter().flat_map(|x| x.docs.iter()) {
                 if !is_ast_full {
@@ -244,6 +244,11 @@ async fn ast_indexer_thread(
                     .collect();
 
                 for (doc, res) in zip(docs_with_text, symbols) {
+                    let is_ast_full2 = ast_index.lock().await.is_overflowed();
+                    if is_ast_full2 {
+                        let mut locked_status = status.lock().await;
+                        locked_status.ast_max_files_hit = true;
+                    }
                     match res {
                         Ok(symbols) => {
                             stats_symbols_cnt += symbols.len();
@@ -350,12 +355,14 @@ impl AstIndexService {
                 COOLDOWN_SECS,
             )
         );
+        let ast_max_files = gcx.read().await.cmdline.ast_max_files;
         let indexer_handle = tokio::spawn(
             ast_indexer_thread(
                 Arc::downgrade(&gcx),
                 self.ast_immediate_q.clone(),
                 self.ast_index.clone(),
                 self.ast_hold_off_indexes_rebuild_notify.clone(),
+                ast_max_files,
                 self.status.clone(),
             )
         );

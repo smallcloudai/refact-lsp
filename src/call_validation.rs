@@ -29,6 +29,7 @@ pub struct SamplingParameters {
     pub top_p: Option<f32>,
     #[serde(default)]
     pub stop: Vec<String>,
+    pub n: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -94,6 +95,7 @@ mod tests {
                 temperature: Some(0.1),
                 top_p: None,
                 stop: vec![],
+                n: None
             },
             model: "".to_string(),
             scratchpad: "".to_string(),
@@ -123,6 +125,7 @@ mod tests {
                 temperature: Some(0.1),
                 top_p: None,
                 stop: vec![],
+                n: None,
             },
             model: "".to_string(),
             scratchpad: "".to_string(),
@@ -152,6 +155,7 @@ mod tests {
                 temperature: Some(0.1),
                 top_p: None,
                 stop: vec![],
+                n: None,
             },
             model: "".to_string(),
             scratchpad: "".to_string(),
@@ -181,6 +185,7 @@ mod tests {
                 temperature: Some(0.1),
                 top_p: None,
                 stop: vec![],
+                n: None,
             },
             model: "".to_string(),
             scratchpad: "".to_string(),
@@ -241,15 +246,49 @@ pub struct ChatToolCall {
     pub tool_type: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ChatUsage {
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,   // TODO: remove (can produce self-contradictory data when prompt+completion != total)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
     #[serde(default, deserialize_with="deserialize_content")]
     pub content: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
     #[serde(default)]
     pub tool_call_id: String,
+    #[serde(default)]
+    pub usage: Option<ChatUsage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct RealChatMessage {
+    pub role: String,
+    #[serde(default, deserialize_with="deserialize_content")]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(default)]
+    pub tool_call_id: String,
+}
+
+impl ChatMessage {
+    pub fn new(role: String, content: String) -> Self {
+        ChatMessage { role, content, ..Default::default()}
+    }
+    pub fn into_real(&self) -> RealChatMessage {
+        RealChatMessage {
+            role: self.role.clone(),
+            content: self.content.clone(),
+            tool_calls: self.tool_calls.clone(),
+            tool_call_id: self.tool_call_id.clone(),
+        }
+    }
 }
 
 // this converts null to empty string
@@ -260,11 +299,6 @@ where
     Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
 }
 
-impl ChatMessage {
-    pub fn new(role: String, content: String) -> Self {
-        ChatMessage { role, content, tool_calls: None, tool_call_id: "".to_string() }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatPost {
@@ -280,15 +314,18 @@ pub struct ChatPost {
     #[serde(default)]
     pub max_tokens: usize,
     #[serde(default)]
+    pub n: Option<usize>,
+    #[serde(default)]
     pub tools: Option<Vec<serde_json::Value>>,
-    // pub tool_choice: Option<String>,
+    #[serde(default)]
+    pub tool_choice: Option<String>,
     #[serde(default)]
     pub only_deterministic_messages: bool,  // means don't sample from the model
     #[serde(default)]
     pub chat_id: String,
 }
 
-#[derive(Deserialize, Clone, Hash, Debug)]
+#[derive(Serialize, Deserialize, Clone, Hash, Debug, Eq, PartialEq, Default)]
 pub struct DiffChunk {
     pub file_name: String,
     pub file_action: String,
@@ -297,3 +334,9 @@ pub struct DiffChunk {
     pub lines_remove: String,
     pub lines_add: String,
 }
+
+// impl DiffChunk {
+//     pub fn is_empty(&self) -> bool {
+//         self.lines_add.is_empty() && self.lines_remove.is_empty()
+//     }
+// }

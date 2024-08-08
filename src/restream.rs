@@ -1,25 +1,26 @@
 use std::sync::Arc;
-
+use tokio::sync::Mutex as AMutex;
+use tokio::sync::mpsc;
 use async_stream::stream;
 use futures::StreamExt;
 use hyper::{Body, Response, StatusCode};
 use reqwest_eventsource::Event;
 use serde_json::json;
-use tokio::sync::RwLock as ARwLock;
 use tracing::{error, info};
 
 use crate::call_validation::SamplingParameters;
 use crate::custom_error::ScratchError;
 use crate::forward_to_hf_endpoint;
 use crate::forward_to_openai_endpoint;
-use crate::global_context::GlobalContext;
 use crate::nicer_logs;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::telemetry::telemetry_structs;
+use crate::at_commands::at_commands::AtCommandsContext;
+
 
 pub async fn scratchpad_interaction_not_stream_json(
-    global_context: Arc<ARwLock<GlobalContext>>,
-    mut scratchpad: Box<dyn ScratchpadAbstract>,
+    ccx: Arc<AMutex<AtCommandsContext>>,
+    scratchpad: &mut Box<dyn ScratchpadAbstract>,
     scope: String,
     prompt: &str,
     model_name: String,
@@ -29,8 +30,9 @@ pub async fn scratchpad_interaction_not_stream_json(
     only_deterministic_messages: bool,
 ) -> Result<serde_json::Value, ScratchError> {
     let t2 = std::time::SystemTime::now();
+    let gcx = ccx.lock().await.global_context.clone();
     let (endpoint_style, endpoint_template, endpoint_chat_passthrough, tele_storage, slowdown_arc) = {
-        let cx = global_context.write().await;
+        let cx = gcx.write().await;
         let caps = cx.caps.clone().unwrap();
         let caps_locked = caps.read().unwrap();
         (caps_locked.endpoint_style.clone(), caps_locked.endpoint_template.clone(), caps_locked.endpoint_chat_passthrough.clone(), cx.telemetry.clone(), cx.http_client_slowdown.clone())
@@ -76,7 +78,7 @@ pub async fn scratchpad_interaction_not_stream_json(
         "".to_string(),
     ));
     info!("forward to endpoint {:.2}ms, url was {}", t2.elapsed().unwrap().as_millis() as f64, save_url);
-    crate::global_context::look_for_piggyback_fields(global_context.clone(), &model_says).await;
+    crate::global_context::look_for_piggyback_fields(gcx.clone(), &model_says).await;
 
     let scratchpad_result: Result<serde_json::Value, String>;
     if only_deterministic_messages {
@@ -86,10 +88,7 @@ pub async fn scratchpad_interaction_not_stream_json(
         }
         scratchpad_result = Ok(model_says.clone());
     } else if let Some(hf_arr) = model_says.as_array() {
-        let choices = hf_arr.iter()
-            .map(|x| {
-                x.get("generated_text").unwrap().as_str().unwrap().to_string()
-            }).collect::<Vec<_>>();
+        let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
         let stopped = vec![false; choices.len()];
         scratchpad_result = scratchpad.response_n_choices(choices, stopped);
 
@@ -107,15 +106,9 @@ pub async fn scratchpad_interaction_not_stream_json(
             // for oai_choice in oai_choices.as_array().unwrap() {
             //     let index = oai_choice.get("index").unwrap().as_u64().unwrap() as usize;
             // }
-            let choices = oai_choices.as_array().unwrap().iter()
-                .map(|x| {
-                    x.get("text").unwrap().as_str().unwrap().to_string()
-                }).collect::<Vec<_>>();
-            let stopped = oai_choices.as_array().unwrap().iter()
-                .map(|x| {
-                    x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")
-                }).collect::<Vec<_>>();
-                scratchpad_result = scratchpad.response_n_choices(choices, stopped);
+            let choices = oai_choices.as_array().unwrap().iter().map(|x| x.get("text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
+            let stopped = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
+            scratchpad_result = scratchpad.response_n_choices(choices, stopped);
         }
 
     } else if let Some(err) = model_says.get("error") {
@@ -148,22 +141,30 @@ pub async fn scratchpad_interaction_not_stream_json(
 }
 
 pub async fn scratchpad_interaction_not_stream(
-    global_context: Arc<ARwLock<GlobalContext>>,
-    scratchpad: Box<dyn ScratchpadAbstract>,
+    ccx: Arc<AMutex<AtCommandsContext>>,
+    scratchpad: &mut Box<dyn ScratchpadAbstract>,
     scope: String,
-    prompt: &str,
     model_name: String,
     client: reqwest::Client,
     bearer: String,
-    parameters: &SamplingParameters,
+    parameters: &mut SamplingParameters,
     only_deterministic_messages: bool,
 ) -> Result<Response<Body>, ScratchError> {
+    let t1 = std::time::Instant::now();
+    let prompt = scratchpad.prompt(
+        ccx.clone(),
+        parameters,
+    ).await.map_err(|e|
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Prompt: {}", e))
+    )?;
+    info!("scratchpad_interaction_not_stream prompt {:?}", t1.elapsed());
+
     let t2 = std::time::SystemTime::now();
     let mut scratchpad_response_json = scratchpad_interaction_not_stream_json(
-        global_context,
+        ccx.clone(),
         scratchpad,
         scope,
-        prompt,
+        prompt.as_str(),
         model_name,
         client,
         bearer,
@@ -171,6 +172,9 @@ pub async fn scratchpad_interaction_not_stream(
         only_deterministic_messages,
     ).await?;
     scratchpad_response_json["created"] = json!(t2.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
+
+    try_insert_usage(&mut scratchpad_response_json);
+
     let txt = serde_json::to_string_pretty(&scratchpad_response_json).unwrap();
     // info!("handle_v1_code_completion return {}", txt);
     let response = Response::builder()
@@ -181,10 +185,9 @@ pub async fn scratchpad_interaction_not_stream(
 }
 
 pub async fn scratchpad_interaction_stream(
-    global_context: Arc<ARwLock<GlobalContext>>,
+    ccx: Arc<AMutex<AtCommandsContext>>,
     mut scratchpad: Box<dyn ScratchpadAbstract>,
     scope: String,
-    prompt: String,
     mut model_name: String,
     client: reqwest::Client,
     bearer: String,
@@ -193,17 +196,74 @@ pub async fn scratchpad_interaction_stream(
 ) -> Result<Response<Body>, ScratchError> {
     let t1 = std::time::SystemTime::now();
     let evstream = stream! {
-        let scratch: &mut Box<dyn ScratchpadAbstract> = &mut scratchpad;
+        let my_scratchpad: &mut Box<dyn ScratchpadAbstract> = &mut scratchpad;
+        let mut my_parameters = parameters.clone();
+        let my_ccx = ccx.clone();
+
+        let gcx = ccx.lock().await.global_context.clone();
         let (endpoint_style, endpoint_template, endpoint_chat_passthrough, tele_storage, slowdown_arc) = {
-            let cx = global_context.write().await;
+            let cx = gcx.write().await;
             let caps = cx.caps.clone().unwrap();
             let caps_locked = caps.read().unwrap();
             (caps_locked.endpoint_style.clone(), caps_locked.endpoint_template.clone(), caps_locked.endpoint_chat_passthrough.clone(), cx.telemetry.clone(), cx.http_client_slowdown.clone())
         };
+
+        let t0 = std::time::Instant::now();
+        let mut prompt = String::new();
+        {
+            let subchat_tx: Arc<AMutex<mpsc::UnboundedSender<serde_json::Value>>> = my_ccx.lock().await.subchat_tx.clone();
+            let subchat_rx: Arc<AMutex<mpsc::UnboundedReceiver<serde_json::Value>>> = my_ccx.lock().await.subchat_rx.clone();
+            let mut prompt_future = Some(my_scratchpad.prompt(
+                my_ccx.clone(),
+                &mut my_parameters,
+            ));
+            // horrible loop that waits for prompt() future, and at the same time retranslates any streaming via my_ccx.subchat_rx/tx to the user
+            // (without streaming the rx/tx is never processed, disposed with the ccx)
+            loop {
+                tokio::select! {
+                    value = async {
+                        subchat_rx.lock().await.recv().await
+                    } => {
+                        if let Some(value) = value {
+                            let tmp = serde_json::to_string(&value).unwrap();
+                            info!("{:?}", tmp);
+                            if tmp == "1337" {
+                                break;  // the only way out of this loop
+                            }
+                            let value_str = format!("data: {}\n\n", tmp);
+                            yield Result::<_, String>::Ok(value_str);
+                        }
+                    },
+                    prompt_maybe = async {
+                        if let Some(fut) = prompt_future.as_mut() {
+                            fut.await
+                        } else {
+                            std::future::pending().await
+                        }
+                    } => {
+                        if let Some(_fut) = prompt_future.take() {
+                            prompt = match prompt_maybe {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    // XXX: tool errors go here, check again if this what we want
+                                    tracing::warn!("prompt or tool use problem inside prompt: {}", e);
+                                    let value_str = format!("data: {}\n\n", serde_json::to_string(&json!({"detail": e})).unwrap());
+                                    yield Result::<_, String>::Ok(value_str);
+                                    return;
+                                }
+                            };
+                            let _ = subchat_tx.lock().await.send(serde_json::json!(1337));
+                        }
+                    }
+                }
+            }
+        }
+        info!("scratchpad_interaction_stream prompt {:?}", t0.elapsed());
+
         let mut save_url: String = String::new();
         let _ = slowdown_arc.acquire().await;
         loop {
-            let value_maybe = scratch.response_spontaneous();
+            let value_maybe = my_scratchpad.response_spontaneous();
             if let Ok(value) = value_maybe {
                 for el in value {
                     let value_str = format!("data: {}\n\n", serde_json::to_string(&el).unwrap());
@@ -225,7 +285,7 @@ pub async fn scratchpad_interaction_stream(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
-                    &prompt,
+                    prompt.as_str(),
                     &client,
                     &endpoint_template,
                     &parameters,
@@ -235,7 +295,7 @@ pub async fn scratchpad_interaction_stream(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
-                    &prompt,
+                    prompt.as_str(),
                     &client,
                     &endpoint_template,
                     &endpoint_chat_passthrough,
@@ -271,15 +331,16 @@ pub async fn scratchpad_interaction_stream(
                             break;
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
-                        crate::global_context::look_for_piggyback_fields(global_context.clone(), &json).await;
+                        crate::global_context::look_for_piggyback_fields(gcx.clone(), &json).await;
                         let value_maybe = _push_streaming_json_into_scratchpad(
-                            scratch,
+                            my_scratchpad,
                             &json,
                             &mut model_name,
                             &mut finished,
                             &mut was_correct_output_even_if_error,
                         );
                         if let Ok(mut value) = value_maybe {
+                            finished = try_insert_usage(&mut value);
                             value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                             let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
                             let last_60_chars: String = crate::nicer_logs::first_n_chars(&value_str, 60);
@@ -292,9 +353,6 @@ pub async fn scratchpad_interaction_stream(
                             yield Result::<_, String>::Ok(value_str);
                             // TODO: send telemetry
                             problem_reported = true;
-                            break;
-                        }
-                        if finished {
                             break;
                         }
                     },
@@ -324,7 +382,7 @@ pub async fn scratchpad_interaction_stream(
                 return;
             } else if !finished {
                 let mut value: serde_json::Value;
-                (value, _) = scratch.response_streaming("".to_string(), false, true).unwrap();
+                (value, _) = my_scratchpad.response_streaming("".to_string(), false, true).unwrap();
                 value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                 value["model"] = json!(model_name.clone());
                 let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
@@ -350,6 +408,41 @@ pub async fn scratchpad_interaction_stream(
     return Ok(response);
 }
 
+pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
+    let map = match msg_value.as_object() {
+        Some(map) => map,
+        None => {
+            return false;
+        }
+    };
+    let get_field_as_usize = |field: &str| -> Option<usize> {
+        map.get(field).and_then(|v| v.as_u64()).map(|v| v as usize)
+    };
+
+    let metering_prompt_tokens_n = match get_field_as_usize("metering_prompt_tokens_n") {
+        Some(value) => value,
+        None => return false,
+    };
+    let metering_generated_tokens_n = match get_field_as_usize("metering_generated_tokens_n") {
+        Some(value) => value,
+        None => return false,
+    };
+
+    if let Some(map) = msg_value.as_object_mut() {
+        ["pp1000t_prompt", "pp1000t_generated", "metering_prompt_tokens_n", "metering_generated_tokens_n"]
+            .iter()
+            .for_each(|&field| { map.remove(field); });
+
+        let usage = json!({
+            "prompt_tokens": metering_prompt_tokens_n,
+            "completion_tokens": metering_generated_tokens_n,
+            "total_tokens": metering_prompt_tokens_n + metering_generated_tokens_n
+        });
+        map.insert("usage".to_string(), usage);
+        return true;
+    }
+    return false;
+}
 fn _push_streaming_json_into_scratchpad(
     scratch: &mut Box<dyn ScratchpadAbstract>,
     json: &serde_json::Value,
@@ -373,6 +466,9 @@ fn _push_streaming_json_into_scratchpad(
             // let _role = delta.get("role").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
             // let content = delta.get("content").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
             // (value, *finished) = scratch.response_streaming(content, stop_toks, stop_length)?;
+            value = json.clone();
+            *finished = !finish_reason.is_empty();
+        } else if choices.as_array().map_or(true, |arr|arr.is_empty())  {
             value = json.clone();
             *finished = !finish_reason.is_empty();
         } else {

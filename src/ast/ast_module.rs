@@ -28,18 +28,19 @@ pub struct AstIndexStatus {
     pub ast_index_files_total: usize,
     pub ast_index_symbols_total: usize,
     pub state: String,
+    pub ast_max_files_hit: bool,  // ast_index_files_total >= limit
 }
 
 
 pub struct AstModule {
-    ast_index_service: Arc<AMutex<AstIndexService>>,
+    pub ast_index_service: Arc<AMutex<AstIndexService>>,
     ast_index: Arc<AMutex<AstIndex>>,
     status: Arc<AMutex<AstIndexStatus>>
 }
 
 impl AstModule {
     pub async fn ast_indexer_init(
-        ast_index_max_files: usize,
+        ast_max_files: usize,
         shutdown_flag: Arc<AtomicBool>,
         ast_light_mode: bool
     ) -> Result<AstModule, String> {
@@ -49,9 +50,10 @@ impl AstModule {
             ast_index_files_total: 0,
             ast_index_symbols_total: 0,
             state: "starting".to_string(),
+            ast_max_files_hit: false,
         }));
         let ast_index = Arc::new(AMutex::new(AstIndex::init(
-            ast_index_max_files, shutdown_flag, ast_light_mode
+            ast_max_files, shutdown_flag, ast_light_mode
         )));
         let ast_index_service = Arc::new(AMutex::new(AstIndexService::init(
             ast_index.clone(),
@@ -91,6 +93,10 @@ impl AstModule {
                 return Err("ast timeout".to_string());
             }
         };
+        if ast_ref.is_overflowed() {
+            let mut locked_status = self.status.lock().await;
+            locked_status.ast_max_files_hit = true;
+        }
         ast_ref.add_or_update(&document, make_dirty)
     }
 
@@ -135,7 +141,7 @@ impl AstModule {
         Ok(())
     }
 
-    async fn read_ast(&self, duration: Duration) -> Result<MutexGuard<'_, AstIndex>, Elapsed> {
+    pub async fn read_ast(&self, duration: Duration) -> Result<MutexGuard<'_, AstIndex>, Elapsed> {
         timeout(duration, self.ast_index.lock()).await
     }
 
@@ -440,6 +446,45 @@ impl AstModule {
             result.bucket_imports.len()
         );
         Ok(result)
+    }
+
+    pub async fn decl_symbols_from_imports_by_file_path(
+        &self,
+        doc: &Document,
+        imports_depth: usize,
+    ) -> Result<AstQuerySearchResult, String> {
+        let t0 = std::time::Instant::now();
+        let ast_ref = match self.read_ast(Duration::from_millis(25)).await {
+            Ok(ast) => ast,
+            Err(_) => {
+                return Err("ast timeout".to_string());
+            }
+        };
+        let results = ast_ref.decl_symbols_from_imports_by_file_path(&doc, imports_depth);
+        let symbol_structs = results
+            .iter()
+            .filter_map(|s| {
+                let info_struct = s.borrow().symbol_info_struct();
+                let content = info_struct.get_content_from_file_blocked().ok()?;
+                Some(SymbolsSearchResultStruct {
+                    symbol_declaration: info_struct,
+                    content: content,
+                    usefulness: 100.0,
+                })
+            })
+            .collect::<Vec<_>>();
+        for r in symbol_structs.iter() {
+            let last_30_chars = crate::nicer_logs::last_n_chars(&r.symbol_declaration.name, 30);
+            info!("def-distance {:.3}, found {last_30_chars}", r.usefulness);
+        }
+        info!("ast decl_symbols_from_imports_by_file_path time {:.3}s, found {} results", t0.elapsed().as_secs_f32(), results.len());
+        Ok(
+            AstQuerySearchResult {
+                query_text: "".to_string(),
+                search_results: symbol_structs,
+                refs_n: results.len(),
+            }
+        )
     }
 
     pub async fn file_markup(

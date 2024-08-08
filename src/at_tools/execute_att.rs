@@ -1,26 +1,28 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use tokio::sync::Mutex as AMutex;
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use tracing::{info, warn};
-use tokio::sync::RwLock as ARwLock;
 
 use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
 use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
-use crate::global_context::GlobalContext;
-use crate::scratchpads::chat_utils_rag::{HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2};
+use crate::scratchpads::chat_utils_rag::{HasRagResults, max_tokens_for_rag_chat, postprocess_at_results2, postprocess_plain_text_messages};
 
 
 pub async fn run_tools(
-    global_context: Arc<ARwLock<GlobalContext>>,
+    ccx: Arc<AMutex<AtCommandsContext>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
-    n_ctx: usize,
     original_messages: &Vec<ChatMessage>,
-    top_n: usize,
     stream_back_to_user: &mut HasRagResults,
 ) -> (Vec<ChatMessage>, bool)
 {
+    let (n_ctx, top_n) = {
+        let ccx_locked = ccx.lock().await;
+        (ccx_locked.n_ctx, ccx_locked.top_n)
+    };
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let context_limit = reserve_for_context;
 
@@ -38,11 +40,11 @@ pub async fn run_tools(
         return (original_messages.clone(), false);
     }
 
-    let mut ccx = AtCommandsContext::new(global_context.clone(), top_n, false, original_messages).await;
-    let at_tools = ccx.at_tools.clone();
+    let at_tools = ccx.lock().await.at_tools.clone();
 
-    let mut context_messages: Vec<ChatMessage> = original_messages.iter().map(|m| m.clone()).collect();
-    let mut for_postprocessing: Vec<ContextFile> = vec![];
+    let mut for_postprocessing = vec![];
+    let mut generated_tool = vec![];  // tool must go first
+    let mut generated_other = vec![];
 
     for t_call in ass_msg.tool_calls.as_ref().unwrap_or(&vec![]).iter() {
         if let Some(cmd) = at_tools.get(&t_call.function.name) {
@@ -55,33 +57,42 @@ pub async fn run_tools(
                     content: format!("couldn't deserialize arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
+                    ..Default::default()
                 };
-                context_messages.push(tool_failed_message.clone());
-                stream_back_to_user.push_in_json(json!(tool_failed_message));
+                generated_tool.push(tool_failed_message.clone());
                 continue;
             }
             let args = args_maybe.unwrap();
             info!("tool use: args={:?}", args);
-            let tool_msg_and_maybe_more_mb = cmd.lock().await.execute(&mut ccx, &t_call.id.to_string(), &args).await;
+            let tool_msg_and_maybe_more_mb = cmd.lock().await.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await;
             if let Err(e) = tool_msg_and_maybe_more_mb {
-                let tool_failed_message = ChatMessage {
+                let mut tool_failed_message = ChatMessage {
                     role: "tool".to_string(),
                     content: e.to_string(),
                     tool_calls: None,
                     tool_call_id: t_call.id.to_string(),
+                    ..Default::default()
                 };
-                context_messages.push(tool_failed_message.clone());
-                stream_back_to_user.push_in_json(json!(tool_failed_message));
+                {
+                    let mut cmd_lock = cmd.lock().await;
+                    if let Some(usage) = cmd_lock.usage() {
+                        tool_failed_message.usage = Some(usage.clone());
+                    }
+                    *cmd_lock.usage() = None;
+                }
+                generated_tool.push(tool_failed_message.clone());
                 continue;
             }
             let tool_msg_and_maybe_more = tool_msg_and_maybe_more_mb.unwrap();
             let mut have_answer = false;
             for msg in tool_msg_and_maybe_more {
                 if let ContextEnum::ChatMessage(ref raw_msg) = msg {
-                    context_messages.push(raw_msg.clone());
-                    stream_back_to_user.push_in_json(json!(raw_msg.clone()));
                     if (raw_msg.role == "tool" || raw_msg.role == "diff") && raw_msg.tool_call_id == t_call.id {
+                        generated_tool.push(raw_msg.clone());
                         have_answer = true;
+                    } else {
+                        generated_other.push(raw_msg.clone());
+                        assert!(raw_msg.tool_call_id.is_empty());
                     }
                 }
                 if let ContextEnum::ContextFile(ref cf) = msg {
@@ -97,34 +108,71 @@ pub async fn run_tools(
                 content: e.to_string(),
                 tool_calls: None,
                 tool_call_id: t_call.id.to_string(),
+                ..Default::default()
             };
-            context_messages.push(tool_failed_message.clone());
-            stream_back_to_user.push_in_json(json!(tool_failed_message));
+            generated_tool.push(tool_failed_message.clone());
         }
     }
 
-    let context_file: Vec<ContextFile> = postprocess_at_results2(
-        global_context.clone(),
-        &for_postprocessing,
-        tokenizer.clone(),
-        context_limit,
-        false,
-        top_n,
-    ).await;
+    if context_limit > MIN_RAG_CONTEXT_LIMIT {
+        let (tokens_limit_chat_msg, mut tokens_limit_files) = {
+            if for_postprocessing.is_empty() {
+                (context_limit, 0)
+            } else {
+                (context_limit / 2, context_limit / 2)
+            }
+        };
+        info!("run_tools: context_limit={} tokens_limit_chat_msg={} tokens_limit_files={}", context_limit, tokens_limit_chat_msg, tokens_limit_files);
 
-    if !context_file.is_empty() {
-        let json_vec = context_file.iter().map(|p| {
-            json!(p)
-        }).collect::<Vec<Value>>();
+        let (pp_chat_msg, non_used_context_limit) = postprocess_plain_text_messages(
+            generated_tool.iter().chain(generated_other.iter()).collect(),
+            tokenizer.clone(),
+            tokens_limit_chat_msg,
+        ).await;
 
-        let message = ChatMessage::new(
-            "context_file".to_string(),
-            serde_json::to_string(&json_vec).unwrap_or("".to_string()),
-        );
+        // re-add potentially truncated messages, role="tool" will still go first
+        generated_tool.clear();
+        generated_other.clear();
+        for m in pp_chat_msg {
+            if !m.tool_call_id.is_empty() {
+                generated_tool.push(m.clone());
+            } else {
+                generated_other.push(m.clone());
+            }
+        }
 
-        context_messages.push(message.clone());
-        stream_back_to_user.push_in_json(json!(message));
+        tokens_limit_files += non_used_context_limit;
+        info!("run_tools: tokens_limit_files={} after postprocessing", tokens_limit_files);
+
+        let gcx = ccx.lock().await.global_context.clone();
+        let context_file: Vec<ContextFile> = postprocess_at_results2(
+            gcx.clone(),
+            &for_postprocessing,
+            tokenizer.clone(),
+            tokens_limit_files,
+            false,
+            top_n,
+        ).await;
+
+        if !context_file.is_empty() {
+            let json_vec = context_file.iter().map(|p| json!(p)).collect::<Vec<Value>>();
+            let message = ChatMessage::new(
+                "context_file".to_string(),
+                serde_json::to_string(&json_vec).unwrap_or("".to_string()),
+            );
+            generated_other.push(message.clone());
+        }
     }
 
-    (context_messages, true)
+    let mut all_messages: Vec<ChatMessage> = original_messages.iter().map(|m| m.clone()).collect();
+    for msg in generated_tool.iter() {
+        all_messages.push(msg.clone());
+        stream_back_to_user.push_in_json(json!(msg));
+    }
+    for msg in generated_other.iter() {
+        all_messages.push(msg.clone());
+        stream_back_to_user.push_in_json(json!(msg));
+    }
+
+    (all_messages, true)
 }
