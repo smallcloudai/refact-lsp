@@ -18,10 +18,12 @@ pub async fn run_at_commands(
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
-    top_n: usize,
     stream_back_to_user: &mut HasRagResults,
 ) -> (Vec<ChatMessage>, usize, bool) {
-    let n_ctx = ccx.lock().await.n_ctx;
+    let (n_ctx, top_n) = {
+        let ccx_locked = ccx.lock().await;
+        (ccx_locked.n_ctx, ccx_locked.top_n)
+    };
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     info!("reserve_for_context {} tokens", reserve_for_context);
 

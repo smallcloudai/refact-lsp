@@ -15,6 +15,9 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::global_context::SharedGlobalContext;
 use crate::scratchpads;
 
+
+pub const CHAT_TOP_N: usize = 7;
+
 pub async fn lookup_chat_scratchpad(
     caps: Arc<StdRwLock<CodeAssistantCaps>>,
     chat_post: &ChatPost,
@@ -105,8 +108,13 @@ async fn chat(
     //     ));
     //     let _ = std::fs::write(&notes_path, serde_json::to_string_pretty(&chat_post.messages).unwrap());
     // }
-    let top_n = 7;
-    let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(AtCommandsContext::new(global_context.clone(), n_ctx, top_n, false, &chat_post.messages).await));
+    let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(AtCommandsContext::new(
+        global_context.clone(),
+        n_ctx,
+        CHAT_TOP_N,
+        false,
+        &chat_post.messages,
+    ).await));
 
     if chat_post.stream.is_some() && !chat_post.stream.unwrap() {
         crate::restream::scratchpad_interaction_not_stream(

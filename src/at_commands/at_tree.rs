@@ -246,7 +246,7 @@ impl AtCommand for AtTree {
             Some(arg) => {
                 let path = arg.text.clone();
                 let candidates = correct_to_nearest_dir_path(gcx.clone(), &path, false, 10).await;
-                let candidate = real_file_path_candidate(ccx, &path, &candidates, &get_project_paths(ccx).await, true).await.map_err(|e| {
+                let candidate = real_file_path_candidate(ccx.clone(), &path, &candidates, &get_project_paths(ccx.clone()).await, true).await.map_err(|e| {
                     cmd.ok = false; cmd.reason = Some(e.clone()); args.clear();
                     e
                 })?;

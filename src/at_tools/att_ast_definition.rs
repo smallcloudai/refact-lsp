@@ -24,8 +24,7 @@ impl Tool for AttAstDefinition {
         ccx: Arc<AMutex<AtCommandsContext>>,
         tool_call_id: &String,
         args: &HashMap<String, Value>,
-    ) -> Result<Vec<ContextEnum>, String>
-    {
+    ) -> Result<Vec<ContextEnum>, String> {
         let mut symbol = match args.get("symbol") {
             Some(Value::String(s)) => s.clone(),
             Some(v) => { return Err(format!("argument `symbol` is not a string: {:?}", v)) }

@@ -174,7 +174,7 @@ impl AtParam for AtParamFilePath {
         }
         let file_path = PathBuf::from(value);
         if file_path.is_relative() {
-            let project_paths = get_project_paths(ccx).await;
+            let project_paths = get_project_paths(ccx.clone()).await;
             let options = project_paths.iter().map(|x|x.join(&file_path)).filter(|x|x.is_file()).collect::<Vec<_>>();
             if !options.is_empty() {
                 return options.iter().map(|x| x.to_string_lossy().to_string()).collect();

@@ -99,16 +99,15 @@ impl ScratchpadAbstract for ChatPassthrough {
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
         info!("chat passthrough {} messages at start", &self.post.messages.len());
-        let top_n: usize = 15;
+        let n_ctx = ccx.lock().await.n_ctx;
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
-            run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.post.messages, top_n, &mut self.has_rag_results).await
+            run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.post.messages, &mut self.has_rag_results).await
         } else {
             (self.post.messages.clone(), self.post.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, top_n, &mut self.has_rag_results).await;
+            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results).await;
         };
-        let n_ctx = ccx.lock().await.n_ctx;
         let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
