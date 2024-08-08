@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -12,7 +12,7 @@ use crate::at_tools::att_patch::unified_diff_format::UnifiedDiffFormat;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum};
 
-pub const DEFAULT_MODEL_NAME: &str = "claude-3-5-sonnet";
+pub const DEFAULT_MODEL_NAME: &str = "gpt-4o";
 pub const MAX_TOKENS: usize = 64000;
 pub const MAX_NEW_TOKENS: usize = 8192;
 pub const TEMPERATURE: f32 = 0.2;
@@ -44,28 +44,54 @@ impl Tool for ToolPatch {
                 return Err(format!("Cannot parse input arguments: {err}. Try to call `patch` one more time with valid arguments"));
             }
         };
-        let (answer, usage_mb) = match execute_chat_model(&args, ccx).await {
+        let (answers, usage_mb) = match execute_chat_model(&args, ccx).await {
             Ok(res) => res,
             Err(err) => {
                 return Err(format!("Patch model execution problem: {err}. Try to call `patch` one more time"));
             }
         };
-        
-        let mut results = vec![];
-        
-        let parsed_chunks = parse_diff_chunks_from_message(ccx, &answer).await.map_err(|err| {
-            self.usage = usage_mb.clone();
-            warn!(err);
-            format!("{err}. Try to call `patch` one more time to generate a correct diff")
-        })?;
 
-        results.push(ContextEnum::ChatMessage(ChatMessage {
-            role: "diff".to_string(),
-            content: parsed_chunks,
-            tool_calls: None,
-            tool_call_id: tool_call_id.clone(),
-            usage: usage_mb,
-        }));
+        let mut counter = HashMap::new();
+        for answer in answers {
+            let parsed_chunks = match parse_diff_chunks_from_message(ccx, &answer).await {
+                Ok(parsed_chunks) => parsed_chunks,
+                Err(err) => {
+                    self.usage = usage_mb.clone();
+                    warn!(err);
+                    String::new()
+                }
+            };
+            if !parsed_chunks.is_empty() {
+                let count = counter.entry(parsed_chunks).or_insert(0);
+                *count += 1;
+            }
+        }
+
+        let mut results = vec![];
+        for (parsed_chunks, count) in counter {
+            let mut usage: Option<ChatUsage> = None;
+            if results.is_empty() {
+                usage = usage_mb.clone();
+            }
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "diff".to_string(),
+                content: parsed_chunks,
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                usage, count,
+            }));
+        }
+
+        if results.is_empty() {
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "diff".to_string(),
+                content: "Try to call `patch` one more time to generate a correct diff".to_string(),
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                usage: usage_mb.clone(),
+                count: 0,
+            }));
+        }
         
         Ok(results)
     }

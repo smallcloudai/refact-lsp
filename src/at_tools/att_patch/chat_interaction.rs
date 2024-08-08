@@ -82,8 +82,9 @@ async fn make_chat_history(
 pub async fn execute_chat_model(
     args: &PatchArguments,
     ccx: &mut AtCommandsContext,
-) -> Result<(String, Option<ChatUsage>), String> {
+) -> Result<(Vec<String>, Option<ChatUsage>), String> {
     let gx = ccx.global_context.clone();
+    let n_choices: Option<usize> = Some(12);
     let mut chat_post = ChatPost {
         messages: vec![],
         parameters: SamplingParameters {
@@ -91,14 +92,14 @@ pub async fn execute_chat_model(
             temperature: Some(crate::at_tools::att_patch::tool::TEMPERATURE),
             top_p: None,
             stop: vec![],
-            n: None
+            n: n_choices,
         },
         model: crate::at_tools::att_patch::tool::DEFAULT_MODEL_NAME.to_string(),
         scratchpad: "".to_string(),
         stream: Some(false),
         temperature: Some(crate::at_tools::att_patch::tool::TEMPERATURE),
         max_tokens: crate::at_tools::att_patch::tool::MAX_TOKENS,
-        n: None,
+        n: n_choices,
         tools: None,
         tool_choice: None,
         only_deterministic_messages: false,
@@ -187,21 +188,14 @@ pub async fn execute_chat_model(
         None => return Err("unable to get choices array from JSON".to_string()),
     };
 
-    let choice0 = match choices_array.get(0) {
-        Some(Value::Object(o)) => o,
-        Some(v) => { return Err(format!("choice[0] is not a dict: {:?}", v)) }
-        None => { return Err("error while parsing patch model's output: choice[0] doesn't exist".to_string()) }
-    };
-
-    let choice0_message = match choice0.get("message") {
-        Some(Value::Object(o)) => o,
-        Some(v) => { return Err(format!("choice[0].message is not a dict: {:?}", v)) }
-        None => { return Err("error while parsing patch model's output: choice[0].message doesn't exist".to_string()) }
-    };
-
-    match choice0_message.get("content") {
-        Some(Value::String(s)) => Ok((s.clone(), usage_mb)),
-        Some(v) => { return Err(format!("choice[0].message.content is not a string: {:?}", v)) }
-        None => { return Err("error while parsing patch model's output: choice[0].message.content doesn't exist".to_string()) }
+    let mut choices = Vec::new();
+    for item in choices_array {
+        if let Some(content) = item.get("message")
+            .and_then(|msg| msg.get("content"))
+            .and_then(|content| content.as_str()) {
+            choices.push(content.to_string());
+        }
     }
+
+    Ok((choices, usage_mb.clone()))
 }

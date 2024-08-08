@@ -38,6 +38,7 @@ class Message(BaseModel):
     finish_reason: str = ""
     tool_call_id: str = ""
     usage: Optional[Dict[str, int]] = None
+    count: int = 0
 
 
 def messages_to_dicts(
