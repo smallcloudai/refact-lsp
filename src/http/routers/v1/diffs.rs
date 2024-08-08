@@ -4,17 +4,18 @@ use std::sync::Arc;
 
 use axum::Extension;
 use axum::http::{Response, StatusCode};
+use hashbrown::HashMap;
 use hyper::Body;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
 use tokio::sync::RwLock as ARwLock;
 use tracing::warn;
-use crate::at_commands::at_file::file_repair_candidates;
 use crate::call_validation::DiffChunk;
 use crate::custom_error::ScratchError;
-use crate::diffs::{read_files_n_apply_diff_chunks, fuzzy_results_into_state_vector};
+use crate::diffs::{read_files_n_apply_diff_chunks_edit, fuzzy_results_into_state_vector, correct_and_validate_chunks, can_apply_diff_chunks_other, apply_diff_chunks_other_to_files};
 use crate::files_in_workspace::Document;
 use crate::global_context::GlobalContext;
 use crate::vecdb::vdb_highlev::memories_block_until_vectorized;
@@ -79,51 +80,6 @@ fn validate_post(post: &DiffPost) -> Result<(), ScratchError> {
     Ok(())
 }
 
-fn validate_chunk(chunk: &DiffChunk) -> Result<(), String> {
-    if chunk.line1 < 1 {
-        return Err("Invalid line range: line1 cannot be < 1".to_string());
-    }
-    if chunk.line2 < chunk.line1 {
-        return Err("Invalid line range: line2 cannot be < line1".to_string());
-    }
-    if !vec!["edit", "add"].contains(&chunk.file_action.as_str()) {
-        return Err("Invalid file action: file_action must be either `edit` or `add`".to_string());
-    }
-    Ok(())
-}
-
-async fn correct_and_validate_chunks(
-    chunks: &mut Vec<DiffChunk>,
-    global_context: Arc<ARwLock<GlobalContext>>
-) -> Result<(), ScratchError> {
-    for c in chunks.iter_mut() {
-        let file_path = PathBuf::from(&c.file_name);
-        if !file_path.is_file() {
-            let candidates = file_repair_candidates(&c.file_name, global_context.clone(), 5, false).await;
-            let fuzzy_candidates = file_repair_candidates(&c.file_name, global_context.clone(), 5, true).await;
-
-            if candidates.len() > 1 {
-                return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is ambiguous.\nIt could be interpreted as:\n{}", &c.file_name, candidates.join("\n"))));
-            }
-            if candidates.is_empty() {
-                return if !fuzzy_candidates.is_empty() {
-                    Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found.\nHowever, there are similar paths:\n{}", &c.file_name, fuzzy_candidates.join("\n"))))
-                } else {
-                    Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found", &c.file_name)))
-                }
-            }
-            let candidate = candidates.get(0).unwrap();
-            if !PathBuf::from(&candidate).is_file() {
-                return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("file_name `{}` is not found.\nHowever, there are similar paths:\n{}", &c.file_name, fuzzy_candidates.join("\n"))));
-            }
-            c.file_name = candidate.clone();
-        }
-
-        validate_chunk(c).map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, format!("error validating chunk {:?}:\n{}", c, e)))?;
-    }
-    Ok(())
-}
-
 async fn sync_documents_ast_vecdb(global_context: Arc<ARwLock<GlobalContext>>, docs: Vec<Document>) -> Result<(), ScratchError> {
     if let Some(ast) = global_context.write().await.ast_module.clone() {
         let mut ast_write = ast.write().await;
@@ -166,7 +122,7 @@ pub async fn handle_v1_diff_apply(
     post.set_id();
 
     validate_post(&post)?;
-    correct_and_validate_chunks(&mut post.chunks, global_context.clone()).await?;
+    correct_and_validate_chunks(&mut post.chunks, global_context.clone()).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     // undo all chunks that are already applied to file, then apply chunks marked in post.apply
     let applied_state = {
@@ -174,13 +130,19 @@ pub async fn handle_v1_diff_apply(
         diff_state.get(&post.id).map(|x| x.clone()).unwrap_or_default()
     };
     let desired_state = post.apply.clone();
-    let (texts_after_patch, fuzzy_n_used) = read_files_n_apply_diff_chunks(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (texts_after_patch_edit, fuzzy_n_used) = read_files_n_apply_diff_chunks_edit(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    
+    // println!("applied_state: {:?}", applied_state);
+    let can_apply_other_raw = can_apply_diff_chunks_other(&post.chunks, &applied_state, &desired_state);
+    let can_apply_other = fuzzy_results_into_state_vector(&can_apply_other_raw, post.chunks.len()).iter().map(|x| *x == 0 || *x == 1).collect();
+    // println!("can_apply_other: {:?}", can_apply_other);
+    let results_other = apply_diff_chunks_other_to_files(&post.chunks, &can_apply_other);
 
-    for (file_name, new_text) in texts_after_patch.iter() {
+    for (file_name, new_text) in texts_after_patch_edit.iter() {
         write_to_file(file_name, new_text).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
     }
 
-    let docs: Vec<Document> = texts_after_patch.iter().map(|(k, v)| {
+    let docs: Vec<Document> = texts_after_patch_edit.iter().map(|(k, v)| {
         let mut doc = Document::new(&PathBuf::from(k));
         doc.update_text(v);
         doc
@@ -188,10 +150,14 @@ pub async fn handle_v1_diff_apply(
 
     sync_documents_ast_vecdb(global_context.clone(), docs).await?;
     
-    let new_state = fuzzy_results_into_state_vector(&fuzzy_n_used, post.chunks.len());
+    let mut fuzzy_results_map = HashMap::new();
+    fuzzy_results_map.extend(results_other);
+    fuzzy_results_map.extend(fuzzy_n_used);
+        
+    let new_state = fuzzy_results_into_state_vector(&fuzzy_results_map, post.chunks.len());
     global_context.write().await.documents_state.diffs_applied_state.insert(post.id, new_state.iter().map(|x|x==&1).collect::<Vec<_>>().clone());
 
-    let fuzzy_results: Vec<DiffResponseItem> = fuzzy_n_used.iter().filter(|x|x.1.is_some())
+    let fuzzy_results: Vec<DiffResponseItem> = fuzzy_results_map.iter().filter(|x|x.1.is_some())
         .map(|(chunk_id, fuzzy_n_used)| DiffResponseItem {
             chunk_id: chunk_id.clone(),
             fuzzy_n_used: fuzzy_n_used.unwrap()
@@ -240,7 +206,7 @@ pub async fn handle_v1_diff_state(
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     post.set_id();
 
-    correct_and_validate_chunks(&mut post.chunks, global_context.clone()).await?;
+    correct_and_validate_chunks(&mut post.chunks, global_context.clone()).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     let applied_state = {
         let diff_state = global_context.read().await.documents_state.diffs_applied_state.clone();
@@ -248,8 +214,14 @@ pub async fn handle_v1_diff_state(
     };
     let desired_state = vec![true; post.chunks.len()];
 
-    let (_, fuzzy_n_used) = read_files_n_apply_diff_chunks(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
-    let new_state = fuzzy_results_into_state_vector(&fuzzy_n_used, post.chunks.len());
+    let (_, fuzzy_n_used) = read_files_n_apply_diff_chunks_edit(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let can_apply_other = can_apply_diff_chunks_other(&post.chunks, &applied_state, &desired_state);
+    
+    let mut can_apply_raw = HashMap::new();
+    can_apply_raw.extend(fuzzy_n_used);
+    can_apply_raw.extend(can_apply_other);
+    
+    let new_state = fuzzy_results_into_state_vector(&can_apply_raw, post.chunks.len());
     let can_apply = new_state.iter().map(|x| *x == 0 || *x == 1).collect();
 
     let response = DiffStateResponse {
