@@ -40,6 +40,7 @@ pub async fn at_tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> H
         // ("diff".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_diff::AttDiff{}) as Box<dyn Tool + Send>))),
         ("web".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_web::AttWeb{}) as Box<dyn Tool + Send>))),
         ("files_skeleton".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_files_skeleton::AttFilesSkeleton{}) as Box<dyn Tool + Send>))),
+        ("supercat".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_supercat::AttSuperCat{}) as Box<dyn Tool + Send>))),
         ("relevant_files".to_string(), Arc::new(AMutex::new(Box::new(crate::at_tools::att_relevant_files::AttRelevantFiles{}) as Box<dyn Tool + Send>))),
     ]);
 
@@ -166,6 +167,18 @@ tools:
         description: "Put your intent there: 'debug file1.cpp', 'install project1', 'gather info about MyClass'"
     parameters_required:
       - "im_going_to_do"
+
+  - name: "supercat"
+    description: "Like cat in console, but better: it can read multiple files and skeletonize them. Give it AST symbols important for the goal (classes, functions, variables, etc) to see them in full."
+    parameters:
+      - name: "paths"
+        type: "string"
+        description: "Comma separated file names: dir1/file1.ext, dir2/file2.ext"
+      - name: "symbols"
+        type: "string"
+        description: "Comma separated symbols: MyClass, MyClass::method, my_function"
+    parameters_required:
+      - "paths"
 
   - name: "relevant_files"
     description: "Get a list of files that are relevant to solve a particular task."
