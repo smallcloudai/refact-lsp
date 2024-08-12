@@ -227,6 +227,7 @@ async fn supercat_extract_symbols(
 
     let mut supercat_args = HashMap::new();
     supercat_args.insert("paths".to_string(), files.join(","));
+    supercat_args.insert("skeleton".to_string(), "true".to_string());
     if !symbols.is_empty() {
         supercat_args.insert("symbols".to_string(), symbols.join(","));
     }
@@ -290,6 +291,7 @@ async fn supercat_decider(
 
     let mut supercat_args = HashMap::new();
     supercat_args.insert("paths".to_string(), files.join(","));
+    supercat_args.insert("skeleton".to_string(), "true".to_string());
     if !symbols.is_empty() {
         supercat_args.insert("symbols".to_string(), symbols.join(","));
     }
@@ -364,12 +366,11 @@ async fn find_relevant_files_det(
     ccx: Arc<AMutex<AtCommandsContext>>,
     user_query: &str
 ) -> Result<Value, String> {
-    // all_results = [*strategy_1, *strategy_2, .. *strategy_n] -> call supercat(files or files + symbols) -> let model decide
-
     let mut paths_chosen = vec![];
+    
     let tree_files = strategy_tree(ccx.clone(), user_query).await?;
     let (def_ref_files, mut symbols) = strategy_definitions_references(ccx.clone(), user_query).await?;
-    println!("\n\nSYMBOLS: {:?}\n\n", symbols);
+    
     paths_chosen.extend(tree_files);
     paths_chosen.extend(def_ref_files);
     
@@ -379,9 +380,8 @@ async fn find_relevant_files_det(
         paths_chosen.clone(),
         symbols.clone(),
     ).await?;
-    println!("\n\nEXTRA SYMBOLS: {:?}\n\n", extra_symbols);
-    symbols.extend(extra_symbols);
     
+    symbols.extend(extra_symbols);
 
     let results = supercat_decider(
         ccx.clone(),
@@ -389,10 +389,6 @@ async fn find_relevant_files_det(
         paths_chosen,
         symbols,
     ).await?;
-    // let results = json!(paths_chosen.into_iter().map(|x|SuperCatResultItem{
-    //     file_path: x.to_string(),
-    //     reason: "none".to_string(),
-    // }).collect::<Vec<_>>());
     Ok(results)
 }
 
