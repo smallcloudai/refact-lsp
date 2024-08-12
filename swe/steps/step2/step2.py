@@ -1,6 +1,7 @@
 import re
 import json
 import subprocess
+import asyncio
 
 from refact import chat_client
 from refact.chat_client import print_block
@@ -10,7 +11,7 @@ from swe.steps import Step
 
 from collections import Counter
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Dict, Tuple, Any
 
 
 CONTEXT_SYSTEM_MESSAGE = f"""
@@ -62,6 +63,17 @@ class ProducePatchStep(Step):
         return self._active_tools
 
     @staticmethod
+    async def _lint(filename: Path) -> bool:
+        process = await asyncio.create_subprocess_exec(
+            "flake8",
+            "--select=E9,F821,F823,F831,F406,F407,F701,F702,F704,F706",
+            "--show-source",
+            "--isolated", str(filename),
+        )
+        await process.communicate()
+        return process.returncode == 0
+
+    @staticmethod
     def _extract_filenames(text: str, filter_tests: bool = False) -> Set[str]:
         pattern = r'\b(?:[a-zA-Z]:\\|/)?(?:[\w-]+[/\\])*[\w-]+\.\w+\b'
         filenames = set(re.findall(pattern, text))
@@ -69,16 +81,20 @@ class ProducePatchStep(Step):
             filenames = {f for f in filenames if "test" not in f.lower()}
         return filenames
 
-    async def _patch_generate(self, message: chat_client.Message, repo_name: Path):
+    async def _patch_generate(self, message: chat_client.Message, repo_name: Path) -> Tuple[str, int, Dict[str, Any]]:
         if message.role != "diff":
             raise RuntimeError("not a diff message")
         formatted_diff = json.loads(message.content)
         await chat_client.diff_apply(self._base_url, chunks=formatted_diff, apply=[True] * len(formatted_diff))
         result = subprocess.check_output(["git", "--no-pager", "diff"], cwd=str(repo_name))
+        is_linted = all([
+            await self._lint(filename)
+            for filename in set([d["file_name"] for d in formatted_diff])
+        ])
         await chat_client.diff_apply(self._base_url, chunks=formatted_diff, apply=[False] * len(formatted_diff))
-        return result.decode()
+        return result.decode(), message.count, {"is_linted": is_linted, "formatted_diff": formatted_diff}
 
-    async def _patch(self, message: chat_client.Message, repo_name: Path, problem_statement: str) -> str:
+    async def _patch(self, message: chat_client.Message, repo_name: Path, problem_statement: str) -> Tuple[Counter, Dict]:
         function_dict = message.tool_calls[0].function
         if function_dict.name != "patch":
             raise RuntimeError("not a patch tool call")
@@ -87,19 +103,33 @@ class ProducePatchStep(Step):
             raise RuntimeError("patch tool call should edit exactly one filename")
         if not args.get("todo", ""):
             raise RuntimeError("patch tool should contain todo")
+        todo = args["todo"]
         args["todo"] = "\n\n".join([
             "Original problem:", problem_statement,
-            "Plan:", args["todo"],
+            "Plan:", todo,
             PATCH_TODO_REMINDER,
         ])
         function_dict.arguments = json.dumps(args)
+        message.tool_calls = message.tool_calls[:1]
         self._trajectory.extend(print_messages([message]))
         patch_tool_messages = await self._query([message], only_deterministic_messages=True)
         self._trajectory.extend(print_messages(patch_tool_messages))
+
+        results = []
         for message in patch_tool_messages:
-            if message.role == "diff":
-                return await self._patch_generate(message, repo_name)
-        raise RuntimeError(f"expected a diff message")
+            if message.role != "diff":
+                continue
+            model_patch, count, raw_diff_info = await self._patch_generate(message, repo_name)
+            results.append((model_patch, count, raw_diff_info))
+
+        model_patches = Counter({
+            model_patch: count
+            for model_patch, count, result_info in results
+            if result_info["is_linted"] and model_patch
+        })
+        if not model_patches:
+            raise RuntimeError(f"expected a diff message")
+        return model_patches, {"todo": todo, "results": results}
 
     async def _deterministic_tool_call_messages(
             self, functions: List[chat_client.FunctionDict]) -> List[chat_client.Message]:
@@ -135,34 +165,35 @@ class ProducePatchStep(Step):
         )
         self._trajectory.extend(print_messages(messages))
 
-        function_dict_counter = Counter()
-        for idx, new_messages in enumerate(await self._query_choices(messages, self._context_choices)):
-            self._trajectory.append(print_block("context choice", idx + 1))
-            self._trajectory.extend(print_messages(new_messages))
-            try:
-                def _normalize(args: str):
-                    try:
-                        return json.dumps(json.loads(args))
-                    except:
-                        return args
-
-                function_dict_counter.update([
-                    chat_client.FunctionDict(
-                        name=tool_call_dict.function.name,
-                        arguments=_normalize(tool_call_dict.function.arguments),
-                    )
-                    for tool_call_dict in new_messages[-1].tool_calls
-                    if tool_call_dict.type == "function"
-                ])
-            except Exception as e:
-                self._trajectory.append(print_exception(e, trace=True))
-
-        if function_dict_counter:
-            tool_call_messages = await self._deterministic_tool_call_messages([
-                function_dict for function_dict, _ in function_dict_counter.most_common()
-            ])
-            self._trajectory.extend(print_messages(tool_call_messages))
-            messages += tool_call_messages
+        # NOTE: this block of context collection doesn't give better results, but we need to check why
+        # function_dict_counter = Counter()
+        # for idx, new_messages in enumerate(await self._query_choices(messages, self._context_choices)):
+        #     self._trajectory.append(print_block("context choice", idx + 1))
+        #     self._trajectory.extend(print_messages(new_messages))
+        #     try:
+        #         def _normalize(args: str):
+        #             try:
+        #                 return json.dumps(json.loads(args))
+        #             except:
+        #                 return args
+        #
+        #         function_dict_counter.update([
+        #             chat_client.FunctionDict(
+        #                 name=tool_call_dict.function.name,
+        #                 arguments=_normalize(tool_call_dict.function.arguments),
+        #             )
+        #             for tool_call_dict in new_messages[-1].tool_calls
+        #             if tool_call_dict.type == "function"
+        #         ])
+        #     except Exception as e:
+        #         self._trajectory.append(print_exception(e, trace=True))
+        #
+        # if function_dict_counter:
+        #     tool_call_messages = await self._deterministic_tool_call_messages([
+        #         function_dict for function_dict, _ in function_dict_counter.most_common()
+        #     ])
+        #     self._trajectory.extend(print_messages(tool_call_messages))
+        #     messages += tool_call_messages
 
         return messages[1:]
 
@@ -178,17 +209,31 @@ class ProducePatchStep(Step):
             chat_client.Message(role="system", content=PATCH_SYSTEM_MESSAGE),
             *context_messages,
         ]
-        results = list()
+        patch_count = 0
+        attempt_results = []
+        model_patches_counter = Counter()
         for idx, new_messages in enumerate(await self._query_choices(messages, self._patch_choices)):
             self._trajectory.append(print_block("patch choice", idx + 1))
             self._trajectory.extend(print_messages(new_messages))
             try:
-                results.append(await self._patch(new_messages[-1], repo_path.absolute(), problem_statement))
+                model_patches, results = await self._patch(new_messages[-1], repo_path.absolute(), problem_statement)
+                model_patches_counter.update(model_patches)
+                attempt_results.append(results)
+                patch_count += 1
+                if patch_count == 3:
+                    break
             except Exception as e:
                 self._trajectory.append(print_exception(e, trace=True))
-        return results
 
-    async def process(self, problem_statement: str, related_files: List[str], repo_path: Path, **kwargs) -> List[str]:
+        # NOTE: we need to improve patches of counter
+        # 1. count score over each attempt (gives higher probability)
+        # 2. patch normalization before linting
+        model_patches_with_scores = [
+            (p, cnt / sum(model_patches_counter.values()))
+            for p, cnt in model_patches_counter.most_common()
+        ]
+        return model_patches_with_scores, attempt_results
+
+    async def process(self, problem_statement: str, related_files: List[str], repo_path: Path, **kwargs) -> Tuple[List, List]:
         context_messages = await self._collect_context(problem_statement, related_files, repo_path)
-        results = await self._collect_patches(problem_statement, repo_path, context_messages)
-        return results
+        return await self._collect_patches(problem_statement, repo_path, context_messages)
