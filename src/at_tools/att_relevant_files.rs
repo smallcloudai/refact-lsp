@@ -24,7 +24,13 @@ pub struct AttRelevantFiles;
 
 #[async_trait]
 impl Tool for AttRelevantFiles {
-    async fn tool_execute(&mut self, ccx: Arc<AMutex<AtCommandsContext>>, tool_call_id: &String, _args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+    async fn tool_execute(&mut self, ccx: Arc<AMutex<AtCommandsContext>>, tool_call_id: &String, args: &HashMap<String, Value>) -> Result<Vec<ContextEnum>, String> {
+        let problem_statement_summary = match args.get("problem_statement") {
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => return Err(format!("argument `problem_statement` is not a string: {:?}", v)),
+            None => return Err("Missing argument `problem_statement`".to_string())
+        };
+
         let (top_n_default, n_ctx_default) = {
             let mut ccx_lock = ccx.lock().await;
             let (top_n_default, n_ctx_default) = (ccx_lock.top_n, ccx_lock.n_ctx);
@@ -32,14 +38,18 @@ impl Tool for AttRelevantFiles {
             ccx_lock.n_ctx = 64_000;
             (top_n_default, n_ctx_default)
         };
-        let problem = {
-            let ccx_locked = ccx.lock().await;
-            ccx_locked.messages.iter().filter(|m| m.role == "user").last().map(|x|x.content.clone()).ok_or(
-                "relevant_files: unable to find user problem description".to_string()
-            )?
-        };
 
-        let res = find_relevant_files_det(ccx.clone(), problem.as_str()).await?;
+        let problem_message_mb = {
+            let ccx_locked = ccx.lock().await;
+            ccx_locked.messages.iter().filter(|m| m.role == "user").last().map(|x|x.content.clone())
+        };
+        
+        let mut problem_statement = format!("Problem statement:\n{}", problem_statement_summary);
+        if let Some(problem_message) = problem_message_mb {
+            problem_statement = format!("{}\n\nProblem described by user:\n{}", problem_statement, problem_message);
+        }
+        
+        let res = find_relevant_files_det(ccx.clone(), problem_statement.as_str()).await?;
 
         {
             let mut ccx_lock = ccx.lock().await;
