@@ -121,7 +121,8 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
-                "gpt-4o-2024-05-13"
+                "gpt-4o-2024-05-13",
+                "gpt-4o-2024-08-06"
             ]
         },
         "gpt-4o-mini": {
