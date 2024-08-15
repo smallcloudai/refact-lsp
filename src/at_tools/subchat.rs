@@ -264,6 +264,7 @@ pub async fn subchat_single(
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
     temperature: Option<f32>,
+    max_new_tokens: Option<usize>,
     n: usize,
     logfn_mb: Option<String>,
     tx_toolid_mb: Option<String>,
@@ -286,13 +287,13 @@ pub async fn subchat_single(
     info!("tools_on_intersection {:?}", tools_on_intersection);
 
     let temperature = Some(temperature.unwrap_or(TEMPERATURE));
-
+    let max_new_tokens = max_new_tokens.unwrap_or(MAX_NEW_TOKENS);
     let (mut chat_post, spad) = create_chat_post_and_scratchpad(
         gcx.clone(),
         model_name,
         messages.iter().collect::<Vec<_>>(),
         temperature,
-        MAX_NEW_TOKENS,
+        max_new_tokens,
         n,
         Some(tools),
         tool_choice.clone(),
@@ -393,6 +394,7 @@ pub async fn subchat(
                 Some("auto".to_string()),
                 false,
                 temperature,
+                None,
                 1,
                 logfn_mb.clone(),
                 tx_toolid_mb.clone(),
@@ -413,6 +415,7 @@ pub async fn subchat(
                 Some("none".to_string()),
                 true,   // <-- only runs tool calls
                 temperature,
+                None,
                 1,
                 logfn_mb.clone(),
                 tx_toolid_mb.clone(),
@@ -429,6 +432,7 @@ pub async fn subchat(
         Some("none".to_string()),
         false,
         temperature,
+        None,
         1,
         logfn_mb.clone(),
         tx_toolid_mb.clone(),

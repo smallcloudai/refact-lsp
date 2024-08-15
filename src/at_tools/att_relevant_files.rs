@@ -268,6 +268,7 @@ async fn find_relevant_files(
         None,
         false,
         None,
+        None,
         1,
         Some(format!("{log_prefix}-rf-step2-reduce")),
         Some(tool_call_id.clone()),
