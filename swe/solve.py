@@ -40,6 +40,7 @@ def checkpoint_preds(output: Path):
     stats = {
         "instances": len(preds),
         "found_files": len([p for p in preds if p.get("patched_file_is_found", "no") == "fully"]),
+        "to_change_files": len([p for p in preds if p.get("to_change_file_is_found", "no") == "fully"]),
         "patched": len([p for p in preds if p["model_patch"]]),
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -63,11 +64,12 @@ async def main():
 
     parser = ArgumentParser()
     parser.add_argument("--run", type=str, required=True)
+    parser.add_argument("--split", type=str, choices=["dev", "test"])
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
     output = SWE_WORKDIR / "predictions" / args.run
-    for row_batch in chunked(load_dataset('princeton-nlp/SWE-bench_Lite', split='test'), n=args.workers):
+    for row_batch in chunked(load_dataset('princeton-nlp/SWE-bench_Lite', split=args.split), n=args.workers):
         await asyncio.gather(*[process_instance(row["instance_id"], output) for row in row_batch])
         checkpoint_preds(output)
 

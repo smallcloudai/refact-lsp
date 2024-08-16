@@ -33,6 +33,7 @@ class SWERunner(AgentRunner):
                 repo_path=repo_path
             )
             results["found_files"] = res["context_files"]
+            results["found_symbols"] = res["context_symbols"]
             results["to_change_files"] = res["to_change_files"]
             results["patched_file_is_found"] = filename_mentioned(filename, "\n".join(results["found_files"]))
             results["to_change_file_is_found"] = filename_mentioned(filename, "\n".join(results["to_change_files"]))

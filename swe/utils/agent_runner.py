@@ -5,6 +5,7 @@ import traceback
 import filelock
 
 from uuid import uuid4
+from itertools import chain
 from async_timeout import timeout
 from datasets import load_dataset
 from pathlib import Path
@@ -28,7 +29,10 @@ def get_swe_bench_lite_instance(instance_id: str):
             "problem_statement": row["problem_statement"],
             "patch": row["patch"],
         }
-        for row in load_dataset('princeton-nlp/SWE-bench_Lite', split='test')
+        for row in chain(
+            load_dataset('princeton-nlp/SWE-bench_Lite', split="dev"),
+            load_dataset('princeton-nlp/SWE-bench_Lite', split="test")
+        )
     }
     assert instance_id in swebench
     return swebench[instance_id]

@@ -96,7 +96,7 @@ class Locate(Step):
 
         # TODO: return description of the files
         return {
-            "context_files": context_files,
-            "context_symbols": symbols_list,
-            "to_change_files": to_change_files,
+            "context_files": list(set(context_files)),
+            "context_symbols": list(set(symbols_list)),
+            "to_change_files": list(set(to_change_files)),
         }
