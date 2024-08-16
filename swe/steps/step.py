@@ -1,4 +1,8 @@
 from refact.chat_client import Message
+from refact.chat_client import Usage
+from refact.chat_client import FunctionDict
+from refact.chat_client import ToolCallDict
+from refact.chat_client import gen_function_call_id
 from refact.chat_client import tools_fetch_and_filter
 from refact.chat_client import ask_using_http
 
@@ -63,21 +67,34 @@ class Step:
             result.append(new_messages)
         return result
 
+    async def _deterministic_tool_call_messages(
+            self, functions: List[FunctionDict]) -> List[Message]:
+        tool_calls = [
+            ToolCallDict(id=gen_function_call_id(), function=function, type='function')
+            for function in functions
+        ]
+        messages = [
+            Message(role="assistant", finish_reason="tool_calls", tool_calls=tool_calls),
+        ]
+        tool_messages = await self._query(messages, only_deterministic_messages=True)
+        return messages + tool_messages
+
     @property
     def model_name(self) -> str:
         return self._model_name
 
     @property
     def usage(self) -> Dict[str, int]:
+        # TODO: probably we need return model and it's usage
         result = {
             'completion_tokens': 0,
             'prompt_tokens': 0,
             'total_tokens': 0,
         }
-        for usage in filter(lambda x: isinstance(x, dict), self._usages):
-            result["completion_tokens"] += usage.get("completion_tokens", 0)
-            result["prompt_tokens"] += usage.get("prompt_tokens", 0)
-            result["total_tokens"] += usage.get("total_tokens", 0)
+        for usage in filter(lambda x: isinstance(x, Usage), self._usages):
+            result["completion_tokens"] += usage.completion_tokens
+            result["prompt_tokens"] += usage.prompt_tokens
+            result["total_tokens"] += usage.total_tokens
         return result
 
     @property
