@@ -3,7 +3,9 @@ import json
 import subprocess
 import asyncio
 
-from refact import chat_client
+from refact.chat_client import Message
+from refact.chat_client import FunctionDict
+from refact.chat_client import diff_apply
 from refact.chat_client import print_block
 from refact.chat_client import print_exception
 from refact.chat_client import print_messages
@@ -13,15 +15,6 @@ from collections import Counter
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Any
 
-
-CONTEXT_SYSTEM_MESSAGE = f"""
-You're Refact Dev a prefect AI assistant.
-
-You should collect all needed context to solve the problem.
-- Look through the user's problem statement and given files structure.
-- Collect additional context using definition and references tools if needed.
-- Call tools in parallel as much as it possible.
-"""
 
 PATCH_SYSTEM_MESSAGE = f"""
 You're Refact Dev a prefect AI assistant.
@@ -52,15 +45,15 @@ If you see that you can't solve the problem in given file with provided context 
 
 class ProducePatchStep(Step):
 
-    def __init__(self, context_choices: int, patch_choices: int, *args, **kwargs):
+    def __init__(self, patch_choices: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._context_choices = context_choices
         self._patch_choices = patch_choices
-        self._active_tools = set()
 
     @property
     def _tools(self) -> Set[str]:
-        return self._active_tools
+        return {
+            "patch",
+        }
 
     @staticmethod
     async def _lint(filename: Path) -> bool:
@@ -81,20 +74,21 @@ class ProducePatchStep(Step):
             filenames = {f for f in filenames if "test" not in f.lower()}
         return filenames
 
-    async def _patch_generate(self, message: chat_client.Message, repo_name: Path) -> Tuple[str, int, Dict[str, Any]]:
+    async def _patch_generate(self, message: Message, repo_name: Path) -> Tuple[str, int, Dict[str, Any]]:
         if message.role != "diff":
             raise RuntimeError("not a diff message")
         formatted_diff = json.loads(message.content)
-        await chat_client.diff_apply(self._base_url, chunks=formatted_diff, apply=[True] * len(formatted_diff))
+        await diff_apply(self._base_url, chunks=formatted_diff, apply=[True] * len(formatted_diff))
         result = subprocess.check_output(["git", "--no-pager", "diff"], cwd=str(repo_name))
         is_linted = all([
             await self._lint(filename)
             for filename in set([d["file_name"] for d in formatted_diff])
         ])
-        await chat_client.diff_apply(self._base_url, chunks=formatted_diff, apply=[False] * len(formatted_diff))
-        return result.decode(), message.count, {"is_linted": is_linted, "formatted_diff": formatted_diff}
+        await diff_apply(self._base_url, chunks=formatted_diff, apply=[False] * len(formatted_diff))
+        # TODO: we need to add all patches from patch tool as messages with count attr
+        return result.decode(), 1, {"is_linted": is_linted, "formatted_diff": formatted_diff}
 
-    async def _patch(self, message: chat_client.Message, repo_name: Path, problem_statement: str) -> Tuple[Counter, Dict]:
+    async def _patch(self, message: Message, repo_name: Path, problem_statement: str) -> Tuple[Counter, Dict]:
         function_dict = message.tool_calls[0].function
         if function_dict.name != "patch":
             raise RuntimeError("not a patch tool call")
@@ -131,84 +125,18 @@ class ProducePatchStep(Step):
             raise RuntimeError(f"expected a diff message")
         return model_patches, {"todo": todo, "results": results}
 
-    async def _deterministic_tool_call_messages(
-            self, functions: List[chat_client.FunctionDict]) -> List[chat_client.Message]:
-        tool_calls = [
-            chat_client.ToolCallDict(id=chat_client.gen_function_call_id(), function=function, type='function')
-            for function in functions
-        ]
-        messages = [
-            chat_client.Message(role="assistant", finish_reason="tool_calls", tool_calls=tool_calls),
-        ]
-        tool_messages = await self._query(messages, only_deterministic_messages=True)
-        return messages + tool_messages
-
-    async def _collect_context(
-            self,
-            problem_statement: str,
-            related_files: List[str],
-            repo_path: Path) -> List[chat_client.Message]:
-        self._active_tools = {
-            "definition",
-            "references",
-        }
-        messages = [
-            chat_client.Message(role="system", content=CONTEXT_SYSTEM_MESSAGE),
-            chat_client.Message(role="user", content=f"Problem statement:\n\n{problem_statement}"),
-        ]
-
-        paths = ",".join([str(repo_path / filename) for filename in related_files])
-        messages.extend(
-            await self._deterministic_tool_call_messages([
-                chat_client.FunctionDict(arguments='{"paths":"' + paths + '"}', name='files_skeleton')
-            ])
-        )
-        self._trajectory.extend(print_messages(messages))
-
-        # NOTE: this block of context collection doesn't give better results, but we need to check why
-        # function_dict_counter = Counter()
-        # for idx, new_messages in enumerate(await self._query_choices(messages, self._context_choices)):
-        #     self._trajectory.append(print_block("context choice", idx + 1))
-        #     self._trajectory.extend(print_messages(new_messages))
-        #     try:
-        #         def _normalize(args: str):
-        #             try:
-        #                 return json.dumps(json.loads(args))
-        #             except:
-        #                 return args
-        #
-        #         function_dict_counter.update([
-        #             chat_client.FunctionDict(
-        #                 name=tool_call_dict.function.name,
-        #                 arguments=_normalize(tool_call_dict.function.arguments),
-        #             )
-        #             for tool_call_dict in new_messages[-1].tool_calls
-        #             if tool_call_dict.type == "function"
-        #         ])
-        #     except Exception as e:
-        #         self._trajectory.append(print_exception(e, trace=True))
-        #
-        # if function_dict_counter:
-        #     tool_call_messages = await self._deterministic_tool_call_messages([
-        #         function_dict for function_dict, _ in function_dict_counter.most_common()
-        #     ])
-        #     self._trajectory.extend(print_messages(tool_call_messages))
-        #     messages += tool_call_messages
-
-        return messages[1:]
-
     async def _collect_patches(
             self,
             problem_statement: str,
+            context_messages: List[Message],
             repo_path: Path,
-            context_messages: List[chat_client.Message]):
-        self._active_tools = {
-            "patch",
-        }
+    ):
         messages = [
-            chat_client.Message(role="system", content=PATCH_SYSTEM_MESSAGE),
+            Message(role="system", content=PATCH_SYSTEM_MESSAGE),
+            Message(role="user", content=f"Problem statement:\n\n{problem_statement}"),
             *context_messages,
         ]
+
         patch_count = 0
         attempt_results = []
         model_patches_counter = Counter()
@@ -234,6 +162,28 @@ class ProducePatchStep(Step):
         ]
         return model_patches_with_scores, attempt_results
 
-    async def process(self, problem_statement: str, related_files: List[str], repo_path: Path, **kwargs) -> Tuple[List, List]:
-        context_messages = await self._collect_context(problem_statement, related_files, repo_path)
-        return await self._collect_patches(problem_statement, repo_path, context_messages)
+    async def process(
+            self,
+            problem_statement: str,
+            context_files: List[str],
+            context_symbols: List[str],
+            to_change_files: List[str],
+            repo_path: Path,
+            **kwargs) -> Tuple[List, List]:
+        context_messages = await self._deterministic_tool_call_messages([
+            FunctionDict(name="cat", arguments=json.dumps({
+                "paths": ",".join([str(repo_path / filename) for filename in context_files]),
+                "symbols": ",".join(context_symbols),
+                "skeleton": True,
+            }))
+        ])
+        if to_change_files:
+            notes_message = "\n".join([
+                "Most likely you should patch:",
+                *to_change_files,
+            ])
+            context_messages.append(Message(role="user", content=notes_message))
+        return await self._collect_patches(
+            problem_statement=problem_statement,
+            context_messages=context_messages,
+            repo_path=repo_path)

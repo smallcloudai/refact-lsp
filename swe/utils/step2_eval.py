@@ -17,8 +17,8 @@ from typing import Dict, Any, Tuple
 
 # MODEL = "gpt-4o"
 # MODEL = "gpt-4o-2024-05-13"
-MODEL = "gpt-4o-2024-08-06"
-# MODEL = "gpt-4o-mini"
+# MODEL = "gpt-4o-2024-08-06"
+MODEL = "gpt-4o-mini"
 
 
 class SWERunner(AgentRunner):
@@ -26,20 +26,21 @@ class SWERunner(AgentRunner):
     async def _steps(self, base_url: str, repo_path: Path, *args, **kwargs) -> Tuple[Dict[str, Any], str]:
         results: Dict[str, Any] = dict()
         problem_statement = kwargs["problem_statement"]
-        found_files = kwargs["found_files"]
         filename = patched_file(kwargs["problem_patch"])
         step = ProducePatchStep(
-            base_url=base_url, model_name=MODEL, context_choices=7, patch_choices=7, temperature=0.8)
+            base_url=base_url, model_name=MODEL, patch_choices=1, temperature=0.8)
         try:
             results["model_patches"], results["step2_results"] = await step.process(
                 problem_statement=problem_statement,
-                related_files=found_files,
+                context_files=kwargs["found_files"],
+                context_symbols=kwargs["found_symbols"],
+                to_change_files=kwargs["to_change_files"],
                 repo_path=repo_path)
             # NOTE: select top1 patch for eval without any postprocessing like in step3
             results["model_patch"] = "" if not results["model_patches"] else results["model_patches"][0][0]
             results["patched_file_in_model_patches"] = any([
                 filename in model_patch
-                for model_patch in results["model_patches"]
+                for model_patch, _ in results["model_patches"]
             ])
         except Exception as e:
             results["error"] = f"step2: {type(e)} {str(e) or traceback.format_exc()}"
@@ -78,8 +79,12 @@ async def main():
         if args.step1_output is not None:
             data = json.loads(args.step1_output.read_text())
             results["found_files"] = data["found_files"]
+            results["found_symbols"] = data["found_symbols"]
+            results["to_change_files"] = data["to_change_files"]
         else:
             results["found_files"] = [patched_file(results["problem_patch"])]
+            results["found_symbols"] = []
+            results["to_change_files"] = [patched_file(results["problem_patch"])]
 
         found_files_info = "\n".join([f"using additional step1 data:", *results["found_files"]])
         print(termcolor.colored(found_files_info, "green"))
