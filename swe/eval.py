@@ -1,6 +1,9 @@
 import asyncio
+import json
+
 import jsonlines
 
+from datasets import load_dataset
 from pathlib import Path
 
 from swe import SWE_WORKDIR
@@ -18,13 +21,17 @@ async def main():
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--run", type=str, default="gpt35-gpt4")
+    parser.add_argument("--split", type=str, choices=["dev", "test"])
+    parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
 
     swe_bench_eval = "/home/mitya/projects/aider-swe-bench/SWE-bench-docker/run_evaluation.py"
-    swe_bench_tasks = Path(__file__).parent / "princeton-nlp--SWE-bench_Lite.json"
     log_dir = SWE_WORKDIR / "logs" / args.run
+
+    swe_bench_tasks = Path(__file__).parent / f"princeton-nlp--SWE-bench_Lite_{args.split}.json"
+    dataset = load_dataset("princeton-nlp/SWE-bench_Lite", split=args.split).to_list()
+    swe_bench_tasks.write_text(json.dumps(dataset, indent=4))
 
     for predictions_root in [SWE_WORKDIR, Path("/home/mitya/projects/aider-swe-bench")]:
         predictions_path = predictions_root / "predictions" / args.run / "all_preds.jsonl"
@@ -48,7 +55,7 @@ async def main():
         print(f"failed to eval {args.run}: {e or type(e)}")
         exit(1)
 
-    total_instances = 300
+    total_instances = len(dataset)
     instance_processed = 0
     other_error = 0
     step1_error = 0
