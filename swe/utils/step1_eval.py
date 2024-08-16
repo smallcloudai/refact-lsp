@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 from swe.utils import AgentRunner
 from swe.utils import get_swe_bench_lite_instance
-from swe.steps import ExploreRepoStep
+from swe.steps import Locate
 from swe.utils.common import patched_file
 from swe.utils.common import filename_mentioned
 
@@ -32,8 +32,8 @@ class SWERunner(AgentRunner):
                 problem_statement=problem_statement,
                 repo_path=repo_path
             )
-            results["found_files"] = res['context_files']
-            results['to_change_files'] = res['to_change_files']
+            results["found_files"] = res["context_files"]
+            results["to_change_files"] = res["to_change_files"]
             results["patched_file_is_found"] = filename_mentioned(filename, "\n".join(results["found_files"]))
             results["to_change_file_is_found"] = filename_mentioned(filename, "\n".join(results["to_change_files"]))
         except Exception as e:
