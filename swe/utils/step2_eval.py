@@ -28,7 +28,7 @@ class SWERunner(AgentRunner):
         problem_statement = kwargs["problem_statement"]
         filename = patched_file(kwargs["problem_patch"])
         step = ProducePatchStep(
-            base_url=base_url, model_name=MODEL, patch_choices=1, temperature=0.8)
+            base_url=base_url, model_name=MODEL, patch_n=3, patch_choices=7, temperature=0.8)
         try:
             results["model_patches"], results["step2_results"] = await step.process(
                 problem_statement=problem_statement,

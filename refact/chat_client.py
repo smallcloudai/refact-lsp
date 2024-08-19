@@ -1,6 +1,7 @@
 from __future__ import annotations
 import uuid
 import tabulate
+import traceback
 import aiohttp, os, termcolor, copy, json, time
 from typing import Optional, List, Any, Tuple, DefaultDict, Dict, Literal, Set
 import collections
@@ -47,6 +48,7 @@ class Message(BaseModel):
     usage: Optional[Usage] = None
     subchats: DefaultDict[str, List[Message]] = None
     model_config = ConfigDict(exclude_none=True)
+    count: int = 0
 
 
 def messages_to_dicts(

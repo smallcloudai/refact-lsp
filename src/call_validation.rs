@@ -264,9 +264,8 @@ pub struct ChatMessage {
     pub tool_call_id: String,
     #[serde(default)]
     pub usage: Option<ChatUsage>,
-//     TODO: add counter for each result
-//     #[serde(default)]
-//     pub count: u32,
+    #[serde(default)]
+    pub count: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
