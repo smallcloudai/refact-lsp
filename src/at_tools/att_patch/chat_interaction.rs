@@ -24,13 +24,6 @@ pub struct LocateItem {
     pub reason: String,
 }
 
-
-async fn get_max_tokens(ccx: Arc<AMutex<AtCommandsContext>>, model: &str) -> Result<usize, String> {
-    let gcx = ccx.lock().await.global_context.clone();
-    let model_record = get_model_record(gcx.clone(), model).await?;
-    Ok(model_record.n_ctx)
-}
-
 async fn load_tokenizer(
     ccx: Arc<AMutex<AtCommandsContext>>,
     model: &str,
