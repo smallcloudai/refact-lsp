@@ -12,13 +12,27 @@ use tracing::info;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::subchat::subchat_single;
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ChatUsage, ContextEnum, ContextFile};
-
-
-const MODEL_NAME: &str = "gpt-4o-mini"; // TODO: move to a ChatPost
-
+use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ChatUsage, ContextEnum, ContextFile, SubchatParameters};
+use crate::caps::get_model_record;
+use crate::toolbox::toolbox_config::load_customization;
 
 pub struct AttLocate;
+
+
+pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
+    let ccx_locked = ccx.lock().await;
+    let gcx = ccx_locked.global_context.clone();
+    let params = match ccx_locked.subchat_tool_parameters.get(tool_name) {
+        Some(params) => params.clone(),
+        None => {
+            let tconfig = load_customization(gcx.clone()).await?;
+            let subchat_tool_parameters = tconfig.subchat_tool_parameters.clone();
+            subchat_tool_parameters.get(tool_name).cloned().ok_or(format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
+        }    
+    };
+    let _ = get_model_record(gcx, &params.model).await?; // check if the model exists
+    Ok(params.clone())
+}
 
 #[async_trait]
 impl Tool for AttLocate{
@@ -28,18 +42,18 @@ impl Tool for AttLocate{
         tool_call_id: &String,
         args: &HashMap<String, Value>
     ) -> Result<Vec<ContextEnum>, String> {
+        
         let problem_statement_summary = match args.get("problem_statement") {
             Some(Value::String(s)) => s.clone(),
             Some(v) => return Err(format!("argument `problem_statement` is not a string: {:?}", v)),
             None => return Err("Missing argument `problem_statement`".to_string())
         };
 
-        let (top_n_default, n_ctx_default) = {
+        let params = unwrap_subchat_params(ccx.clone(), "locate").await?;
+        {
             let mut ccx_lock = ccx.lock().await;
-            let (top_n_default, n_ctx_default) = (ccx_lock.top_n, ccx_lock.n_ctx);
             ccx_lock.top_n = 30;
-            ccx_lock.n_ctx = 64_000; // TODO: move to a ChatPost
-            (top_n_default, n_ctx_default)
+            ccx_lock.n_ctx = params.n_ctx;
         };
 
         let problem_message_mb = {
@@ -53,13 +67,7 @@ impl Tool for AttLocate{
         }
 
         let mut usage = ChatUsage{..Default::default()};
-        let res = locate_relevant_files(ccx.clone(), problem_statement.as_str(), tool_call_id.clone(), &mut usage).await?;
-
-        {
-            let mut ccx_lock = ccx.lock().await;
-            ccx_lock.top_n = top_n_default;
-            ccx_lock.n_ctx = n_ctx_default;
-        }
+        let res = locate_relevant_files(ccx.clone(), &params.model, problem_statement.as_str(), tool_call_id.clone(), &mut usage).await?;
         info!("att_locate produced usage: {:?}", usage);
 
         let mut results = vec![];
@@ -112,6 +120,7 @@ where
 
 async fn strategy_tree(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model: &String,
     user_query: &str,
     log_prefix: String,
     tool_call_id: String,
@@ -127,7 +136,7 @@ async fn strategy_tree(
 
     let mut messages = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec!["tree".to_string()],
         None,
@@ -145,7 +154,7 @@ async fn strategy_tree(
 
     let n_choices = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec![],
         Some("none".to_string()),
@@ -182,6 +191,7 @@ async fn strategy_tree(
 
 async fn strategy_definitions_references(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model: &String,
     user_query: &str,
     log_prefix: String,
     tool_call_id: String,
@@ -196,7 +206,7 @@ async fn strategy_definitions_references(
     // todo: simply ask list of symbols comma separated, don't ask for tools
     let n_choices = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec!["definition".to_string(), "references".to_string()],
         Some("required".to_string()),
@@ -223,7 +233,7 @@ async fn strategy_definitions_references(
         }
         let ch_messages = subchat_single(
             ccx.clone(),
-            MODEL_NAME,
+            model,
             ch_messages,
             vec![],
             None,
@@ -256,6 +266,7 @@ async fn strategy_definitions_references(
 
 async fn supercat_extract_symbols(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model: &String,
     user_query: &str,
     files: Vec<String>,
     symbols: Vec<String>,
@@ -281,7 +292,7 @@ async fn supercat_extract_symbols(
 
     let mut messages = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec!["cat".to_string()],
         None,
@@ -299,7 +310,7 @@ async fn supercat_extract_symbols(
 
     let n_choices = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec![],
         Some("none".to_string()),
@@ -333,6 +344,7 @@ async fn supercat_extract_symbols(
 
 async fn supercat_decider(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model: &String,
     user_query: &str,
     files: Vec<String>,
     symbols: Vec<String>,
@@ -358,7 +370,7 @@ async fn supercat_decider(
 
     let mut messages = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec!["cat".to_string()],
         None,
@@ -376,7 +388,7 @@ async fn supercat_decider(
 
     let n_choices = subchat_single(
         ccx.clone(),
-        MODEL_NAME,
+        model,
         messages,
         vec![],
         Some("none".to_string()),
@@ -443,6 +455,7 @@ async fn supercat_decider(
 
 async fn locate_relevant_files(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model: &String,
     user_query: &str,
     tool_call_id: String,
     usage_collector: &mut ChatUsage,
@@ -452,6 +465,7 @@ async fn locate_relevant_files(
 
     let tree_files = strategy_tree(
         ccx.clone(),
+        model,
         user_query,
         log_prefix.clone(),
         tool_call_id.clone(),
@@ -460,6 +474,7 @@ async fn locate_relevant_files(
 
     let (def_ref_files, mut symbols) = strategy_definitions_references(
         ccx.clone(),
+        model,
         user_query,
         log_prefix.clone(),
         tool_call_id.clone(),
@@ -471,6 +486,7 @@ async fn locate_relevant_files(
 
     let extra_symbols = supercat_extract_symbols(
         ccx.clone(),
+        model,
         user_query,
         paths_chosen.clone(),
         symbols.clone(),
@@ -484,6 +500,7 @@ async fn locate_relevant_files(
 
     let file_results = supercat_decider(
         ccx.clone(),
+        model,
         user_query,
         paths_chosen,
         symbols.clone(),

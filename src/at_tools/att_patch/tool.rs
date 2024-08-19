@@ -7,6 +7,7 @@ use tokio::sync::Mutex as AMutex;
 use tracing::warn;
 
 use crate::at_commands::at_commands::AtCommandsContext;
+use crate::at_tools::att_locate::unwrap_subchat_params;
 use crate::at_tools::att_patch::args_parser::parse_arguments;
 use crate::at_tools::att_patch::chat_interaction::execute_chat_model;
 use crate::at_tools::att_patch::diff_formats::parse_diff_chunks_from_message;
@@ -14,9 +15,7 @@ use crate::at_tools::att_patch::unified_diff_format::UnifiedDiffFormat;
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum};
 
-pub const DEFAULT_MODEL_NAME: &str = "gpt-4o-mini";
-pub const MAX_NEW_TOKENS: usize = 8192;
-pub const TEMPERATURE: f32 = 0.7;
+
 pub const N_CHOICES: usize = 16;
 pub type DefaultToolPatch = UnifiedDiffFormat;
 
@@ -88,8 +87,15 @@ impl Tool for ToolPatch {
             }
         };
         let mut usage = ChatUsage{..Default::default()};
+
+        let params = unwrap_subchat_params(ccx.clone(), "patch").await?;
+
         let answers = match execute_chat_model(
             ccx.clone(),
+            &params.model,
+            params.n_ctx,
+            params.temperature,
+            params.max_new_tokens,
             tool_call_id,
             &args,
             &mut usage,

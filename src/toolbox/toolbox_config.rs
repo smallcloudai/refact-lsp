@@ -1,8 +1,9 @@
 use serde_yaml;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use std::hash::Hash;
 use tokio::sync::RwLock as ARwLock;
-use crate::call_validation::ChatMessage;
+use crate::call_validation::{ChatMessage, SubchatParameters};
 use std::io::Write;
 use std::sync::Arc;
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
@@ -14,6 +15,8 @@ pub struct ToolboxConfigDeserialize {
     #[serde(default)]
     pub system_prompts: HashMap<String, SystemPrompt>,
     #[serde(default)]
+    pub subchat_tool_parameters: HashMap<String, SubchatParameters>,
+    #[serde(default)]
     pub toolbox_commands: HashMap<String, ToolboxCommand>,
     #[serde(default)]
     pub tools: Vec<AtToolCustDictDeserialize>,
@@ -21,9 +24,10 @@ pub struct ToolboxConfigDeserialize {
     pub tools_parameters: Vec<AtParamDict>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ToolboxConfig {
     pub system_prompts: HashMap<String, SystemPrompt>,
+    pub subchat_tool_parameters: HashMap<String, SubchatParameters>,
     pub toolbox_commands: HashMap<String, ToolboxCommand>,
     pub tools: Vec<ToolCustDict>,
 }
@@ -152,6 +156,7 @@ fn load_and_mix_with_users_config(user_yaml: &str, caps_yaml: &str, caps_default
     let mut work_config = ToolboxConfig {
         system_prompts: work_config_deserialize.system_prompts,
         toolbox_commands: work_config_deserialize.toolbox_commands,
+        subchat_tool_parameters: work_config_deserialize.subchat_tool_parameters,
         tools,
     };
 
@@ -165,6 +170,7 @@ fn load_and_mix_with_users_config(user_yaml: &str, caps_yaml: &str, caps_default
         system_prompts: user_config_deserialize.system_prompts,
         toolbox_commands: user_config_deserialize.toolbox_commands,
         tools: user_tools,
+        ..Default::default()
     };
 
     replace_variables_in_messages(&mut work_config, &variables);
@@ -178,6 +184,7 @@ fn load_and_mix_with_users_config(user_yaml: &str, caps_yaml: &str, caps_default
         system_prompts: caps_config_deserialize.system_prompts,
         toolbox_commands: caps_config_deserialize.toolbox_commands,
         tools: vec![],
+        ..Default::default()
     };
 
     work_config.system_prompts.extend(caps_config.system_prompts.iter().map(|(k, v)| (k.clone(), v.clone())));
