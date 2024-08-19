@@ -2,6 +2,7 @@ from __future__ import annotations
 import uuid
 import tabulate
 import textwrap
+import traceback
 import aiohttp, os, termcolor, copy, json, time
 from typing import Optional, List, Any, Tuple, DefaultDict, Dict, Literal, Set
 import collections

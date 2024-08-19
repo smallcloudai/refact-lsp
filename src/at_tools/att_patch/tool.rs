@@ -61,7 +61,7 @@ pub async fn parse_arguments(
     })
 }
 
-fn choose_correct_chunk(chunks: Vec<Result<String, String>>) -> Result<String, String> {
+fn choose_correct_chunk(chunks: Vec<Result<String, String>>) -> Result<Vec<(String, i32)>, String> {
     let errors = chunks
         .iter()
         .filter(|res| res.is_err())
@@ -89,22 +89,16 @@ fn choose_correct_chunk(chunks: Vec<Result<String, String>>) -> Result<String, S
         .collect::<Vec<_>>();
     warn!("{} diff were parsed successfully", non_error_chunks.len());
 
-    // return the most common chunk
-    let mut chunks_freq = HashMap::new();
+    // count chunks
+    let mut chunks_counter: HashMap<&str, i32> = HashMap::new();
     for chunk in non_error_chunks.iter() {
-        *chunks_freq.entry(chunk.as_str()).or_insert(0) += 1;
+        *chunks_counter.entry(chunk.as_str()).or_insert(0) += 1;
     }
-    let max_repeats = chunks_freq.iter().max_by_key(|(_, k)| *k).unwrap().1.clone();
-    let chunks_max_repeats = chunks_freq
-        .iter()
-        .filter(|(k, v)| **v == max_repeats)
-        .map(|x| x.0.clone())
-        .collect::<Vec<_>>();
-    Ok(chunks_max_repeats
-        .iter()
-        .max()
-        .expect("There is no max repeats")
-        .to_string())
+    Ok(chunks_counter
+      .into_iter()
+      .map(|(k, v)| (k.to_string(), v))
+      .sorted_by_key(|x| -x.1)
+      .collect())
 }
 
 #[async_trait]
@@ -159,15 +153,23 @@ impl Tool for ToolPatch {
         }
         let chunks = choose_correct_chunk(chunks_for_answers)?;
 
-        Ok((false, vec![
-            ContextEnum::ChatMessage(ChatMessage {
+        let mut messages = vec![];
+        for (chunk, count) in chunks {
+            let mut chunk_usage = ChatUsage{..Default::default()};
+            if messages.is_empty() {
+                chunk_usage = usage.clone();
+            }
+            messages.push(ContextEnum::ChatMessage(ChatMessage {
                 role: "diff".to_string(),
-                content: chunks,
+                content: chunk,
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
-                usage: Some(usage),
-            })
-        ]))
+                usage: Some(chunk_usage),
+                count: count,
+            }));
+        }
+
+        Ok(messages)
     }
 
     fn usage(&mut self) -> &mut Option<ChatUsage> {

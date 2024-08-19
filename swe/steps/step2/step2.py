@@ -45,9 +45,10 @@ If you see that you can't solve the problem in given file with provided context 
 
 class ProducePatchStep(Step):
 
-    def __init__(self, patch_choices: int, *args, **kwargs):
+    def __init__(self, patch_choices: int, patch_n: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._patch_choices = patch_choices
+        self._patch_n = patch_n
 
     @property
     def _tools(self) -> Set[str]:
@@ -85,8 +86,7 @@ class ProducePatchStep(Step):
             for filename in set([d["file_name"] for d in formatted_diff])
         ])
         await diff_apply(self._base_url, chunks=formatted_diff, apply=[False] * len(formatted_diff))
-        # TODO: we need to add all patches from patch tool as messages with count attr
-        return result.decode(), 1, {"is_linted": is_linted, "formatted_diff": formatted_diff}
+        return result.decode(), message.count, {"is_linted": is_linted, "formatted_diff": formatted_diff}
 
     async def _patch(self, message: Message, repo_name: Path, problem_statement: str) -> Tuple[Counter, Dict]:
         function_dict = message.tool_calls[0].function
@@ -137,7 +137,6 @@ class ProducePatchStep(Step):
             *context_messages,
         ]
 
-        patch_count = 0
         attempt_results = []
         model_patches_counter = Counter()
         for idx, new_messages in enumerate(await self._query_choices(messages, self._patch_choices)):
@@ -147,8 +146,7 @@ class ProducePatchStep(Step):
                 model_patches, results = await self._patch(new_messages[-1], repo_path.absolute(), problem_statement)
                 model_patches_counter.update(model_patches)
                 attempt_results.append(results)
-                patch_count += 1
-                if patch_count == 3:
+                if len(attempt_results) == self._patch_n:
                     break
             except Exception as e:
                 self._trajectory.append(print_exception(e, trace=True))
