@@ -21,8 +21,8 @@ pub struct AttLocate;
 
 
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
-    let ccx_locked = ccx.lock().await;
     let (gcx, params_mb) = {
+        let ccx_locked = ccx.lock().await;
         let gcx = ccx_locked.global_context.clone();
         let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
         (gcx, params)
