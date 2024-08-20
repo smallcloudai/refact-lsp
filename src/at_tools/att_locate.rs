@@ -34,10 +34,9 @@ pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_nam
             tconfig.subchat_tool_parameters.get(tool_name).cloned()
                 .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
         }    
-    };
-    
+    }; 
     let _ = get_model_record(gcx, &params.model).await?; // check if the model exists
-    Ok(params.clone())
+    Ok(params)
 }
 
 #[async_trait]
