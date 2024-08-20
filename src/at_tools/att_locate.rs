@@ -21,19 +21,21 @@ pub struct AttLocate;
 
 
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
-    let (gcx, params) = {
-        let ccx_locked = ccx.lock().await;
+    let ccx_locked = ccx.lock().await;
+    let (gcx, params_mb) = {
         let gcx = ccx_locked.global_context.clone();
-        let params = match ccx_locked.subchat_tool_parameters.get(tool_name) {
-            Some(params) => params.clone(),
-            None => {
-                let tconfig = load_customization(gcx.clone()).await?;
-                let subchat_tool_parameters = tconfig.subchat_tool_parameters.clone();
-                subchat_tool_parameters.get(tool_name).cloned().ok_or(format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
-            }
-        };
+        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
         (gcx, params)
     };
+    let params = match params_mb {
+        Some(params) => params,
+        None => {
+            let tconfig = load_customization(gcx.clone()).await?;
+            tconfig.subchat_tool_parameters.get(tool_name).cloned()
+                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
+        }    
+    };
+    
     let _ = get_model_record(gcx, &params.model).await?; // check if the model exists
     Ok(params.clone())
 }
