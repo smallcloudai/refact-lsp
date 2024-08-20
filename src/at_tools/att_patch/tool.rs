@@ -89,9 +89,19 @@ impl Tool for ToolPatch {
         let mut usage = ChatUsage{..Default::default()};
 
         let params = unwrap_subchat_params(ccx.clone(), "patch").await?;
+        let ccx_subchat = {
+            let ccx_lock = ccx.lock().await;
+            Arc::new(AMutex::new(AtCommandsContext::new(
+                ccx_lock.global_context.clone(),
+                params.n_ctx,
+                ccx_lock.top_n,
+                false,
+                ccx_lock.messages.clone(),
+            ).await))
+        };
 
         let answers = match execute_chat_model(
-            ccx.clone(),
+            ccx_subchat.clone(),
             &params.model,
             params.n_ctx,
             params.temperature,
@@ -109,7 +119,7 @@ impl Tool for ToolPatch {
         let mut chunks_for_answers = vec![];
         for answer in answers.iter() {
             warn!("Patch model answer:\n{}", &answer);
-            let parsed_chunks = parse_diff_chunks_from_message(ccx.clone(), &answer).await;
+            let parsed_chunks = parse_diff_chunks_from_message(ccx_subchat.clone(), &answer).await;
             chunks_for_answers.push(parsed_chunks);
         }
         let chunks = choose_correct_chunk(chunks_for_answers)?;
