@@ -126,7 +126,7 @@ async fn chat(
         n_ctx,
         CHAT_TOP_N,
         false,
-        &chat_post.messages,
+        chat_post.messages.clone(),
     ).await;
     ccx.subchat_tool_parameters = chat_post.subchat_tool_parameters.clone();
     let ccx_arc = Arc::new(AMutex::new(ccx));

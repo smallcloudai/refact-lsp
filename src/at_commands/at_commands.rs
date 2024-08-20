@@ -46,7 +46,7 @@ impl AtCommandsContext {
         n_ctx: usize,
         top_n: usize,
         is_preview: bool,
-        messages: &Vec<ChatMessage>,
+        messages: Vec<ChatMessage>,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel::<serde_json::Value>();
         AtCommandsContext {
@@ -55,7 +55,7 @@ impl AtCommandsContext {
             top_n,
             is_preview,
             pp_skeleton: false,
-            messages: messages.clone(),
+            messages,
             
             at_commands: at_commands_dict(global_context.clone()).await,
             at_tools: crate::at_tools::tools::at_tools_merged_and_filtered(global_context.clone()).await,

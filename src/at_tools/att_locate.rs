@@ -16,6 +16,7 @@ use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ChatUs
 use crate::caps::get_model_record;
 use crate::toolbox::toolbox_config::load_customization;
 
+
 pub struct AttLocate;
 
 
@@ -50,14 +51,19 @@ impl Tool for AttLocate{
         };
 
         let params = unwrap_subchat_params(ccx.clone(), "locate").await?;
-        {
-            let mut ccx_lock = ccx.lock().await;
-            ccx_lock.top_n = 30;
-            ccx_lock.n_ctx = params.n_ctx;
+        let ccx_subchat = {
+            let ccx_lock = ccx.lock().await;
+            Arc::new(AMutex::new(AtCommandsContext::new(
+                ccx_lock.global_context.clone(),
+                params.n_ctx,
+                30,
+                false,
+                ccx_lock.messages.clone(),
+            ).await))
         };
 
         let problem_message_mb = {
-            let ccx_locked = ccx.lock().await;
+            let ccx_locked = ccx_subchat.lock().await;
             ccx_locked.messages.iter().filter(|m| m.role == "user").last().map(|x|x.content.clone())
         };
 
@@ -67,7 +73,7 @@ impl Tool for AttLocate{
         }
 
         let mut usage = ChatUsage{..Default::default()};
-        let res = locate_relevant_files(ccx.clone(), &params.model, problem_statement.as_str(), tool_call_id.clone(), &mut usage).await?;
+        let res = locate_relevant_files(ccx_subchat.clone(), &params.model, problem_statement.as_str(), tool_call_id.clone(), &mut usage).await?;
         info!("att_locate produced usage: {:?}", usage);
 
         let mut results = vec![];
