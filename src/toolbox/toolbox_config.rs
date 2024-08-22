@@ -292,7 +292,6 @@ pub async fn get_default_system_prompt(
         system_prompt = system_prompt.replace("%WORKSPACE_PROJECTS_INFO%", &format!("The current IDE workspace has these project directories:\n{}\n", workspace_dirs.join("\n")).as_str());
     }
 
-    info!("system_prompt\n{}", system_prompt);
     system_prompt
 }
 
