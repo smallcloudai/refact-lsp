@@ -1,53 +1,21 @@
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use hashbrown::HashSet;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex as AMutex;
 use tracing::info;
 
-use crate::at_tools::att_locate::prompts::{STEP1_DET_SYSTEM_PROMPT, SUPERCAT_DECIDER_PROMPT, SUPERCAT_REDUCE_TO_CHANGE};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::at_tools::att_locate::locate_utils::{pretend_tool_call, reduce_by_counter, update_usage};
-use crate::at_tools::att_locate::strategies::{strategy_symbols_from_problem_text, strategy_tree, supercat_extract_symbols};
-use crate::at_tools::subchat::subchat_single;
+use crate::at_tools::att_locate::locate_deciders::{decide_files_to_change, decide_symbols_list};
+use crate::at_tools::att_locate::locate_utils::{unwrap_subchat_params, update_usage};
+use crate::at_tools::att_locate::locate_strategies::{strategy_symbols_from_problem_text, strategy_tree, cat_extract_symbols};
 use crate::at_tools::tools::Tool;
-use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, SubchatParameters};
-use crate::caps::get_model_record;
-use crate::toolbox::toolbox_config::load_customization;
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum};
 
 
 pub struct AttLocate;
-
-
-#[derive(Serialize, Deserialize, Debug)]
-struct SuperCatResultItem {
-    file_path: String,
-    reason: String,
-    description: String,
-}
-
-
-pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
-    let (gcx, params_mb) = {
-        let ccx_locked = ccx.lock().await;
-        let gcx = ccx_locked.global_context.clone();
-        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
-        (gcx, params)
-    };
-    let params = match params_mb {
-        Some(params) => params,
-        None => {
-            let tconfig = load_customization(gcx.clone()).await?;
-            tconfig.subchat_tool_parameters.get(tool_name).cloned()
-                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
-        }    
-    }; 
-    let _ = get_model_record(gcx, &params.model).await?; // check if the model exists
-    Ok(params)
-}
 
 #[async_trait]
 impl Tool for AttLocate{
@@ -115,7 +83,6 @@ async fn locate_relevant_files(
     usage: Arc<AMutex<ChatUsage>>,
 ) -> Result<Value, String> {
     let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    let mut paths_chosen = vec![];
 
     let tree_files_future = strategy_tree(
         ccx.clone(),
@@ -133,216 +100,66 @@ async fn locate_relevant_files(
         tool_call_id.clone(),
         usage.clone(),
     );
-    let (tree_files, (def_ref_files, mut symbols)) = tokio::try_join!(tree_files_future, def_ref_future)?;
+    
+    let (tree_files, symbols_and_paths) = tokio::try_join!(tree_files_future, def_ref_future)?;
 
     let mut usage_collector = ChatUsage::default();
+    // tree_paths + symbols_paths
+    let paths = tree_files.iter().chain(symbols_and_paths.values().flatten()).cloned().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
+    let symbols = symbols_and_paths.keys().cloned().collect::<Vec<_>>();
+    drop(symbols_and_paths);
     
-    paths_chosen.extend(tree_files);
-    paths_chosen.extend(def_ref_files);
+    // todo: correct and validate files
 
-    let extra_symbols = supercat_extract_symbols(
+    let files_to_symbols = cat_extract_symbols(
         ccx.clone(),
         model,
         user_query,
-        paths_chosen.clone(),
-        symbols.clone(),
+        paths,
+        symbols,
         log_prefix.clone(),
         tool_call_id.clone(),
         &mut usage_collector,
     ).await?;
-
-    symbols.extend(extra_symbols);
-    let symbols = symbols.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
-
-    let file_results = supercat_decider(
+    
+    let files_to_change_future = decide_files_to_change(
         ccx.clone(),
         model,
         user_query,
-        paths_chosen,
-        symbols.clone(),
+        files_to_symbols.keys().cloned().collect::<Vec<_>>(),
+        files_to_symbols.values().flatten().cloned().collect::<Vec<_>>(),
         log_prefix.clone(),
         tool_call_id.clone(),
-        &mut usage_collector,
-    ).await?;
-
-    let results_dict = json!({
-        "files": file_results,
-        "symbols": symbols,
-    });
+        usage.clone(),
+    );
+    
+    let chosen_symbols_future = decide_symbols_list(
+        ccx.clone(),
+        model,
+        user_query,
+        files_to_symbols.keys().cloned().collect::<Vec<_>>(),
+        files_to_symbols.values().flatten().cloned().collect::<Vec<_>>(),
+        log_prefix.clone(),
+        tool_call_id.clone(),
+        usage.clone(),
+    );
+    
+    let (files_to_change, chosen_symbols) = tokio::try_join!(files_to_change_future, chosen_symbols_future)?;
+    
+    // todo: continue
 
     update_usage(usage, &mut usage_collector).await;
 
-    Ok(results_dict)
-}
+    
+    // todo: not files to change, but symbols to change (?)
+    
+    todo!();
 
-async fn supercat_decider(
-    ccx: Arc<AMutex<AtCommandsContext>>,
-    model: &String,
-    user_query: &str,
-    files: Vec<String>,
-    symbols: Vec<String>,
-    log_prefix: String,
-    tool_call_id: String,
-    usage: &mut ChatUsage,
-) -> Result<Value, String> {
-    let mut messages = vec![];
-    messages.push(ChatMessage::new("system".to_string(), STEP1_DET_SYSTEM_PROMPT.to_string()));
-    messages.push(ChatMessage::new("user".to_string(), user_query.to_string()));
-
-    let mut supercat_args = HashMap::new();
-    supercat_args.insert("paths".to_string(), files.join(","));
-    supercat_args.insert("skeleton".to_string(), "true".to_string());
-    if !symbols.is_empty() {
-        supercat_args.insert("symbols".to_string(), symbols.join(","));
-    }
-
-    messages.push(pretend_tool_call(
-        "cat",
-        serde_json::to_string(&supercat_args).unwrap().as_str()
-    ));
-
-    let mut messages = subchat_single(
-        ccx.clone(),
-        model,
-        messages,
-        vec!["cat".to_string()],
-        None,
-        true,
-        None,
-        None,
-        1,
-        Some(usage),
-        None,
-        Some(tool_call_id.clone()),
-        Some(format!("{log_prefix}-locate-step4-det")),
-    ).await?.get(0).ok_or("locate: cat message was empty.".to_string())?.clone();
-
-    messages.push(ChatMessage::new("user".to_string(), SUPERCAT_DECIDER_PROMPT.replace("{USER_QUERY}", &user_query)));
-
-    let n_choices = subchat_single(
-        ccx.clone(),
-        model,
-        messages,
-        vec![],
-        Some("none".to_string()),
-        false,
-        Some(0.8),
-        None,
-        5,
-        Some(usage),
-        Some(format!("{log_prefix}-locate-step4-det-result")),
-        Some(tool_call_id.clone()),
-        Some(format!("{log_prefix}-locate-step4-det-result")),
-    ).await?;
-
-    assert_eq!(n_choices.len(), 5);
-
-    let mut results_to_change = vec![];
-    let mut results_context = vec![];
-    let mut file_descriptions: HashMap<String, HashSet<String>> = HashMap::new();
-
-    for ch_messages in n_choices {
-        let answer_mb = ch_messages.last().filter(|x|x.role == "assistant").map(|x|x.content.clone());
-        if answer_mb.is_none() {
-            continue;
-        }
-        let answer = answer_mb.unwrap();
-        let results: Vec<SuperCatResultItem> = match serde_json::from_str(&answer) {
-            Ok(x) => x,
-            Err(_) => continue
-        };
-
-        for r in results.iter() {
-            file_descriptions.entry(r.file_path.clone()).or_insert(HashSet::new()).insert(r.description.clone());
-        }
-
-        let to_change = results.iter().filter(|x|x.reason == "to_change").map(|x|x.file_path.clone()).collect::<Vec<_>>();
-        if to_change.is_empty() {
-            continue;
-        }
-        results_to_change.push(to_change);
-
-        let context = results.iter().filter(|x|x.reason == "context").map(|x|x.file_path.clone()).collect::<Vec<_>>();
-        results_context.push(context);
-    }
-
-    let files_to_change = reduce_by_counter(results_to_change.into_iter().flatten().filter(|x|PathBuf::from(x).is_file()), 5);
-    let files_context = reduce_by_counter(results_context.into_iter().flatten().filter(|x|PathBuf::from(x).is_file()), 5);
-
-    let mut res_to_change = vec![];
-    res_to_change.extend(
-        files_to_change.into_iter().map(|x| SuperCatResultItem{
-            file_path: x.clone(),
-            reason: "to_change".to_string(),
-            description: file_descriptions.get(&x).unwrap_or(&HashSet::new()).into_iter().cloned().collect::<Vec<_>>().join(", "),
-        })
-    );
-
-    let mut res_context = vec![];
-    res_context.extend(
-        files_context.into_iter().map(|x| SuperCatResultItem{
-            file_path: x.clone(),
-            reason: "context".to_string(),
-            description: file_descriptions.get(&x).unwrap_or(&HashSet::new()).into_iter().cloned().collect::<Vec<_>>().join(", "),
-        })
-    );
-
-
-    let mut supercat_args = HashMap::new();
-    supercat_args.insert("paths".to_string(), res_to_change.into_iter().map(|x|x.file_path).collect::<Vec<_>>().join(","));
-    supercat_args.insert("skeleton".to_string(), "true".to_string());
-    if !symbols.is_empty() {
-        supercat_args.insert("symbols".to_string(), symbols.join(","));
-    }
-
-    let mut messages = vec![];
-    messages.push(ChatMessage::new("system".to_string(), STEP1_DET_SYSTEM_PROMPT.to_string()));
-    messages.push(ChatMessage::new("user".to_string(), user_query.to_string()));
-
-    messages.push(pretend_tool_call(
-        "cat",
-        serde_json::to_string(&supercat_args).unwrap().as_str()
-    ));
-
-    let mut messages = subchat_single(
-        ccx.clone(),
-        model,
-        messages,
-        vec!["cat".to_string()],
-        None,
-        true,
-        None,
-        None,
-        1,
-        Some(usage),
-        None,
-        Some(tool_call_id.clone()),
-        Some(format!("{log_prefix}-locate-step4-det2")),
-    ).await?.get(0).ok_or("locate: cat message was empty.".to_string())?.clone();
-
-    messages.push(ChatMessage::new("user".to_string(), SUPERCAT_REDUCE_TO_CHANGE.replace("{USER_QUERY}", &user_query)));
-
-    let messages = subchat_single(
-        ccx.clone(),
-        model,
-        messages,
-        vec![],
-        None,
-        false,
-        None,
-        None,
-        1,
-        Some(usage),
-        None,
-        Some(tool_call_id.clone()),
-        Some(format!("{log_prefix}-locate-step4-reduce-to-change")),
-    ).await?.get(0).ok_or("locate: locate-step4-reduce-to-change was empty".to_string())?.clone();
-
-    let answer = messages.last().filter(|x|x.role == "assistant").map(|x|x.content.clone()).ok_or("locate: locate-step4-reduce-to-change last message was empty".to_string())?;
-
-    let results: Vec<SuperCatResultItem> = serde_json::from_str(&answer).map_err(|x|x.to_string())?;
-
-    let res = results.into_iter().chain(res_context.into_iter()).collect::<Vec<_>>();
-
-    Ok(json!(res))
+    // let results_dict = json!({
+    //     "files": file_results,
+    //     "symbols": symbols,
+    // });
+    // 
+    // 
+    // Ok(results_dict)
 }

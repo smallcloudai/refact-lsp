@@ -270,6 +270,8 @@ pub async fn subchat_single(
     tx_toolid_mb: Option<String>,
     tx_chatid_mb: Option<String>,
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
+    // todo: get (model, temperature, max_new_tokens) from ccx
+    // todo reduce amount of arguments: logfn_mb, tx_toolid_mb, tx_chatid_mb
     let gcx = ccx.lock().await.global_context.clone();
 
     // this ignores customized tools

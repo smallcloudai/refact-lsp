@@ -7,7 +7,7 @@ use tokio::sync::Mutex as AMutex;
 use tracing::warn;
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::at_tools::att_locate::unwrap_subchat_params;
+use crate::at_tools::att_locate::locate_utils::unwrap_subchat_params;
 use crate::at_tools::att_patch::chat_interaction::execute_chat_model;
 use crate::at_tools::att_patch::diff_formats::parse_diff_chunks_from_message;
 use crate::at_tools::att_patch::unified_diff_format::UnifiedDiffFormat;
