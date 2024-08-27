@@ -17,7 +17,7 @@ TODO:
   b) need to be changed to solve the problem.
 5. return the results in a format specified below in a json format, explain nothing.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "variable1",
     "function11",
@@ -33,10 +33,10 @@ Read slowly and carefully the problem text one more time before you start:
 TODO:
 1. analyse thoroughly the problem statement;
 2. read thoroughly the list of files;
-3. pick among those files given pick those that you are absolutely 100% you need to change;
+3. pick among those files given pick those that you are absolutely 100% sure you need to change (MAXIMIM: {MAX_FILES} files);
 4. return the results in a format specified below in a json format, explain nothing, file_path must be an absolute path.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "/a/b/c/file1.py",
     "a/d/e/file2.py"
@@ -56,7 +56,7 @@ TODO:
 3. among the files pick the ones you need to make changes in to solve the problem (according to the problem statement);
 5. return the results in a format specified below in a json format, explain nothing, file_path must be an absolute path.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "/a/b/c/file1.py",
     "a/d/e/file2.py"
@@ -73,7 +73,7 @@ Read slowly and carefully the problem text one more time before you start:
 3. from the given context select all the symbols (functino names, classes names etc) that you find relevant to the problem (either give releavant context or need to be changed);
 4. return found symbols in a json format, explain nothing.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "variable1",
     "function11",
@@ -88,7 +88,7 @@ TODO:
 3. pick at least 10 files that will help you solving the problem (ones that give you the context and ones that shall be changed);
 4. return chosen files in a json format, explain nothing.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "file1.py",
     "file2.py"
@@ -101,7 +101,7 @@ TODO:
 2. from the problem statement pick up AST Symbols (classes, functions, types, variables etc) that are relevant to the problem;
 3. return found symbols in a json format, explain nothing.
 
-Format you must obey:
+Format you must obey, OMIT BACKTICKS:
 [
     "variable1",
     "function11",

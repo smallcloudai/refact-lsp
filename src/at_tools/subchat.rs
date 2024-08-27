@@ -199,7 +199,7 @@ async fn chat_interaction(
     }
 }
 
-async fn write_dumps(
+pub async fn write_dumps(
     gcx: Arc<ARwLock<GlobalContext>>,
     logfn: String,
     content: &str,

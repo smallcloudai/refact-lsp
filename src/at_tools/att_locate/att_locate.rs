@@ -1,19 +1,30 @@
 use std::collections::HashMap;
 use hashbrown::HashSet;
 use std::sync::Arc;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AMutex;
 use tracing::info;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_tools::att_locate::locate_deciders::{decide_files_to_change, decide_symbols_list};
-use crate::at_tools::att_locate::locate_utils::{unwrap_subchat_params, update_usage};
+use crate::at_tools::att_locate::locate_utils::{assign_symbols_to_paths, complete_and_filter_paths, unwrap_subchat_params, update_usage};
 use crate::at_tools::att_locate::locate_strategies::{strategy_symbols_from_problem_text, strategy_tree, cat_extract_symbols};
 use crate::at_tools::tools::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum};
 
+// may be overridden using hidden arg "max_files_to_change"
+const MAX_FILES_TO_CHANGE: usize = 5;
+
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CatResultPathItem {
+    file_path: String,
+    reason: String,
+    description: String,
+}
 
 pub struct AttLocate;
 
@@ -30,6 +41,12 @@ impl Tool for AttLocate{
             Some(Value::String(s)) => s.clone(),
             Some(v) => return Err(format!("argument `problem_statement` is not a string: {:?}", v)),
             None => return Err("Missing argument `problem_statement`".to_string())
+        };
+        // hidden arg
+        let max_files_to_change = match args.get("max_files_to_change") {
+            Some(Value::Number(n)) => n.as_u64().unwrap() as usize,
+            Some(v) => return Err(format!("argument `max_files_to_change` is not a number: {:?}", v)),
+            None => MAX_FILES_TO_CHANGE
         };
 
         let params = unwrap_subchat_params(ccx.clone(), "locate").await?;
@@ -55,7 +72,14 @@ impl Tool for AttLocate{
         }
 
         let usage = Arc::new(AMutex::new(ChatUsage::default()));
-        let res = locate_relevant_files(ccx_subchat.clone(), &params.model, problem_statement.as_str(), tool_call_id.clone(), usage.clone()).await?;
+        let res = locate_relevant_files(
+            ccx_subchat.clone(), 
+            &params.model, 
+            problem_statement.as_str(), 
+            tool_call_id.clone(), 
+            usage.clone(),
+            max_files_to_change
+        ).await?;
         let usage_values = usage.lock().await.clone();
         info!("att_locate produced usage: {:?}", usage_values);
 
@@ -81,14 +105,15 @@ async fn locate_relevant_files(
     user_query: &str,
     tool_call_id: String,
     usage: Arc<AMutex<ChatUsage>>,
+    max_files_to_change: usize,
 ) -> Result<Value, String> {
-    let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    // todo: not files to change, but symbols to change (?)
+    let gcx = ccx.lock().await.global_context.clone();
 
     let tree_files_future = strategy_tree(
         ccx.clone(),
         model,
         user_query,
-        log_prefix.clone(),
         tool_call_id.clone(),
         usage.clone(),
     );
@@ -96,7 +121,6 @@ async fn locate_relevant_files(
         ccx.clone(),
         model,
         user_query,
-        log_prefix.clone(),
         tool_call_id.clone(),
         usage.clone(),
     );
@@ -109,18 +133,20 @@ async fn locate_relevant_files(
     let symbols = symbols_and_paths.keys().cloned().collect::<Vec<_>>();
     drop(symbols_and_paths);
     
-    // todo: correct and validate files
+    let paths = complete_and_filter_paths(gcx.clone(), paths).await;
 
-    let files_to_symbols = cat_extract_symbols(
+    let cat_symbols = cat_extract_symbols(
         ccx.clone(),
         model,
         user_query,
-        paths,
-        symbols,
-        log_prefix.clone(),
+        paths.clone(),
+        symbols.clone(),
         tool_call_id.clone(),
         &mut usage_collector,
     ).await?;
+
+    let all_symbols = cat_symbols.into_iter().chain(symbols.into_iter()).collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
+    let mut files_to_symbols = assign_symbols_to_paths(gcx.clone(), all_symbols, paths).await;
     
     let files_to_change_future = decide_files_to_change(
         ccx.clone(),
@@ -128,9 +154,9 @@ async fn locate_relevant_files(
         user_query,
         files_to_symbols.keys().cloned().collect::<Vec<_>>(),
         files_to_symbols.values().flatten().cloned().collect::<Vec<_>>(),
-        log_prefix.clone(),
         tool_call_id.clone(),
         usage.clone(),
+        max_files_to_change,
     );
     
     let chosen_symbols_future = decide_symbols_list(
@@ -138,28 +164,37 @@ async fn locate_relevant_files(
         model,
         user_query,
         files_to_symbols.keys().cloned().collect::<Vec<_>>(),
-        files_to_symbols.values().flatten().cloned().collect::<Vec<_>>(),
-        log_prefix.clone(),
+        files_to_symbols.values().flatten().cloned().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>(),
         tool_call_id.clone(),
         usage.clone(),
     );
     
     let (files_to_change, chosen_symbols) = tokio::try_join!(files_to_change_future, chosen_symbols_future)?;
+    let chosen_symbols_set = chosen_symbols.into_iter().collect::<HashSet<_>>();
+    // remove files from list if no symbols were chosen
+    files_to_symbols.retain(|_, v| {
+        *v = v.intersection(&chosen_symbols_set).cloned().collect::<HashSet<_>>();
+        !v.is_empty()
+    });
     
-    // todo: continue
+    let context_files = files_to_symbols.iter().filter(|(k, _)|!files_to_change.contains(k)).map(|(k, _)|k).cloned().collect::<Vec<_>>();
+    
+    let result_files = context_files.into_iter().map(|x|CatResultPathItem {
+        file_path: x,
+        reason: "context".to_string(),
+        description: "".to_string(),
+    }).chain(files_to_change.into_iter().map(|x|CatResultPathItem {
+        file_path: x,
+        reason: "to_change".to_string(),
+        description: "".to_string(),
+    })).collect::<Vec<_>>();
 
     update_usage(usage, &mut usage_collector).await;
-
     
-    // todo: not files to change, but symbols to change (?)
-    
-    todo!();
+    let results_dict = json!({
+        "files": result_files,
+        "symbols": files_to_symbols.values().flatten().cloned().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>()
+    });
 
-    // let results_dict = json!({
-    //     "files": file_results,
-    //     "symbols": symbols,
-    // });
-    // 
-    // 
-    // Ok(results_dict)
+    Ok(results_dict)
 }
