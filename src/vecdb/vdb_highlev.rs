@@ -125,7 +125,7 @@ async fn _create_vecdb(
 
     {
         let vec_db_locked = vec_db_arc.lock().await;
-        let tasks = vec_db_locked.as_ref().unwrap().vecdb_start_background_tasks(gcx.clone()).await;
+        let tasks = vec_db_locked.as_ref().unwrap().vecdb_start_background_tasks().await;
         background_tasks.extend(tasks);
     }
 
@@ -255,13 +255,10 @@ impl VecDb {
         })
     }
 
-    pub async fn vecdb_start_background_tasks(
-        &self,
-        gcx: Arc<ARwLock<GlobalContext>>,
-    ) -> Vec<JoinHandle<()>> {
+    pub async fn vecdb_start_background_tasks(&self) -> Vec<JoinHandle<()>> {
         info!("vecdb: start_background_tasks");
         vectorizer_enqueue_dirty_memory(self.vectorizer_service.clone()).await;
-        return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), gcx.clone(), self.constants.tokenizer.clone()).await;
+        return self.vectorizer_service.lock().await.vecdb_start_background_tasks(self.vecdb_emb_client.clone(), self.constants.tokenizer.clone()).await;
     }
 
     pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {

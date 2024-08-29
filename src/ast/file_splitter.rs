@@ -37,7 +37,6 @@ impl AstBasedFileSplitter {
         &self,
         doc: &Document,
         tokenizer: Arc<StdRwLock<Tokenizer>>,
-        _gcx_weak: Weak<RwLock<GlobalContext>>,
         tokens_limit: usize,
     ) -> Result<Vec<SplitResult>, String> {
         assert!(doc.text.is_some());

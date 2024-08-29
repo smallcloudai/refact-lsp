@@ -6,7 +6,7 @@ use std::sync::RwLock as StdRwLock;
 use std::time::SystemTime;
 
 use tokenizers::Tokenizer;
-use tokio::sync::{Mutex as AMutex, RwLock as ARwLock, Notify as ANotify};
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock, Notify as ANotify, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -205,6 +205,64 @@ async fn add_from_cache_to_vec_db(
     info!("add_from_cache_to_vec_db: done");
 }
 
+async fn vectorize_and_cache_document(
+    doc: Document,
+    constants: VecdbConstants,
+    tokenizer: Tokenizer,
+    vecdb_cache_arc: Arc<AMutex<VecDBCache>>,
+    delayed_cached_splits_q_collector: Arc<AMutex<Vec<SplitResult>>>,
+    embed_q_collector: Arc<AMutex<Vec<SplitResult>>>,
+) {
+    let tokenizer_arc = Arc::new(StdRwLock::new(tokenizer.clone()));
+
+    let mut doc = doc;
+    let last_30_chars = crate::nicer_logs::last_n_chars(&doc.path.display().to_string(), 30);
+
+    // Not from memory, vecdb works on files from disk
+    if let Err(err) = doc.update_text_from_disk().await {
+        info!("{}: {}", last_30_chars, err);
+        return;
+    }
+
+    if let Err(err) = doc.does_text_look_good() {
+        info!("embeddings {} doesn't look good: {}", last_30_chars, err);
+        return;
+    }
+
+    let t00 = Instant::now();
+    let file_splitter = AstBasedFileSplitter::new(constants.splitter_window_size);
+    let split_data = file_splitter.vectorization_split(&doc, tokenizer_arc.clone(), constants.vectorizer_n_ctx).await.unwrap_or_else(|err| {
+        info!("{}", err);
+        vec![]
+    });
+
+    if DEBUG_WRITE_VECDB_FILES {
+        let path_vecdb = doc.path.with_extension("vecdb");
+        if let Ok(mut file) = std::fs::File::create(path_vecdb) {
+            let mut writer = std::io::BufWriter::new(&mut file);
+            for chunk in split_data.iter() {
+                let beautiful_line = format!("\n\n------- {:?} {}-{} ------\n", chunk.symbol_path, chunk.start_line, chunk.end_line);
+                let _ = writer.write_all(beautiful_line.as_bytes());
+                let _ = writer.write_all(chunk.window_text.as_bytes());
+                let _ = writer.write_all(b"\n");
+            }
+        }
+    }
+
+    {
+        let vecdb_cache = vecdb_cache_arc.lock().await;
+        let mut delayed_cached_splits_q_collector_lock = delayed_cached_splits_q_collector.lock().await;
+        let mut embed_q_collector_lock = embed_q_collector.lock().await;
+        for split_item in split_data.into_iter() {
+            if vecdb_cache.contains(&split_item.window_text_hash) {
+                delayed_cached_splits_q_collector_lock.push(split_item);
+            } else {
+                embed_q_collector_lock.push(split_item);
+            }
+        }
+    }
+}
+
 async fn vectorize_thread(
     client: Arc<AMutex<reqwest::Client>>,
     vecdb_immediate_q: Arc<AMutex<VecDeque<MessageToVecdbThread>>>,
@@ -216,9 +274,10 @@ async fn vectorize_thread(
     constants: VecdbConstants,
     api_key: String,
     tokenizer: Arc<StdRwLock<Tokenizer>>,
-    gcx_weak: Weak<ARwLock<GlobalContext>>,
 ) {
     const B: usize = 64;
+    const B_DOCS: usize = 256;
+    const CACHE_DOCS_THREADS: usize = 8;
 
     let mut files_total: usize = 0;
     let mut reported_unprocessed: usize = 0;
@@ -226,7 +285,7 @@ async fn vectorize_thread(
     let mut delayed_cached_splits_q: Vec<SplitResult> = vec![];
 
     loop {
-        let (msg_to_me, files_unprocessed, vstatus_changed) = {
+        let (msgs2thread, files_unprocessed, vstatus_changed) = {
             let mut qlocked = vecdb_immediate_q.lock().await;
             let q_len = qlocked.len();
             // CAREFUL: two locks, qlocked -> vstatus_locked
@@ -246,7 +305,11 @@ async fn vectorize_thread(
                     }
                 }
             }
-            (qlocked.pop_front(), q_len, state_changed)
+            let mut msgs = vec![];
+            for _ in 0..B_DOCS.min(q_len) {
+                msgs.push(qlocked.pop_front())
+            }
+            (msgs, q_len, state_changed)
         };
         if vstatus_changed {
             vstatus_notify.notify_waiters();
@@ -275,119 +338,123 @@ async fn vectorize_thread(
             info!("have {} unprocessed files", files_unprocessed);
             reported_unprocessed = files_unprocessed;
         }
+        let mut docs = vec![];
 
-        let mut doc = {
-            match msg_to_me {
-                Some(MessageToVecdbThread::RegularDocument(doc)) => {
-                    {
-                        let mut vstatus_locked = vstatus.lock().await;
-                        vstatus_locked.files_unprocessed = files_unprocessed;
-                        if files_unprocessed > files_total {
-                            files_total = files_unprocessed;
-                        }
-                        vstatus_locked.files_total = files_total;
-                    }
-                    vstatus_notify.notify_waiters();
-                    doc
+        if msgs2thread.is_empty() {
+            // No files left to process
+            if delayed_cached_splits_q.len() > 0 {
+                add_from_cache_to_vec_db( // leftover splits
+                      &mut delayed_cached_splits_q,
+                      vecdb_handler_arc.clone(),
+                      vecdb_cache_arc.clone(),
+                      1024,
+                ).await;
+            }
+            let reported_vecdb_complete = {
+                let mut vstatus_locked = vstatus.lock().await;
+                let done = vstatus_locked.state == "done";
+                if !done {
+                    vstatus_locked.files_unprocessed = 0;
+                    vstatus_locked.files_total = 0;
+                    vstatus_locked.state = "done".to_string();
+                    info!(
+                        "vectorizer since start {} API calls, {} vectors",
+                        vstatus_locked.requests_made_since_start, vstatus_locked.vectors_made_since_start
+                    );
                 }
-                Some(MessageToVecdbThread::MemoriesSomethingDirty()) => {
-                    info!("MEMDB VECTORIZER START");
-                    let r = vectorize_dirty_memories(
-                        memdb.clone(),
-                        vecdb_cache_arc.clone(),
-                        vstatus.clone(),
-                        client.clone(),
-                        &api_key,
-                        B,
-                    ).await;
-                    info!("/MEMDB {:?}", r);
-                    continue;
-                }
-                None => {
-                    // No files left to process
-                    if delayed_cached_splits_q.len() > 0 {
-                        add_from_cache_to_vec_db( // leftover splits
-                            &mut delayed_cached_splits_q,
-                            vecdb_handler_arc.clone(),
-                            vecdb_cache_arc.clone(),
-                            1024,
-                        ).await;
-                    }
-                    let reported_vecdb_complete = {
-                        let mut vstatus_locked = vstatus.lock().await;
-                        let done = vstatus_locked.state == "done";
-                        if !done {
-                            vstatus_locked.files_unprocessed = 0;
-                            vstatus_locked.files_total = 0;
-                            vstatus_locked.state = "done".to_string();
-                            info!(
-                                "vectorizer since start {} API calls, {} vectors",
-                                vstatus_locked.requests_made_since_start, vstatus_locked.vectors_made_since_start
-                            );
+                done
+            };
+            if !reported_vecdb_complete {
+                // For now, we do not create index because it hurts the quality of retrieval
+                // info!("VECDB Creating index");
+                // match vecdb_handler_arc.lock().await.create_index().await {
+                //     Ok(_) => info!("VECDB CREATED INDEX"),
+                //     Err(err) => info!("VECDB Error creating index: {}", err)
+                // }
+                let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
+                info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
+                vstatus_notify.notify_waiters();
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {},
+                _ = vstatus_notify.notified() => {},
+            }
+            continue;
+        }
+        
+        for msg_to_me in msgs2thread {
+            let doc = {
+                match msg_to_me {
+                    Some(MessageToVecdbThread::RegularDocument(doc)) => {
+                        {
+                            let mut vstatus_locked = vstatus.lock().await;
+                            vstatus_locked.files_unprocessed = files_unprocessed;
+                            if files_unprocessed > files_total {
+                                files_total = files_unprocessed;
+                            }
+                            vstatus_locked.files_total = files_total;
                         }
-                        done
-                    };
-                    if !reported_vecdb_complete {
-                        // For now, we do not create index because it hurts the quality of retrieval
-                        // info!("VECDB Creating index");
-                        // match vecdb_handler_arc.lock().await.create_index().await {
-                        //     Ok(_) => info!("VECDB CREATED INDEX"),
-                        //     Err(err) => info!("VECDB Error creating index: {}", err)
-                        // }
-                        let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
-                        info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
                         vstatus_notify.notify_waiters();
+                        doc
                     }
-                    tokio::select! {
-                        _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {},
-                        _ = vstatus_notify.notified() => {},
+                    Some(MessageToVecdbThread::MemoriesSomethingDirty()) => {
+                        info!("MEMDB VECTORIZER START");
+                        let r = vectorize_dirty_memories(
+                            memdb.clone(),
+                            vecdb_cache_arc.clone(),
+                            vstatus.clone(),
+                            client.clone(),
+                            &api_key,
+                            B,
+                        ).await;
+                        info!("/MEMDB {:?}", r);
+                        continue;
                     }
-                    continue;
+                    None => continue
                 }
-            }
-        };
-        let last_30_chars = crate::nicer_logs::last_n_chars(&doc.path.display().to_string(), 30);
-
-        // Not from memory, vecdb works on files from disk
-        if let Err(err) = doc.update_text_from_disk().await {
-            info!("{}: {}", last_30_chars, err);
-            continue;
+            };
+            docs.push(doc);
         }
+        
+        let delayed_cached_splits_q_collector = Arc::new(AMutex::new(Vec::new()));
+        let embed_q_collector = Arc::new(AMutex::new(Vec::new()));
+        let semaphore = Arc::new(Semaphore::new(CACHE_DOCS_THREADS));
 
-        if let Err(err) = doc.does_text_look_good() {
-            info!("embeddings {} doesn't look good: {}", last_30_chars, err);
-            continue;
+        let mut handles = vec![];
+        for doc in docs {
+            let constants_clone = constants.clone();
+            let vecdb_cache_arc_clone = vecdb_cache_arc.clone();
+            let delayed_cached_splits_q_collector_clone = delayed_cached_splits_q_collector.clone();
+            let embed_q_collector_clone = embed_q_collector.clone();
+            let semaphore_clone = semaphore.clone();
+            let tokenizer_arc_clone = tokenizer.clone();
+
+            let handle = tokio::spawn(async move {
+                let permit = semaphore_clone.acquire().await.unwrap();
+                let tokenizer_clone = tokenizer_arc_clone.read().unwrap().clone();
+                vectorize_and_cache_document(
+                    doc,
+                    constants_clone,
+                    tokenizer_clone,
+                    vecdb_cache_arc_clone,
+                    delayed_cached_splits_q_collector_clone,
+                    embed_q_collector_clone,
+                ).await;
+                drop(permit);
+            });
+            handles.push(handle);
         }
-
-        let file_splitter = AstBasedFileSplitter::new(constants.splitter_window_size);
-        let split_data = file_splitter.vectorization_split(&doc, tokenizer.clone(), gcx_weak.clone(), constants.vectorizer_n_ctx).await.unwrap_or_else(|err| {
-            info!("{}", err);
-            vec![]
-        });
-
-        if DEBUG_WRITE_VECDB_FILES {
-            let path_vecdb = doc.path.with_extension("vecdb");
-            if let Ok(mut file) = std::fs::File::create(path_vecdb) {
-                let mut writer = std::io::BufWriter::new(&mut file);
-                for chunk in split_data.iter() {
-                    let beautiful_line = format!("\n\n------- {:?} {}-{} ------\n", chunk.symbol_path, chunk.start_line, chunk.end_line);
-                    let _ = writer.write_all(beautiful_line.as_bytes());
-                    let _ = writer.write_all(chunk.window_text.as_bytes());
-                    let _ = writer.write_all(b"\n");
-                }
-            }
+        
+        for handle in handles {
+            handle.await.unwrap();
         }
-
         {
-            let vecdb_cache = vecdb_cache_arc.lock().await;
-            for split_item in split_data.into_iter() {
-                if vecdb_cache.contains(&split_item.window_text_hash) {
-                    delayed_cached_splits_q.push(split_item);
-                } else {
-                    embed_q.push(split_item);
-                }
-            }
+            let delayed_cached_splits_q_lock = delayed_cached_splits_q_collector.lock().await;
+            let embed_q_lock = embed_q_collector.lock().await;
+            delayed_cached_splits_q.extend(delayed_cached_splits_q_lock.clone());
+            embed_q.extend(embed_q_lock.clone());
         }
+
         // Do not keep too many
         if delayed_cached_splits_q.len() > 1024 {
             add_from_cache_to_vec_db(
@@ -440,7 +507,6 @@ impl FileVectorizerService {
     pub async fn vecdb_start_background_tasks(
         &self,
         vecdb_client: Arc<AMutex<reqwest::Client>>,
-        gcx: Arc<ARwLock<GlobalContext>>,
         tokenizer: Arc<StdRwLock<Tokenizer>>,
     ) -> Vec<JoinHandle<()>> {
         let cooldown_queue_join_handle = tokio::spawn(
@@ -465,7 +531,6 @@ impl FileVectorizerService {
                 constants,
                 self.api_key.clone(),
                 tokenizer,
-                Arc::downgrade(&gcx.clone()),
             )
         );
         return vec![cooldown_queue_join_handle, retrieve_thread_handle];
