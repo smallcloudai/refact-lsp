@@ -251,13 +251,13 @@ impl AstModule {
             .collect::<Vec<_>>();
         let exact_matches = sorted_decl_symbols
             .iter()
-            .filter(|s| ast_ref.get_symbol_full_path(s).contains(&query))
+            .filter(|s| ast_ref.get_symbol_full_path(s).ends_with(&query))
             .filter_map(|s| symbol_to_search_res_struct(&ast_ref, s, 100.0))
             .collect::<Vec<_>>();
 
         let mut fuzzy_matches = sorted_decl_symbols
             .iter()
-            .filter(|s| !ast_ref.get_symbol_full_path(s).contains(&query))
+            .filter(|s| !ast_ref.get_symbol_full_path(s).ends_with(&query))
             .filter_map(|s| symbol_to_search_res_struct(&ast_ref, s, 10.0))
             .collect::<Vec<_>>();
         fuzzy_matches.sort_by(|a, b| b.usefulness.partial_cmp(&a.usefulness).unwrap());
@@ -367,13 +367,35 @@ impl AstModule {
             .chain(func_calls_matched_by_name)
             .unique_by(|s| s.borrow().guid().clone())
             .collect::<Vec<_>>();
+        // for those references which are class fields or variable declarations, searching for extra references symbols by their names
+        let extra_usages = usages
+            .iter()
+            .filter(|s| s.borrow().symbol_type() == SymbolType::VariableDefinition 
+                || s.borrow().symbol_type() == SymbolType::ClassFieldDeclaration)
+            .map(|x| {
+                let full_path = ast_ref.get_symbol_full_path(x);
+                ast_ref.search_by_fullpath(
+                    &full_path, RequestSymbolType::Usage, None, None, false, false
+                ).unwrap_or_default()
+            })
+            .flatten()
+            .unique_by(|s| s.borrow().guid().clone())
+            .collect::<Vec<_>>();
+        
+        let mut usefulness = 100.0;
+        let u_reduce_step = 10.0 / (usages.len() + extra_usages.len()) as f32;
         let res = AstReferencesSearchResult {
             query_text: query.clone(),
             declaration_exact_matches: declarations.exact_matches,
             declaration_fuzzy_matches: declarations.fuzzy_matches,
             references_for_exact_matches: usages
                 .iter()
-                .filter_map(|s| symbol_to_search_res_struct(&ast_ref, s, 100.0))
+                .chain(&extra_usages)
+                .filter_map(|s| {
+                    let symbol = symbol_to_search_res_struct(&ast_ref, s, usefulness);
+                    usefulness -= u_reduce_step;
+                    symbol
+                })
                 .collect::<Vec<_>>(),
         };
         log(&t0, &res);
