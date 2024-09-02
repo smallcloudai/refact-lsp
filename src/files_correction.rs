@@ -18,16 +18,16 @@ pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) ->
 }
 
 fn make_cache<I>(paths_iter: I) -> (
-    HashMap<String, HashSet<String>>, Vec<String>, usize
+    HashMap<String, HashSet<String>>, HashMap<String, String>, usize
 ) where I: IntoIterator<Item = PathBuf> {
     let mut cache_correction = HashMap::<String, HashSet<String>>::new();
-    let mut cache_fuzzy_set = HashSet::<String>::new();
+    let mut cache_fuzzy = HashMap::new();
     let mut cnt = 0;
 
     for path in paths_iter {
         let path_str = path.to_str().unwrap_or_default().to_string();
         let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        cache_fuzzy_set.insert(file_name);
+        cache_fuzzy.insert(file_name.clone(), path_str.clone());
         cnt += 1;
 
         cache_correction.entry(path_str.clone()).or_insert_with(HashSet::new).insert(path_str.clone());
@@ -43,7 +43,7 @@ fn make_cache<I>(paths_iter: I) -> (
         }
     }
 
-    (cache_correction, cache_fuzzy_set.into_iter().collect(), cnt)
+    (cache_correction, cache_fuzzy, cnt)
 }
 
 pub async fn get_files_in_dir(
@@ -56,7 +56,7 @@ pub async fn get_files_in_dir(
         .collect()
 }
 
-pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<String>>) {
+pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<HashMap<String, String>>) {
     let (cache_dirty_arc, mut cache_correction_arc, mut cache_fuzzy_arc) = {
         let cx = global_context.read().await;
         (
@@ -89,17 +89,31 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_fuzzy_arc);
 }
 
-fn fuzzy_search<I>(
+fn fuzzy_search(
     cache_correction_arc: Arc<HashMap<String, HashSet<String>>>,
+    cache_fuzzy_arc: Arc<HashMap<String, String>>,
     correction_candidate: &String,
-    candidates: I,
     top_n: usize,
-) -> Vec<String>
-where I: Iterator<Item = String> {
+) -> Vec<String> {
     let mut top_n_records = Vec::with_capacity(top_n);
-    for p in candidates {
-        let dist = normalized_damerau_levenshtein(&correction_candidate, &p);
-        top_n_records.push((p.clone(), dist));
+    let cand_path = PathBuf::from(correction_candidate);
+    let dirs_correction_map = dirs_correction_map(cache_correction_arc.clone());
+
+    let (prefix_mb, correction_candidate) = cand_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| dirs_correction_map.contains_key(p))
+        .and_then(|p| get_last_component(correction_candidate).map(|last_component| (Some(p), last_component)))
+        .unwrap_or((None, correction_candidate.clone()));
+    
+    for (c_name, c_full_path) in cache_fuzzy_arc.iter() {
+        if let Some(prefix) = &prefix_mb {
+            if !c_full_path.contains(prefix) {
+                continue;
+            }
+        }
+        let dist = normalized_damerau_levenshtein(&correction_candidate, c_name);
+        top_n_records.push((c_full_path.clone(), dist));
         if top_n_records.len() >= top_n {
             top_n_records.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             top_n_records.pop();
@@ -135,26 +149,20 @@ pub async fn correct_to_nearest_filename(
 
     if fuzzy {
         info!("fuzzy search {:?}, cache_fuzzy_arc.len={}", correction_candidate, cache_fuzzy_arc.len());
-        return fuzzy_search(cache_correction_arc.clone(), correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n);
+        return fuzzy_search(cache_correction_arc.clone(), cache_fuzzy_arc.clone(), correction_candidate, top_n);
     }
 
     return vec![];
 }
 
-pub async fn correct_to_nearest_dir_path(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    correction_candidate: &String,
-    fuzzy: bool,
-    top_n: usize,
-) -> Vec<String> {
+fn get_last_component(p: &String) -> Option<String> {
+    PathBuf::from(p).components().last().map(|comp| comp.as_os_str().to_string_lossy().to_string())
+}
+
+fn dirs_correction_map(cache_correction_arc: Arc<HashMap<String, HashSet<String>>>) -> HashMap<String, HashSet<String>> {
     fn get_parent(p: &String) -> Option<String> {
         PathBuf::from(p).parent().map(PathBuf::from).map(|x|x.to_string_lossy().to_string())
     }
-    fn get_last_component(p: &String) -> Option<String> {
-        PathBuf::from(p).components().last().map(|comp| comp.as_os_str().to_string_lossy().to_string())
-    }
-
-    let (cache_correction_arc, _) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let mut paths_correction_map = HashMap::new();
     for (k, v) in cache_correction_arc.iter() {
         match get_parent(k) {
@@ -168,13 +176,30 @@ pub async fn correct_to_nearest_dir_path(
             None => {}
         }
     }
+    paths_correction_map
+}
+
+pub async fn correct_to_nearest_dir_path(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    correction_candidate: &String,
+    fuzzy: bool,
+    top_n: usize,
+) -> Vec<String> {
+    let (cache_correction_arc, _) = files_cache_rebuild_as_needed(gcx.clone()).await;
+    let paths_correction_map = dirs_correction_map(cache_correction_arc.clone());
+    
     if let Some(res) = paths_correction_map.get(correction_candidate).map(|x|x.iter().cloned().collect::<Vec<_>>()) {
         return res;
     }
-
     if fuzzy {
-        let paths_fuzzy = paths_correction_map.values().flat_map(|v| v).filter_map(get_last_component).collect::<HashSet<_>>();
-        return fuzzy_search(Arc::new(paths_correction_map), correction_candidate, paths_fuzzy.into_iter(), top_n);
+        let all_dirs = paths_correction_map.values().flat_map(|v|v).cloned().collect::<HashSet<_>>();
+        let mut paths_fuzzy = HashMap::new();
+        for d in all_dirs.into_iter() {
+            if let Some(last_component) = get_last_component(&d) {
+                paths_fuzzy.insert(last_component.clone(), d.clone());
+            }
+        }
+        return fuzzy_search(Arc::new(paths_correction_map), Arc::new(paths_fuzzy), correction_candidate, top_n);
     }
     vec![]
 }
