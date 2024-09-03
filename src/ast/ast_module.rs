@@ -1,3 +1,4 @@
+use std::ops::Neg;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -403,8 +404,23 @@ impl AstModule {
             references_for_exact_matches: usages
                 .iter()
                 .chain(&extra_usages)
+                .unique_by(|s| (
+                    s.borrow().full_range().start_point.row,
+                    s.borrow().file_path().clone()))
+                .sorted_unstable_by_key(|x| x.borrow().file_path().clone())
+                .group_by(|s| s.borrow().file_path().clone())
+                .into_iter()
+                .map(|(file_path, group)| {
+                    group
+                        .into_iter()
+                        .sorted_unstable_by_key(|x| ast_ref.get_symbol_full_path(x).len())
+                        .cloned()
+                        .collect::<Vec<AstSymbolInstanceRc>>()
+                })
+                .sorted_unstable_by_key(|x| (x.len() as i64).neg())
+                .flatten()
                 .filter_map(|s| {
-                    let symbol = symbol_to_search_res_struct(&ast_ref, s, usefulness);
+                    let symbol = symbol_to_search_res_struct(&ast_ref, &s, usefulness);
                     usefulness -= u_reduce_step;
                     symbol
                 })
