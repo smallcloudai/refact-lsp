@@ -251,13 +251,25 @@ impl AstModule {
             .collect::<Vec<_>>();
         let exact_matches = sorted_decl_symbols
             .iter()
-            .filter(|s| ast_ref.get_symbol_full_path(s).ends_with(&query))
+            .filter(|s| {
+                if query.contains("::") {
+                    ast_ref.get_symbol_full_path(s).ends_with(&query)
+                } else {
+                    s.borrow().name() == &query
+                }
+            })
             .filter_map(|s| symbol_to_search_res_struct(&ast_ref, s, 100.0))
             .collect::<Vec<_>>();
 
         let mut fuzzy_matches = sorted_decl_symbols
             .iter()
-            .filter(|s| !ast_ref.get_symbol_full_path(s).ends_with(&query))
+            .filter(|s| {
+                if query.contains("::") {
+                    !ast_ref.get_symbol_full_path(s).ends_with(&query)
+                } else {
+                    s.borrow().name() != &query
+                }
+            })
             .filter_map(|s| symbol_to_search_res_struct(&ast_ref, s, 10.0))
             .collect::<Vec<_>>();
         fuzzy_matches.sort_by(|a, b| b.usefulness.partial_cmp(&a.usefulness).unwrap());
