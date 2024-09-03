@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
+use log::warn;
 use rand::Rng;
 use rayon::prelude::*;
 use ropey::Rope;
@@ -20,7 +21,7 @@ use uuid::Uuid;
 use crate::ast::comments_wrapper::get_language_id_by_filename;
 use crate::ast::imports_resolver::{possible_filepath_candidates, top_n_prefixes, try_find_file_path};
 use crate::ast::structs::FileASTMarkup;
-use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstance, AstSymbolInstanceArc, AstSymbolInstanceRc, ImportDeclaration, ImportType, SymbolInformation};
+use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstance, AstSymbolInstanceArc, AstSymbolInstanceRc, ClassFieldDeclaration, ImportDeclaration, ImportType, SymbolInformation, TypeDef, VariableDefinition};
 use crate::ast::treesitter::language_id::LanguageId;
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::structs::SymbolType;
@@ -153,7 +154,7 @@ impl AstIndex {
                 self.ast_max_files,
                 crate::nicer_logs::last_n_chars(&doc.doc_path.display().to_string(), 30)
             );
-            return Err("ast index too many files".to_string());
+            return Err("as.as_ref()t index too many files".to_string());
         }
         let symbols_filtered = if self.ast_light_mode {
             symbols
@@ -176,14 +177,15 @@ impl AstIndex {
                 let mut write_lock = sym.write();
                 Rc::new(RefCell::new(std::mem::replace(&mut *write_lock, Box::new(ImportDeclaration::default()))))
             }).collect::<Vec<_>>();
+        link_inference_symbol_info(&mut symbols_cloned);
         let has_changes_before = self.has_changes;
         let has_removed = self.remove(&doc);
         if has_removed {
-            self.resolve_declaration_symbols(&mut symbols_cloned);
             let (_, import_components_succ_solution_index) = self.resolve_imports(
                 &mut symbols_cloned, &self.import_components_succ_solution_index,
             );
             self.import_components_succ_solution_index.extend(import_components_succ_solution_index);
+            self.resolve_declaration_symbols(&mut symbols_cloned);
             self.merge_usages_to_declarations(&mut symbols_cloned);
             self.create_extra_indexes(&mut symbols_cloned);
             self.has_changes = has_changes_before;
@@ -1079,20 +1081,6 @@ impl AstIndex {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        info!("Resolving declaration symbols");
-        let t0 = std::time::Instant::now();
-        let stats = self.resolve_declaration_symbols(&mut symbols);
-        info!(
-            "Resolving declaration symbols finished, took {:.3}s, {} found, {} not found",
-            t0.elapsed().as_secs_f64(),
-            stats.found,
-            stats.non_found
-        );
-        if self.shutdown_flag.load(Ordering::SeqCst) {
-            info!("Aborting ast indexing, shutdown signal received");
-            return;
-        }
-
         info!("Resolving import symbols");
         let t0 = std::time::Instant::now();
         let (stats, import_components_succ_solution_index) = self.resolve_imports(
@@ -1110,8 +1098,23 @@ impl AstIndex {
             stats.non_found
         );
 
+        info!("Resolving declaration symbols");
+        let t0 = std::time::Instant::now();
+        let stats = self.resolve_declaration_symbols(&mut symbols);
+        info!(
+            "Resolving declaration symbols finished, took {:.3}s, {} found, {} not found",
+            t0.elapsed().as_secs_f64(),
+            stats.found,
+            stats.non_found
+        );
+        if self.shutdown_flag.load(Ordering::SeqCst) {
+            info!("Aborting ast indexing, shutdown signal received");
+            return;
+        }
+        
         info!("Linking usage and declaration symbols");
         let t1 = std::time::Instant::now();
+        let stats_1 = self.merge_usages_to_declarations(&mut symbols);
         let stats = self.merge_usages_to_declarations(&mut symbols);
         if self.shutdown_flag.load(Ordering::SeqCst) {
             info!("Aborting ast indexing, shutdown signal received");
@@ -1151,6 +1154,7 @@ impl AstIndex {
             if self.shutdown_flag.load(Ordering::SeqCst) {
                 return stats;
             }
+            let s_dump = symbol.borrow().symbol_info_struct();
             let (type_names, symb_type, symb_path) = {
                 let s_ref = symbol.borrow();
                 (s_ref.types(), s_ref.symbol_type(), s_ref.file_path().clone())
@@ -1164,7 +1168,6 @@ impl AstIndex {
 
             let mut new_guids = vec![];
             for (_, t) in type_names.iter().enumerate() {
-                // TODO: make a type inference by `inference_info`
                 if t.is_pod || t.name.is_none() {
                     stats.non_found += 1;
                     new_guids.push(t.guid.clone());
@@ -1185,6 +1188,7 @@ impl AstIndex {
                             .iter()
                             .filter(|s| s.borrow().is_type())
                             .min_by(|a, b| {
+                                // TODO: use import-based distance  
                                 let path_a = a.borrow().file_path().clone();
                                 let path_b = b.borrow().file_path().clone();
                                 FilePathIterator::compare_paths(&symb_path, &path_a, &path_b)
@@ -1213,7 +1217,6 @@ impl AstIndex {
             {
                 let mut symbol_ref = symbol.borrow_mut();
                 symbol_ref.set_guids_to_types(&new_guids);
-                symbol_ref.temporary_types_cleanup();
             }
         }
         stats
@@ -1224,13 +1227,6 @@ impl AstIndex {
             symbol: &AstSymbolInstanceRc,
             guid_by_symbols: &HashMap<Uuid, AstSymbolInstanceRc>,
         ) -> Option<usize> {
-            match symbol.borrow().get_caller_guid() {
-                Some(_) => {}
-                None => {
-                    return None;
-                }
-            };
-
             let mut current_symbol = symbol.clone();
             let mut current_depth = 0;
             loop {
@@ -1251,32 +1247,144 @@ impl AstIndex {
                 }
             }
         }
+
+        fn get_struct_guid(
+            symbol: &AstSymbolInstanceRc,
+            guid_by_symbols: &HashMap<Uuid, AstSymbolInstanceRc>,
+        ) -> Option<Uuid> {
+            let mut current_symbol = symbol.clone();
+            loop {
+                let guid = match current_symbol.borrow().parent_guid().clone() {
+                    Some(g) => g,
+                    None => {
+                        return None;
+                    }
+                };
+                match guid_by_symbols.get(&guid) {
+                    Some(s) => {
+                        if s.borrow().symbol_type() == SymbolType::StructDeclaration {
+                            return Some(guid);
+                        } else {
+                            current_symbol = s.clone();
+                        }
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            }
+        }
+        
+        fn make_fields_index<'a>(
+            symbols: &'a Vec<AstSymbolInstanceRc>,
+            guid_by_symbols: &'a HashMap<Uuid, AstSymbolInstanceRc>,
+            is_var_index: bool
+        ) -> HashMap<(Uuid, String), AstSymbolInstanceRc> {
+            let mut index: HashMap<(Uuid, String), AstSymbolInstanceRc> = HashMap::new();
+            for s in symbols.iter() {
+                if is_var_index {
+                    if s.borrow().symbol_type() == SymbolType::VariableDefinition
+                        || s.borrow().symbol_type() == SymbolType::ClassFieldDeclaration {
+                        if let Some(struct_guid) = get_struct_guid(&s, guid_by_symbols) {
+                            index.insert((struct_guid, s.borrow().name().to_string()), s.clone());
+                        }
+                    }
+                } else {
+                    if s.borrow().symbol_type() == SymbolType::FunctionDeclaration
+                        || s.borrow().symbol_type() == SymbolType::StructDeclaration {
+                        if let Some(struct_guid) = get_struct_guid(&s, guid_by_symbols) {
+                            index.insert((struct_guid, s.borrow().name().to_string()), s.clone());
+                        }
+                    }
+                }
+            }
+            index
+        }
+        
+        fn try_link_type_to_decl(
+            type_inference_linked_guid_index: &HashMap<Uuid, AstSymbolInstanceRc>,
+            symbols_by_guid: &HashMap<Uuid, AstSymbolInstanceRc>,
+            usage_symbol: &AstSymbolInstanceRc,
+            type_def: &TypeDef,
+        ) {
+            let mut first_caller_symbol = usage_symbol;
+            loop {
+                if let Some(s) = first_caller_symbol
+                    .borrow()
+                    .get_caller_guid()
+                    .as_ref()
+                    .map(|x| symbols_by_guid.get(x))
+                    .flatten() {
+                    first_caller_symbol = s;
+                } else {
+                    break;
+                }
+            }
+            let usage_symbol_d = usage_symbol.borrow().symbol_info_struct();
+            let first_caller_symbol_d = first_caller_symbol.borrow().symbol_info_struct();
+            if let Some(decl_symbol) = type_inference_linked_guid_index.get(first_caller_symbol.borrow().guid()) {
+                let symbol_type = decl_symbol.borrow().symbol_type();
+                match symbol_type {
+                    SymbolType::ClassFieldDeclaration => {
+                        decl_symbol
+                            .borrow_mut()
+                            .as_any_mut()
+                            .downcast_mut::<ClassFieldDeclaration>()
+                            .expect("checked above")
+                            .type_
+                            .guid = type_def.guid.clone();
+                    }
+                    SymbolType::VariableDefinition => {
+                        decl_symbol
+                            .borrow_mut()
+                            .as_any_mut()
+                            .downcast_mut::<VariableDefinition>()
+                            .expect("checked above")
+                            .type_
+                            .guid = type_def.guid.clone()
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let type_inference_linked_guid_index = symbols
+            .iter()
+            .filter(|x| x.borrow().symbol_type() == SymbolType::VariableDefinition
+                || x.borrow().symbol_type() == SymbolType::ClassFieldDeclaration)
+            .filter_map(|x| {
+                let type_def = x.borrow()
+                    .types()
+                    .iter()
+                    .next()
+                    .cloned()
+                    .expect("must be at least one");
+                if let Some(s) = type_def
+                    .inference_info_guid
+                    .map(|x| self.symbols_by_guid.get(&x))
+                    .flatten()
+                    .cloned() {
+                    Some((s.borrow().guid().clone(), x.clone()))
+                } else {
+                    None
+                }
+            })
+           .collect::<HashMap<Uuid, AstSymbolInstanceRc>>();
+        
         for s in symbols.iter_mut() {
             let caller_depth = get_caller_depth(s, &self.symbols_by_guid);
             s.borrow_mut().set_caller_depth(caller_depth);
         }
 
         let mut stats = IndexingStats { found: 0, non_found: 0 };
-        let search_by_name_extra_index: HashMap<(String, Uuid, String), AstSymbolInstanceRc> = symbols
-            .iter()
-            .map(|x| {
-                let x_ref = x.borrow();
-                ((x_ref.name().to_string(),
-                  x_ref.parent_guid().clone().unwrap_or_default(),
-                  x_ref.file_path().to_str().unwrap_or_default().to_string()),
-                 x.clone())
-            })
-            .collect();
-        let search_by_caller_extra_index: HashMap<(String, Uuid, SymbolType), Uuid> = symbols
-            .iter()
-            .map(|x| {
-                let x_ref = x.borrow();
-                ((x_ref.name().to_string(),
-                  x_ref.parent_guid().clone().unwrap_or_default(),
-                  x_ref.symbol_type().clone()),
-                 x_ref.guid().clone())
-            })
-            .collect();
+        let search_by_caller_var_index = make_fields_index(
+            &symbols, &self.symbols_by_guid, true
+        );
+        let search_by_caller_func_index = make_fields_index(
+            &symbols, &self.symbols_by_guid, false
+        );
+        
+        let max_depth: usize = 20;
         let mut depth: usize = 0; // depth means "a.b.c" it's 2 for c
         loop {
             let mut symbols_to_process = symbols
@@ -1296,68 +1404,117 @@ impl AstIndex {
                         || s_ref.symbol_type() == SymbolType::VariableUsage)
                 })
                 .collect::<Vec<_>>();
-
-            if symbols_to_process.is_empty() {
+            if depth >= max_depth {
                 break;
             }
+            if symbols_to_process.is_empty() {
+                depth += 1;
+                continue;
+            }
 
-            let mut symbols_cache: HashMap<(Uuid, String), Option<Uuid>> = HashMap::new();
-            for usage_symbol in symbols_to_process.iter_mut() {
+            let mut symbols_cache: HashMap<
+                (Uuid, String),
+                (Option<AstSymbolInstanceRc>, Option<AstSymbolInstanceRc>)
+            > = HashMap::new();
+            for usage_symbol in symbols_to_process
+                .iter_mut()
+                .sorted_unstable_by_key(|x| x.borrow().full_range().start_point.row) {
+                let s_dump = usage_symbol.borrow().symbol_info_struct();
                 if self.shutdown_flag.load(Ordering::SeqCst) {
                     return stats;
                 }
-
-                let (name, parent_guid, caller_guid) = {
-                    let s_ref = usage_symbol.borrow();
-                    (s_ref.name().to_string(), s_ref.parent_guid().clone().unwrap_or_default(), s_ref.get_caller_guid().clone())
-                };
-                let guids_pair = (parent_guid, name);
-                let decl_guid = if !symbols_cache.contains_key(&guids_pair) {
-                    let decl_guid = match caller_guid {
-                        Some(ref guid) => {
-                            match find_decl_by_caller_guid(
-                                *usage_symbol,
-                                &guid,
-                                &self.symbols_by_guid,
-                                &search_by_caller_extra_index,
-                            ) {
-                                Some(decl_guid) => { Some(decl_guid) }
-                                None => find_decl_by_name(
-                                    *usage_symbol,
-                                    &self.path_by_symbols,
-                                    &self.symbols_by_guid,
-                                    &search_by_name_extra_index,
-                                    1,
-                                )
-                            }
-                        }
-                        None => find_decl_by_name(
+                
+                let guids_pair = (
+                    usage_symbol.borrow().parent_guid().clone().unwrap_or_default(),
+                    usage_symbol.borrow().name().to_string()
+                );
+                let decl_searching_result = if !symbols_cache.contains_key(&guids_pair) {
+                    match if depth == 0 {
+                        find_decl_by_name(
                             *usage_symbol,
                             &self.path_by_symbols,
                             &self.symbols_by_guid,
-                            &search_by_name_extra_index,
-                            1,
+                            &search_by_caller_var_index,
+                            &self.declaration_symbols_by_name,
                         )
-                    };
-                    symbols_cache.insert(guids_pair, decl_guid.clone());
-                    decl_guid
-                } else {
-                    symbols_cache.get(&guids_pair).cloned().unwrap_or_default()
-                };
-                match decl_guid {
-                    Some(guid) => {
-                        {
-                            usage_symbol.borrow_mut().set_linked_decl_guid(Some(guid))
+                    } else {
+                        match find_decl_by_caller_guid(
+                            *usage_symbol,
+                            &self.symbols_by_guid,
+                            &search_by_caller_var_index,
+                            &search_by_caller_func_index,
+                        ) {
+                            Some(res) => Some(res),
+                            None => find_decl_by_name(
+                                *usage_symbol,
+                                &self.path_by_symbols,
+                                &self.symbols_by_guid,
+                                &search_by_caller_var_index,
+                                &self.declaration_symbols_by_name,
+                            )
                         }
+                    } {
+                        Some(res) => {
+                            // cache works only if there is no caller
+                            if depth == 0 {
+                                symbols_cache.insert(guids_pair, res.clone());
+                            }
+                            res
+                        }
+                        None => {
+                            let fn_name = s_dump.symbol_type.clone().to_string();
+                            warn!("Not found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
+                            stats.non_found += 1;
+                            continue;
+                        }
+                    }
+                } else {
+                    symbols_cache.get(&guids_pair).expect("checked above").clone()
+                };
+
+                match decl_searching_result {
+                    (None, Some(type_symbol)) => {
+                        let typedef = TypeDef {
+                            name: Some(type_symbol.borrow().name().to_string()),
+                            guid: Some(type_symbol.borrow().guid().clone()),
+                            ..TypeDef::default()
+                        };
+                        try_link_type_to_decl(&type_inference_linked_guid_index, &self.symbols_by_guid, usage_symbol, &typedef);
+                        usage_symbol.borrow_mut().set_linked_decl_type(typedef);
+                        let fn_name = s_dump.symbol_type.clone().to_string();
+                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.found += 1;
                     }
-                    None => {
+                    (Some(decl_symbol), None) => {
+                        usage_symbol.borrow_mut().set_linked_decl_guid(Some(decl_symbol.borrow().guid().clone()));
+                        let fn_name = s_dump.symbol_type.clone().to_string();
+                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
+                        stats.found += 1;
+                    }
+                    (Some(decl_symbol), Some(type_symbol)) => {
+                        let typedef = TypeDef {
+                            name: Some(type_symbol.borrow().name().to_string()),
+                            guid: Some(type_symbol.borrow().guid().clone()),
+                            ..TypeDef::default()
+                        };
+                        try_link_type_to_decl(&type_inference_linked_guid_index, &self.symbols_by_guid, usage_symbol, &typedef);
+                        usage_symbol.borrow_mut().set_linked_decl_guid(Some(decl_symbol.borrow().guid().clone()));
+                        usage_symbol.borrow_mut().set_linked_decl_type(typedef);
+                        let fn_name = s_dump.symbol_type.clone().to_string();
+                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
+                        stats.found += 1;
+                    }
+                    _ => {
+                        let fn_name = s_dump.symbol_type.clone().to_string();
+                        warn!("Not found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.non_found += 1;
+                        continue;
                     }
                 }
             }
             depth += 1;
         }
+        
         stats
     }
 
@@ -1586,14 +1743,57 @@ impl AstIndex {
                 let mut write_lock = sym.write();
                 Rc::new(RefCell::new(std::mem::replace(&mut *write_lock, Box::new(ImportDeclaration::default()))))
             }).collect::<Vec<_>>();
-        self.resolve_declaration_symbols(&mut symbols);
         _ = self.resolve_imports(&mut symbols, &self.import_components_succ_solution_index);
+        self.resolve_declaration_symbols(&mut symbols);
         self.merge_usages_to_declarations(&mut symbols);
         // for s in symbols.iter() {
         //     let x = s.read().unwrap();
         //     info!("symbol {:?} {:?}", x.name(), x.symbol_type());
         // }
         symbols
+    }
+}
+
+fn link_inference_symbol_info(symbols: &mut Vec<AstSymbolInstanceRc>) {
+    let mut symbols_per_start_point: HashMap<usize, Vec<AstSymbolInstanceRc>> = HashMap::new();
+    for symbol in symbols.iter() {
+        symbols_per_start_point
+            .entry(symbol.borrow().full_range().start_point.row)
+            .or_default()
+            .push(symbol.clone())
+    }
+    for symbol in symbols.iter_mut() {
+        let (type_names, symb_type, full_range) = {
+            let s_ref = symbol.borrow();
+            (s_ref.types(), s_ref.symbol_type(), s_ref.full_range().clone())
+        };
+        if symb_type == SymbolType::ImportDeclaration
+            || symb_type == SymbolType::CommentDefinition
+            || symb_type == SymbolType::FunctionCall
+            || symb_type == SymbolType::VariableUsage {
+            continue;
+        }
+
+        let mut new_inference_info_guids = vec![];
+        for (_, t) in type_names.iter().enumerate() {
+            new_inference_info_guids.push(if let Some(inference_info) = t.inference_info.clone() {
+                symbols_per_start_point
+                    .get(&full_range.start_point.row)
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter(|x| inference_info.starts_with(x.borrow().name()))
+                    .next()
+                    .map(|x| x.borrow().guid().clone())
+            } else {
+                None
+            })
+        }
+        assert_eq!(new_inference_info_guids.len(), type_names.len());
+        {
+            let mut symbol_ref = symbol.borrow_mut();
+            symbol_ref.set_inference_info_guids_to_types(&new_inference_info_guids);
+            symbol_ref.temporary_types_cleanup();
+        }
     }
 }
 
