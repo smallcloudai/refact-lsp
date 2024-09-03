@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -63,10 +64,13 @@ impl AtCommand for AtWeb {
             }
         };
 
-        let message = ChatMessage::new(
+        let mut message = ChatMessage::new(
             "plain_text".to_string(),
             text,
         );
+        let mut gui_metadata = HashMap::new();
+        gui_metadata.insert("preview_name".to_string(), url.text.clone());
+        message.gui_metadata = Some(gui_metadata);
 
         info!("executed @web {}", url.text);
         Ok((vec![ContextEnum::ChatMessage(message)], format!("[see text downloaded from {} above]", url.text)))

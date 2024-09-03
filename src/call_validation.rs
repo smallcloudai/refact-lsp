@@ -264,6 +264,8 @@ pub struct ChatMessage {
     pub tool_call_id: String,
     #[serde(default)]
     pub usage: Option<ChatUsage>,
+    #[serde(default)]
+    pub gui_metadata: Option<HashMap<String, String>>
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

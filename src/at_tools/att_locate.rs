@@ -67,6 +67,7 @@ impl Tool for AttLocate{
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             usage: Some(usage),
+            ..Default::default()
         }));
 
         Ok((false, results))
