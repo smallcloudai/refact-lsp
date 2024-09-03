@@ -1685,17 +1685,6 @@ impl AstIndex {
                 (s_ref.name().to_string(), s_ref.guid().clone(), s_ref.types(), s_ref.is_declaration(),
                  s_ref.symbol_type(), s_ref.parent_guid().clone())
             };
-            types = if is_declaration {
-                types
-            } else {
-                symbol.borrow()
-                    .get_linked_decl_guid()
-                    .clone()
-                    .map(|guid| self.symbols_by_guid.get(&guid))
-                    .flatten()
-                    .map(|s| s.borrow().types())
-                    .unwrap_or_default()
-            };
             for guid in types
                 .iter()
                 .filter_map(|t| t.guid.clone()) {
