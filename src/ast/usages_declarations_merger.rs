@@ -117,7 +117,6 @@ pub fn find_decl_by_caller_guid(
     search_by_caller_var_index: &HashMap<(Uuid, String), AstSymbolInstanceRc>,
     search_by_caller_func_index: &HashMap<(Uuid, String), AstSymbolInstanceRc>,
 ) -> Option<(Option<AstSymbolInstanceRc>, Option<AstSymbolInstanceRc>)> {
-    let s_dump = symbol.borrow().symbol_info_struct();
     let search_symbol_indexes: Vec<&HashMap<(Uuid, String), AstSymbolInstanceRc>> = if !symbol.borrow().is_error() {
         match symbol.borrow().symbol_type() {
             SymbolType::VariableUsage => { vec![search_by_caller_var_index] }

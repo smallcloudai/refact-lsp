@@ -1112,20 +1112,21 @@ impl AstIndex {
             return;
         }
         
-        info!("Linking usage and declaration symbols");
+        info!("Linking usage and declaration symbols iterations starting");
         let t1 = std::time::Instant::now();
-        let stats_1 = self.merge_usages_to_declarations(&mut symbols);
-        let stats = self.merge_usages_to_declarations(&mut symbols);
-        if self.shutdown_flag.load(Ordering::SeqCst) {
-            info!("Aborting ast indexing, shutdown signal received");
-            return;
+        loop {
+            let stats = self.merge_usages_to_declarations(&mut symbols);
+            info!(
+                "Linking usage and declaration symbols, took {:.3}s, {} found, {} not found",
+                t1.elapsed().as_secs_f64(),
+                stats.found,
+                stats.non_found
+            );
+            if stats.found == 0 {
+                info!("Linking usage and declaration symbols iterations finished");
+                break;
+            }
         }
-        info!(
-            "Linking usage and declaration symbols finished, took {:.3}s, {} found, {} not found",
-            t1.elapsed().as_secs_f64(),
-            stats.found,
-            stats.non_found
-        );
 
         info!("Creating extra ast indexes");
         let t2 = std::time::Instant::now();
@@ -1154,7 +1155,6 @@ impl AstIndex {
             if self.shutdown_flag.load(Ordering::SeqCst) {
                 return stats;
             }
-            let s_dump = symbol.borrow().symbol_info_struct();
             let (type_names, symb_type, symb_path) = {
                 let s_ref = symbol.borrow();
                 (s_ref.types(), s_ref.symbol_type(), s_ref.file_path().clone())
@@ -1320,8 +1320,6 @@ impl AstIndex {
                     break;
                 }
             }
-            let usage_symbol_d = usage_symbol.borrow().symbol_info_struct();
-            let first_caller_symbol_d = first_caller_symbol.borrow().symbol_info_struct();
             if let Some(decl_symbol) = type_inference_linked_guid_index.get(first_caller_symbol.borrow().guid()) {
                 let symbol_type = decl_symbol.borrow().symbol_type();
                 match symbol_type {
@@ -1391,6 +1389,10 @@ impl AstIndex {
                 .iter()
                 .filter(|symbol| {
                     let s_ref = symbol.borrow();
+                    let has_linked_type = s_ref.get_linked_decl_type().is_some();
+                    if has_linked_type {
+                        return false;
+                    }
                     let has_no_valid_linked_decl = if let Some(guid) = s_ref.get_linked_decl_guid() {
                         !self.symbols_by_guid.contains_key(guid)
                     } else {
@@ -1419,7 +1421,6 @@ impl AstIndex {
             for usage_symbol in symbols_to_process
                 .iter_mut()
                 .sorted_unstable_by_key(|x| x.borrow().full_range().start_point.row) {
-                let s_dump = usage_symbol.borrow().symbol_info_struct();
                 if self.shutdown_flag.load(Ordering::SeqCst) {
                     return stats;
                 }
@@ -1462,8 +1463,6 @@ impl AstIndex {
                             res
                         }
                         None => {
-                            let fn_name = s_dump.symbol_type.clone().to_string();
-                            warn!("Not found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                             stats.non_found += 1;
                             continue;
                         }
@@ -1481,14 +1480,10 @@ impl AstIndex {
                         };
                         try_link_type_to_decl(&type_inference_linked_guid_index, &self.symbols_by_guid, usage_symbol, &typedef);
                         usage_symbol.borrow_mut().set_linked_decl_type(typedef);
-                        let fn_name = s_dump.symbol_type.clone().to_string();
-                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.found += 1;
                     }
                     (Some(decl_symbol), None) => {
                         usage_symbol.borrow_mut().set_linked_decl_guid(Some(decl_symbol.borrow().guid().clone()));
-                        let fn_name = s_dump.symbol_type.clone().to_string();
-                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.found += 1;
                     }
                     (Some(decl_symbol), Some(type_symbol)) => {
@@ -1500,13 +1495,9 @@ impl AstIndex {
                         try_link_type_to_decl(&type_inference_linked_guid_index, &self.symbols_by_guid, usage_symbol, &typedef);
                         usage_symbol.borrow_mut().set_linked_decl_guid(Some(decl_symbol.borrow().guid().clone()));
                         usage_symbol.borrow_mut().set_linked_decl_type(typedef);
-                        let fn_name = s_dump.symbol_type.clone().to_string();
-                        warn!("Found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.found += 1;
                     }
                     _ => {
-                        let fn_name = s_dump.symbol_type.clone().to_string();
-                        warn!("Not found linked guid for {}, {}", fn_name, self.get_symbol_full_path(usage_symbol));
                         stats.non_found += 1;
                         continue;
                     }
