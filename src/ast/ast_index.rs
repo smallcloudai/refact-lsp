@@ -1762,7 +1762,7 @@ fn link_inference_symbol_info(symbols: &mut Vec<AstSymbolInstanceRc>) {
             || symb_type == SymbolType::VariableUsage {
             continue;
         }
-
+        
         let mut new_inference_info_guids = vec![];
         for (_, t) in type_names.iter().enumerate() {
             new_inference_info_guids.push(if let Some(inference_info) = t.inference_info.clone() {
@@ -1774,6 +1774,7 @@ fn link_inference_symbol_info(symbols: &mut Vec<AstSymbolInstanceRc>) {
                     .next()
                     .map(|x| x.borrow().guid().clone())
             } else {
+                // TODO: try to search those by name in the index
                 None
             })
         }
