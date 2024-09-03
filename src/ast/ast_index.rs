@@ -153,7 +153,7 @@ impl AstIndex {
                 self.ast_max_files,
                 crate::nicer_logs::last_n_chars(&doc.doc_path.display().to_string(), 30)
             );
-            return Err("as.as_ref()t index too many files".to_string());
+            return Err("ast index too many files".to_string());
         }
         let symbols_filtered = if self.ast_light_mode {
             symbols
