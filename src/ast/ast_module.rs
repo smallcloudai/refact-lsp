@@ -410,7 +410,7 @@ impl AstModule {
                 .sorted_unstable_by_key(|x| x.borrow().file_path().clone())
                 .group_by(|s| s.borrow().file_path().clone())
                 .into_iter()
-                .map(|(file_path, group)| {
+                .map(|(_, group)| {
                     group
                         .into_iter()
                         .sorted_unstable_by_key(|x| ast_ref.get_symbol_full_path(x).len())

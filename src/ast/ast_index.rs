@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
-use log::warn;
 use rand::Rng;
 use rayon::prelude::*;
 use ropey::Rope;
@@ -186,7 +185,12 @@ impl AstIndex {
             );
             self.import_components_succ_solution_index.extend(import_components_succ_solution_index);
             self.resolve_declaration_symbols(&mut symbols_cloned);
-            self.merge_usages_to_declarations(&mut symbols_cloned);
+            loop {
+                let stats = self.merge_usages_to_declarations(&mut symbols_cloned);
+                if stats.found == 0 {
+                    break;
+                }
+            }
             self.create_extra_indexes(&mut symbols_cloned);
             self.has_changes = has_changes_before;
         } else {
@@ -1680,9 +1684,9 @@ impl AstIndex {
                 continue;
             }
 
-            let (name, s_guid, mut types, is_declaration, symbol_type, parent_guid) = {
+            let (name, s_guid, types, symbol_type, parent_guid) = {
                 let s_ref = symbol.borrow();
-                (s_ref.name().to_string(), s_ref.guid().clone(), s_ref.types(), s_ref.is_declaration(),
+                (s_ref.name().to_string(), s_ref.guid().clone(), s_ref.types(), 
                  s_ref.symbol_type(), s_ref.parent_guid().clone())
             };
             for guid in types
@@ -1725,7 +1729,12 @@ impl AstIndex {
             }).collect::<Vec<_>>();
         _ = self.resolve_imports(&mut symbols, &self.import_components_succ_solution_index);
         self.resolve_declaration_symbols(&mut symbols);
-        self.merge_usages_to_declarations(&mut symbols);
+        loop {
+            let stats = self.merge_usages_to_declarations(&mut symbols);
+            if stats.found == 0 {
+                break;
+            }
+        }
         // for s in symbols.iter() {
         //     let x = s.read().unwrap();
         //     info!("symbol {:?} {:?}", x.name(), x.symbol_type());

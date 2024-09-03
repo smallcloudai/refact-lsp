@@ -1,7 +1,6 @@
 use hashbrown::HashMap;
 use std::cmp::Ordering;
 use std::path::PathBuf;
-use log::warn;
 use uuid::Uuid;
 
 use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstanceRc, FunctionDeclaration};
