@@ -25,15 +25,20 @@ fn get_parent(p: &String) -> Option<String> {
     PathBuf::from(p).parent().map(PathBuf::from).map(|x|x.to_string_lossy().to_string())
 }
 
-fn make_cache<I>(paths_iter: I) -> (
-    HashMap<String, HashSet<String>>, HashMap<String, String>, 
-    HashMap<String, HashSet<String>>, HashMap<String, String>, usize
-) where I: IntoIterator<Item = PathBuf> {
+fn _make_cache(
+    paths_from_anywhere: Vec<PathBuf>
+) -> (
+    HashMap<String, HashSet<String>>,
+    HashMap<String, String>,
+    HashMap<String, HashSet<String>>,
+    HashMap<String, String>,
+    usize
+) {
     let (mut cache_correction_files, mut cache_fuzzy_files) = (HashMap::new(), HashMap::new());
     let (mut cache_correction_dirs, mut cache_fuzzy_dirs) = (HashMap::new(), HashMap::new());
     let mut cnt = 0;
 
-    for path in paths_iter {
+    for path in paths_from_anywhere {
         let path_str = path.to_str().unwrap_or_default().to_string();
         let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         cache_fuzzy_files.insert(file_name.clone(), path_str.clone());
@@ -65,8 +70,12 @@ fn make_cache<I>(paths_iter: I) -> (
         }
     }
 
-    (cache_correction_files, cache_fuzzy_files, 
-     cache_correction_dirs, cache_fuzzy_dirs, cnt)
+    (
+        cache_correction_files,
+        cache_fuzzy_files,
+        cache_correction_dirs,
+        cache_fuzzy_dirs, cnt
+    )
 }
 
 pub async fn get_files_in_dir(
@@ -82,19 +91,25 @@ pub async fn get_files_in_dir(
 pub async fn files_cache_rebuild_as_needed(
     global_context: Arc<ARwLock<GlobalContext>>
 ) -> (
-    Arc<HashMap<String, HashSet<String>>>, Arc<HashMap<String, String>>, 
-    Arc<HashMap<String, HashSet<String>>>, Arc<HashMap<String, String>>
+    Arc<HashMap<String, HashSet<String>>>,
+    Arc<HashMap<String, String>>,
+    Arc<HashMap<String, HashSet<String>>>,
+    Arc<HashMap<String, String>>
 ) {
     let (
         cache_dirty_arc,
-        mut cache_correction_files_arc, mut cache_fuzzy_files_arc, 
-        mut cache_correction_dirs_arc, mut cache_fuzzy_dirs_arc
-    ) = { 
+        mut cache_correction_files_arc,
+        mut cache_fuzzy_files_arc,
+        mut cache_correction_dirs_arc,
+        mut cache_fuzzy_dirs_arc,
+    ) = {
         let cx = global_context.read().await;
         (
             cx.documents_state.cache_dirty.clone(),
-            cx.documents_state.cache_correction_files.clone(), cx.documents_state.cache_fuzzy_files.clone(),
-            cx.documents_state.cache_correction_dirs.clone(), cx.documents_state.cache_fuzzy_dirs.clone(),
+            cx.documents_state.cache_correction_files.clone(),
+            cx.documents_state.cache_fuzzy_files.clone(),
+            cx.documents_state.cache_correction_dirs.clone(),
+            cx.documents_state.cache_fuzzy_dirs.clone(),
         )
     };
 
@@ -105,16 +120,20 @@ pub async fn files_cache_rebuild_as_needed(
         let start_time = Instant::now();
         let paths_from_anywhere = paths_from_anywhere(global_context.clone()).await;
         let (
-            cache_correction_files, cache_fuzzy_files,
-            cache_correction_dirs, cache_fuzzy_dirs,
+            cache_correction_files,
+            cache_fuzzy_files,
+            cache_correction_dirs,
+            cache_fuzzy_dirs,
             cnt
-        ) = make_cache(paths_from_anywhere);
+        ) = _make_cache(paths_from_anywhere);
 
         info!("rebuild completed in {}s, {} URLs => cache_correction_files.len is now {}", start_time.elapsed().as_secs(), cnt, cache_correction_files.len());
 
-        cache_correction_files_arc = Arc::new(cache_correction_files); cache_fuzzy_files_arc = Arc::new(cache_fuzzy_files);
-        cache_correction_dirs_arc = Arc::new(cache_correction_dirs); cache_fuzzy_dirs_arc = Arc::new(cache_fuzzy_dirs);
-        
+        cache_correction_files_arc = Arc::new(cache_correction_files);
+        cache_fuzzy_files_arc = Arc::new(cache_fuzzy_files);
+        cache_correction_dirs_arc = Arc::new(cache_correction_dirs);
+        cache_fuzzy_dirs_arc = Arc::new(cache_fuzzy_dirs);
+
         {
             let mut cx = global_context.write().await;
             cx.documents_state.cache_correction_files = cache_correction_files_arc.clone();
@@ -125,8 +144,12 @@ pub async fn files_cache_rebuild_as_needed(
         *cache_dirty_ref = false;
     }
 
-    (cache_correction_files_arc, cache_fuzzy_files_arc, 
-     cache_correction_dirs_arc, cache_fuzzy_dirs_arc)
+    (
+        cache_correction_files_arc,
+        cache_fuzzy_files_arc,
+        cache_correction_dirs_arc,
+        cache_fuzzy_dirs_arc
+    )
 }
 
 fn fuzzy_search(
@@ -145,7 +168,7 @@ fn fuzzy_search(
         .and_then(|p| cache_correction_dirs_arc.get(&p).cloned())
         .and_then(|p| get_last_component(correction_candidate).map(|last_component| (p.into_iter().collect::<Vec<_>>(), last_component)))
         .unwrap_or((vec!["".to_string()], correction_candidate.clone()));
-    
+
     // pre-filtering cache_fuzzy_files_arc with items that start with prefixes
     for (c_name, c_full_path) in cache_fuzzy_files_arc.iter().filter(|x|prefixes.iter().any(|p| x.1.starts_with(p))) {
         let dist = normalized_damerau_levenshtein(&correction_candidate, c_name);
