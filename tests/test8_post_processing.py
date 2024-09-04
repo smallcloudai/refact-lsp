@@ -41,20 +41,33 @@ async def ask_chat(messages):
     return assistant_choices
 
 
-# async def test_references(symbol: str) -> None:
+async def test_references(symbol: str, expected_references) -> None:
 
-#     initial_messages = [
-#         chat_client.Message(role="user", content=f"Call references() for {symbol}"),
-#         chat_client.Message(role="assistant", content="Alright, here we go", tool_calls=[generate_tool_call("references", {"symbol": symbol})]),
-#     ]
+    initial_messages = [
+        chat_client.Message(role="user", content=f"Call references() for {symbol}"),
+        chat_client.Message(role="assistant", content="Alright, here we go", tool_calls=[generate_tool_call("references", {"symbol": symbol})]),
+    ]
 
-#     # Act
-#     assistant_choices = await ask_chat(initial_messages)
+    # Act
+    assistant_choices = await ask_chat(initial_messages)
 
-#     # Assert
-#     response_messages = assistant_choices[0][2:]
+    # Assert
+    response_messages = assistant_choices[0][2:]
 
-#     print(response_messages)
+    tool_call_message = None
+    for msg in response_messages:
+        if msg.role == "tool" and tool_call_message is None:
+            tool_call_message = msg
+
+    assert tool_call_message is not None, "No tool called"
+    assert "reference" in tool_call_message.tool_call_id, "It should call references tool, called: " + tool_call_message.tool_call_id
+    assert "Found" in tool_call_message.content, "It should find references " + tool_call_message.content
+    assert "references in the workspace" in tool_call_message.content, "It should find references " + tool_call_message.content
+
+    for expected_reference in expected_references:
+        assert tool_call_message.content.count(expected_reference["filename"]) >= expected_reference["count"], "It should find at least " + str(expected_reference["count"]) + " references in " + expected_reference["filename"]
+
+    print("PASS: References test")
 
 
 async def test_definition(function_name: str, function_full_definition: str, body_fragment: str) -> None:
@@ -96,7 +109,26 @@ async def test_definition(function_name: str, function_full_definition: str, bod
 
 
 if __name__ == '__main__':
-    asyncio.run(test_definition("bounce_off_banks", "Frog::bounce_off_banks", "self.vy = -np.abs(self.vy)"))
-    asyncio.run(test_definition("draw_hello_frog", "draw_hello_frog", "text_rect = text.get_rect()"))
-    # asyncio.run(test_references("bounce_off_banks"))
+    asyncio.run(test_definition(
+        function_name="bounce_off_banks", 
+        function_full_definition="Frog::bounce_off_banks", 
+        body_fragment="self.vy = -np.abs(self.vy)")
+    )
+    asyncio.run(test_definition(
+        function_name="draw_hello_frog", 
+        function_full_definition="draw_hello_frog", 
+        body_fragment="text_rect = text.get_rect()")
+    )
+    asyncio.run(test_references(symbol="jump", expected_references=[
+        {"filename": "emergency_frog_situation/holiday.py", "count": 8}, 
+        {"filename": "emergency_frog_situation/jump_to_conclusions.py", "count": 1}, 
+        {"filename": "emergency_frog_situation/set_as_avatar.py", "count": 1}, 
+        {"filename": "emergency_frog_situation/work_day.py", "count": 1}, 
+    ]))
+    asyncio.run(test_references(symbol="bounce_off_banks", expected_references=[
+        {"filename": "emergency_frog_situation/frog.py", "count": 1},
+    ]))
+    asyncio.run(test_references(symbol="draw_hello_frog", expected_references=[
+        {"filename": "emergency_frog_situation/jump_to_conclusions.py", "count": 1},
+    ]))
 
