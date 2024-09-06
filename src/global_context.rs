@@ -129,7 +129,7 @@ pub struct GlobalContext {
     pub ask_shutdown_sender: Arc<StdMutex<std::sync::mpsc::Sender<String>>>,
     pub documents_state: DocumentsState,
     pub at_commands_preview_cache: Arc<AMutex<AtCommandsPreviewCache>>,
-    pub privacy_settings: Arc<ARwLock<PrivacySettings>>,
+    pub privacy_settings: Arc<PrivacySettings>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -303,7 +303,7 @@ pub async fn create_global_context(
         ask_shutdown_sender: Arc::new(StdMutex::new(ask_shutdown_sender)),
         documents_state: DocumentsState::new(workspace_dirs).await,
         at_commands_preview_cache: Arc::new(AMutex::new(AtCommandsPreviewCache::new())),
-        privacy_settings: Arc::new(ARwLock::new(PrivacySettings::default())),
+        privacy_settings: Arc::new(PrivacySettings::default()),
     };
     let gcx = Arc::new(ARwLock::new(cx));
     if cmdline.ast {
