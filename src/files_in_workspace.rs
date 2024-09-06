@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak, Mutex as StdMutex};
 use std::time::Instant;
 use crate::global_context::GlobalContext;
+use crate::privacy::{get_file_privacy_level, FilePrivacyLevel};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
 use ropey::Rope;
@@ -25,6 +26,9 @@ pub struct Document {
 
 pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String>
 {
+    if get_file_privacy_level(global_context.clone(), file_path).await == FilePrivacyLevel::Blocked {
+        return Err(format!("File {} is blocked, adjust privacy settings to allow it to be indexed", file_path.display()));
+    }
     if let Some(doc) = global_context.read().await.documents_state.memory_document_map.get(file_path) {
         let doc = doc.read().await;
         if doc.doc_text.is_some() {
