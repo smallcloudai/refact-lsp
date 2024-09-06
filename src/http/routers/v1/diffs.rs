@@ -40,7 +40,7 @@ impl DiffPost {
     }
 }
 
-async fn write_results_on_disk(results: Vec<ApplyDiffResult>) -> Result<Vec<Document>, String> {
+async fn write_results_on_disk(global_context: Arc<ARwLock<GlobalContext>>, results: Vec<ApplyDiffResult>) -> Result<Vec<Document>, String> {
     async fn write_to_file(path: &String, text: &str) -> Result<(), String> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -120,7 +120,7 @@ async fn write_results_on_disk(results: Vec<ApplyDiffResult>) -> Result<Vec<Docu
             apply_rename_action(rename_from, rename_into)?;
             if PathBuf::from(rename_into).is_file() {
                 let mut doc = Document::new(&PathBuf::from(rename_into));
-                let text = read_file_from_disk(&doc.doc_path).await?.to_string();
+                let text = read_file_from_disk(global_context.clone(), &doc.doc_path).await?.to_string();
                 doc.update_text(&text);
                 docs2index.push(doc);
             }
@@ -199,9 +199,9 @@ pub async fn handle_v1_diff_apply(
         diff_state.get(&post.id).map(|x| x.clone()).unwrap_or_default()
     };
     let desired_state = post.apply.clone();
-    let (results, outputs) = read_files_n_apply_diff_chunks(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (results, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
 
-    let docs2index = write_results_on_disk(results.clone()).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
+    let docs2index = write_results_on_disk(global_context.clone(), results.clone()).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
     sync_documents_ast_vecdb(global_context.clone(), docs2index).await?;
 
@@ -238,7 +238,7 @@ pub async fn handle_v1_diff_preview(
         diff_state.get(&post.id).map(|x| x.clone()).unwrap_or_default()
     };
     let desired_state = post.apply.clone();
-    let (results, outputs) = read_files_n_apply_diff_chunks(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (results, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
 
     let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, post.chunks);
 
@@ -292,7 +292,7 @@ pub async fn handle_v1_diff_state(
     };
     let desired_state = vec![true; post.chunks.len()];
 
-    let (_, outputs) = read_files_n_apply_diff_chunks(&post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (_, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
     let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, post.chunks);
 
     let can_apply = outputs_unwrapped.iter().map(|x|x.applied).collect::<Vec<_>>();
