@@ -45,6 +45,7 @@ mod diffs;
 mod knowledge;
 mod integrations;
 mod cmd_commands;
+mod privacy;
 
 #[tokio::main]
 async fn main() {
