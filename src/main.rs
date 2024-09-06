@@ -53,7 +53,7 @@ mod lsp;
 mod http;
 
 mod integrations;
-
+mod privacy;
 
 #[tokio::main]
 async fn main() {
