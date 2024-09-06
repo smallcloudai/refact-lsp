@@ -28,7 +28,7 @@ pub async fn parse_diff_chunks_from_message(
 
     let gcx = ccx.lock().await.global_context.clone();
     let maybe_ast_module = gcx.read().await.ast_module.clone();
-    correct_and_validate_chunks(gcx, &mut chunks).await?;
+    correct_and_validate_chunks(gcx.clone(), &mut chunks).await?;
     let mut chunks_per_files = HashMap::new();
     for chunk in chunks.iter() {
         chunks_per_files.entry(chunk.file_name.clone()).or_insert(vec![]).push(chunk.clone());
@@ -47,7 +47,7 @@ pub async fn parse_diff_chunks_from_message(
         let text_before = if action == "add" {
             Rope::new()
         } else {
-            match read_file_from_disk(&path).await {
+            match read_file_from_disk(gcx.clone(), &path).await {
                 Ok(text) => text,
                 Err(err) => {
                     let message = format!("Error reading file: {:?}", err);
