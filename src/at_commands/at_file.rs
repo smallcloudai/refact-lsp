@@ -147,7 +147,7 @@ pub async fn return_one_candidate_or_a_good_error(
                 return Err(format!("Path {:?} is outside of project directories:\n\n{:?}\n\nThere are paths with similar names:\n{}", f_path, project_paths, similar_paths_str));
             }
             return if similar_paths_str.is_empty() {
-                Err(format!("The path {:?} does not exist. There are no similar names either.", f_path))
+                Err(format!("The path {:?} does not exist. There are no similar names either.\nSearched in following workspaces:\n{}", f_path, project_paths.iter().map(|x|x.to_string_lossy().to_string()).collect::<Vec<_>>().join("\n")))
             } else {
                 Err(format!("The path {:?} does not exist. There are paths with similar names however:\n{}", f_path, similar_paths_str))
             }
