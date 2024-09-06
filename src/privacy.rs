@@ -109,4 +109,17 @@ pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, pat
     }
 }
 
+pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, min_blocked_privacy_level: FilePrivacyLevel) -> Result<(), String> {
+    let file_privacy_level = futures::executor::block_on(async {
+        load_privacy_if_needed(global_context.clone()).await;
+        get_file_privacy_level(global_context.clone(), path).await
+    });
+
+    if file_privacy_level >= min_blocked_privacy_level {
+        Err(format!("File privacy level for file is too low, {} is {:?}", path.display(), file_privacy_level))
+    } else {
+        Ok(())
+    }
+}
+
 
