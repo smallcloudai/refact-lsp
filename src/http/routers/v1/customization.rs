@@ -11,7 +11,7 @@ use tracing::error;
 use crate::call_validation::ChatMessage;
 use crate::global_context::GlobalContext;
 use crate::custom_error::ScratchError;
-use crate::toolbox::toolbox_config::load_customization;
+use crate::yaml_configs::customization_loader::load_customization;
 
 
 pub async fn handle_v1_config_path(
@@ -65,7 +65,7 @@ pub async fn handle_v1_rewrite_assistant_says_to_at_commands(
 	let mut original_toolbox_command = String::new();
 	for msg in post.messages.iter() {
 		if msg.role == "ignore" {
-	    	// msg.content="original-toolbox-command why\nauto-reponse 👣PROVIDE_COMMANDS_STEP 👣GENERATE_DOCUMENTATION_STEP\n"
+	    	// msg.content="original-yaml_configs-command why\nauto-reponse 👣PROVIDE_COMMANDS_STEP 👣GENERATE_DOCUMENTATION_STEP\n"
 	    	for line in msg.content.lines() {
 	    		if line.starts_with("original-toolbox-command ") {
 	    			original_toolbox_command = line.replace("original-toolbox-command ", "").to_string();
