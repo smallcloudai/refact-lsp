@@ -26,7 +26,7 @@ pub struct Document {
 
 pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String>
 {
-    check_file_privacy(global_context.clone(), &file_path, FilePrivacyLevel::OnlySendToServersIControl).await?;
+    check_file_privacy(global_context.clone(), &file_path, FilePrivacyLevel::AllowToSendEverywhere).await?;
     
     if let Some(doc) = global_context.read().await.documents_state.memory_document_map.get(file_path) {
         let doc = doc.read().await;
@@ -225,7 +225,7 @@ pub async fn read_file_from_disk(
     global_context: Arc<ARwLock<GlobalContext>>, 
     path: &PathBuf,
 ) -> Result<Rope, String> {
-    check_file_privacy(global_context, path, FilePrivacyLevel::OnlySendToServersIControl).await?;
+    check_file_privacy(global_context, path, FilePrivacyLevel::AllowToSendEverywhere).await?;
     read_file_from_disk_after_privacy_check(path).await
 }
 
@@ -233,7 +233,7 @@ pub fn read_file_from_disk_sync(
     global_context: Arc<ARwLock<GlobalContext>>, 
     path: &PathBuf,
 ) -> Result<Rope, String> {
-    check_file_privacy_sync(global_context, path, FilePrivacyLevel::OnlySendToServersIControl)?;
+    check_file_privacy_sync(global_context, path, FilePrivacyLevel::AllowToSendEverywhere)?;
     match std::fs::read_to_string(path) {
         Ok(content) => {
             let rope = Rope::from_str(&content);
