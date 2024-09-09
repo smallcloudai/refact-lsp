@@ -3,11 +3,13 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tokio::sync::RwLock as ARwLock;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::call_validation::DiffChunk;
 use crate::files_in_workspace::read_file_from_disk;
+use crate::global_context::GlobalContext;
 
 #[derive(Clone, Debug)]
 struct Edit {
@@ -165,7 +167,7 @@ fn get_edit_hunks(content: &str) -> Vec<Edit> {
     edits
 }
 
-async fn edit_hunks_to_diff_blocks(edits: &Vec<Edit>) -> Result<Vec<DiffBlock>, String> {
+async fn edit_hunks_to_diff_blocks(global_context: Arc<ARwLock<GlobalContext>>, edits: &Vec<Edit>) -> Result<Vec<DiffBlock>, String> {
     fn make_add_type_diff_block(idx: usize, before_path: &PathBuf, after_path: &PathBuf, edit: &Edit) -> DiffBlock {
         let diff_lines = edit.hunk
             .iter()
@@ -234,7 +236,7 @@ async fn edit_hunks_to_diff_blocks(edits: &Vec<Edit>) -> Result<Vec<DiffBlock>, 
 
         let file_lines = files_to_filelines
             .entry(before_path.clone())
-            .or_insert(Arc::new(read_file_from_disk(&before_path)
+            .or_insert(Arc::new(read_file_from_disk(global_context.clone(), &before_path)
                 .await
                 .map(
                     |x| x
@@ -678,9 +680,10 @@ DO NOT FORGET TO FOLLOW THE REULES AND USE UNIFIED DIFF FORMAT ONLY!"#.to_string
 
     pub async fn parse_message(
         content: &str,
+        global_context: Arc<ARwLock<GlobalContext>>,
     ) -> Result<Vec<DiffChunk>, String> {
         let edits = get_edit_hunks(content);
-        let mut diff_blocks = edit_hunks_to_diff_blocks(&edits).await?;
+        let mut diff_blocks = edit_hunks_to_diff_blocks(global_context, &edits).await?;
         search_diff_block_text_location(&mut diff_blocks);
         let mut diff_blocks = splitting_diff_blocks(&diff_blocks);
         for block in diff_blocks.iter_mut() {
@@ -716,6 +719,7 @@ mod tests {
     use crate::tools::patch::unified_diff_format::UnifiedDiffFormat;
     use crate::call_validation::DiffChunk;
     use crate::diffs::{apply_diff_chunks_to_text, unwrap_diff_apply_outputs};
+    use crate::global_context;
 
     fn apply_diff(path: &String, chunks: &Vec<DiffChunk>) -> (String, String) {
         let text = std::fs::read_to_string(PathBuf::from(path)).unwrap();
@@ -740,7 +744,10 @@ mod tests {
 @@ ... @@
 ```
 Another text"#;
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert!(result.is_empty());
@@ -749,7 +756,10 @@ Another text"#;
     #[tokio::test]
     async fn test_empty_2() {
         let input = r#""#;
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert!(result.is_empty());
@@ -760,7 +770,10 @@ Another text"#;
         let input = r#"Initial text
 ```diff
 Another text"#;
-        let result = UnifiedDiffFormat::parse_message(input).await;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
     }
 
@@ -768,7 +781,10 @@ Another text"#;
     async fn test_empty_4() {
         let input = r#"Initial text
 ```"#;
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert!(result.is_empty());
@@ -782,7 +798,10 @@ some invalid text
 ```
 ```
 ```diff"#;
-        let result = UnifiedDiffFormat::parse_message(input).await;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
     }
 
@@ -793,7 +812,10 @@ some invalid text
 +++
 ```
 Another text"#;
-        let result = UnifiedDiffFormat::parse_message(input).await;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().starts_with("cannot get a correct 'before' file name from the diff chunk:"));
     }
@@ -808,7 +830,10 @@ Another text"#;
 @@ ... @@
 ```
 Another text"#;
-        let result = UnifiedDiffFormat::parse_message(input).await;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_ok());
     }
 
@@ -822,7 +847,10 @@ Another text"#;
 @@ ... @@
 ```
 Another text"#;
-        let result = UnifiedDiffFormat::parse_message(input).await;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_ok());
     }
 
@@ -843,6 +871,9 @@ DT = 0.01
 
 class AnotherFrog:
     def __init__(self, x, y, vx, vy):"#;
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -856,7 +887,7 @@ class AnotherFrog:
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -888,6 +919,10 @@ DT = 0.01
 
     def __init__(self, x, y, vx, vy):"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -900,7 +935,7 @@ DT = 0.01
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -934,6 +969,10 @@ class Frog:
     # Frog class description
     def __init__(self, x, y, vx, vy):"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -946,7 +985,7 @@ class Frog:
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -974,6 +1013,10 @@ import numpy as np
 
 DT = 0.01"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -986,7 +1029,7 @@ DT = 0.01"#;
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1033,6 +1076,10 @@ class Frog:
         self.x += self.vx * DT
         self.y += self.vy * DT"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -1045,7 +1092,7 @@ class Frog:
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1092,6 +1139,11 @@ class Frog:
 
         self.x += self.vx * DT
         self.y += self.vy * DT"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -1104,7 +1156,7 @@ class Frog:
                 ..Default::default()
             }
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1163,6 +1215,10 @@ class Frog:
         elif self.y > pond_height:
             self.vx = -np.abs(self.vy)"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -1185,7 +1241,7 @@ class Frog:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1224,6 +1280,10 @@ class Frog:
 ```
 Another text"#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -1246,7 +1306,7 @@ Another text"#;
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1279,6 +1339,11 @@ Another text"#;
 +            self.vx = -np.abs(self.vy)
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/frog.py".to_string(),
@@ -1301,7 +1366,7 @@ Another text"#;
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1391,7 +1456,7 @@ class Frog:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1448,6 +1513,10 @@ class EuropeanCommonToad(frog.Frog):
         super().__init__(x, y, vx, vy)
         self.name = "EU Toad""#;
 
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/set_as_avatar.py".to_string(),
@@ -1460,7 +1529,7 @@ class EuropeanCommonToad(frog.Frog):
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1509,6 +1578,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1521,7 +1595,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1583,6 +1657,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1625,7 +1704,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1678,6 +1757,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1700,7 +1784,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1748,6 +1832,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1760,7 +1849,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1808,6 +1897,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1820,7 +1914,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1867,6 +1961,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1879,7 +1978,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1928,6 +2027,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -1940,7 +2044,7 @@ if __name__ == __main__:
                 ..Default::default()
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         let (_, changed_text) = apply_diff(
@@ -1963,6 +2067,11 @@ if __name__ == __main__:
 +frog2 = frog.Frog()
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/new_file.py".to_string(),
@@ -1975,7 +2084,7 @@ Another text"#;
                 is_file: false
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -1992,6 +2101,11 @@ frog1 = frog.Frog()
 frog2 = frog.Frog()
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/new_file.py".to_string(),
@@ -2004,7 +2118,7 @@ Another text"#;
                 is_file: false
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -2025,6 +2139,11 @@ if __name__ == __main__:
     frog1 = frog.Frog()
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -2037,7 +2156,7 @@ Another text"#;
                 is_file: true
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -2054,6 +2173,11 @@ Another text"#;
 <file_content>
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -2066,7 +2190,7 @@ Another text"#;
                 is_file: true
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -2083,6 +2207,11 @@ Another text"#;
 <file_content>
 ```
 Another text"#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -2095,7 +2224,7 @@ Another text"#;
                 is_file: true
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -2139,6 +2268,11 @@ if __name__ == __main__:
     frog1.jump()
     frog2.jump()
 "#;
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
         let gt_result = vec![
             DiffChunk {
                 file_name: "tests/emergency_frog_situation/holiday.py".to_string(),
@@ -2151,7 +2285,7 @@ if __name__ == __main__:
                 is_file: true
             },
         ];
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         assert_eq!(result, gt_result);
@@ -2281,7 +2415,12 @@ startObstacleCreation();
 gameLoop();
 ```
 "#;
-        let result = UnifiedDiffFormat::parse_message(input).await.expect(
+
+        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
+        let cache_dir = home_dir.join(".cache/refact");
+        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+
+        let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
         print!("Result: {:?}\n", serde_json::to_string_pretty(&result));

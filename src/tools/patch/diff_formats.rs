@@ -15,11 +15,19 @@ pub async fn postprocess_diff_chunks_from_message(
     ccx: Arc<AMutex<AtCommandsContext>>,
     chunks: &mut Vec<DiffChunk>,
 ) -> Result<String, String> {
+    let gcx = ccx.lock().await.global_context.clone();
+
+    let mut chunks = match DefaultToolPatch::parse_message(message, gcx.clone()).await {
+        Ok(chunks) => chunks,
+        Err(err) => {
+            return Err(format!("Error while diff parsing: {:?}", err));
+        }
+    };
+
     if chunks.is_empty() {
         return Err("No diff chunks were found".to_string());
     }
 
-    let gcx = ccx.lock().await.global_context.clone();
     let maybe_ast_module = gcx.read().await.ast_module.clone();
     correct_and_validate_chunks(gcx.clone(), &mut chunks).await?;
     let mut chunks_per_files = HashMap::new();
