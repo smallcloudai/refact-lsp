@@ -54,6 +54,7 @@ mod http;
 
 mod integrations;
 mod privacy;
+mod privacy_compiled_in;
 
 #[tokio::main]
 async fn main() {
