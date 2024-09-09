@@ -56,6 +56,7 @@ struct DiffBlock {
 }
 
 impl DiffBlock {
+    #[allow(dead_code)]
     pub fn display(&self) -> String {
         let mut output = format!(
             "--- {:?}\n+++ {:?}\n@@ ... @@\n",
