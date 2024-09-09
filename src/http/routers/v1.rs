@@ -27,7 +27,6 @@ use crate::http::routers::v1::telemetry_network::handle_v1_telemetry_network;
 use crate::http::routers::v1::lsp_like_handlers::{handle_v1_lsp_did_change, handle_v1_lsp_add_folder, handle_v1_lsp_initialize, handle_v1_lsp_remove_folder, handle_v1_set_active_document};
 use crate::http::routers::v1::status::handle_v1_rag_status;
 use crate::http::routers::v1::customization::handle_v1_customization;
-use crate::http::routers::v1::customization::handle_v1_rewrite_assistant_says_to_at_commands;
 use crate::http::routers::v1::customization::handle_v1_config_path;
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 use crate::http::routers::v1::diffs::{handle_v1_diff_apply, handle_v1_diff_preview, handle_v1_diff_state};
@@ -99,7 +98,6 @@ pub fn make_v1_router() -> Router {
         .route("/config-path", telemetry_get!(handle_v1_config_path))
         // experimental
         .route("/customization", telemetry_get!(handle_v1_customization))
-        .route("/rewrite-assistant-says-to-at-commands", telemetry_post!(handle_v1_rewrite_assistant_says_to_at_commands))
 
         .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
 
