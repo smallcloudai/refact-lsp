@@ -40,6 +40,7 @@ pub struct FilePrivacySettings {
     pub blocked: Vec<String>,
 }
 
+// TODO: Move to other yaml files handling once that part is finished
 async fn read_privacy_yaml(path: &Path) -> PrivacySettings {
     match fs::read_to_string(&path).await {
         Ok(content) => {
@@ -61,6 +62,7 @@ async fn read_privacy_yaml(path: &Path) -> PrivacySettings {
     }
 }
 
+// TODO: Move to other yaml files handling once that part is finished
 async fn load_privacy_if_needed(global_context: Arc<ARwLock<GlobalContext>>) {
     let (should_reload, path) = {
         let global_context_lock = global_context.read().await;
