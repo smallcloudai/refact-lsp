@@ -2,18 +2,19 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use std::sync::RwLock as StdRwLock;
 use tokenizers::Tokenizer;
-use tokio::sync::Mutex as AMutex;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::at_file::{file_repair_candidates, context_file_from_file_path};
 use crate::at_tools::att_patch::tool::{DefaultToolPatch, PatchArguments, N_CHOICES};
 use crate::at_tools::att_patch::ast_interaction::get_signatures_by_imports_traversal;
 use crate::at_tools::subchat::subchat_single;
-use crate::cached_tokenizers;
-use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ChatUsage, ContextFile};
+use crate::cached_tokenizers::cached_tokenizer;
+use crate::call_validation::{ChatMessage, ChatToolCall, ChatToolFunction, ChatUsage};
+use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::scratchpads::pp_utils::count_tokens;
 
 
@@ -30,42 +31,18 @@ pub struct LocateData {
     pub symbols: Vec<String>,
 }
 
-async fn read_file(
-    ccx: Arc<AMutex<AtCommandsContext>>,
-    file_path: String,
-) -> Option<ContextFile> {
-    let gcx = ccx.lock().await.global_context.clone();
-    let candidates = file_repair_candidates(gcx.clone(), &file_path, 10, false).await;
-    match context_file_from_file_path(ccx.clone(), candidates, file_path.clone()).await {
-        Ok(x) => Some(x),
-        Err(_) => None
-    }
-}
-
-
 async fn load_tokenizer(
-    ccx: Arc<AMutex<AtCommandsContext>>,
+    gcx: Arc<ARwLock<GlobalContext>>,
     model: &str,
 ) -> Result<Arc<StdRwLock<Tokenizer>>, String> {
-    let gcx = ccx.lock().await.global_context.clone();
-    let caps = crate::global_context::try_load_caps_quickly_if_not_present(
-        gcx.clone(), 0,
-    )
-        .await
-        .map_err(|e| {
-            warn!("no caps: {:?}", e);
-            "network error communicating with the model (1)".to_string()
-        })?;
-
-    cached_tokenizers::cached_tokenizer(
-        caps.clone(), gcx.clone(), model.to_string(),
-    ).await
+    let caps = try_load_caps_quickly_if_not_present(gcx.clone(), 0).await.map_err(|e| {
+        warn!("load_tokenizer: failed to load caps.\nERROR: {}", e);
+        format!("load_tokenizer: failed to load caps.\nERROR: {}", e)
+    })?;
+    cached_tokenizer(caps.clone(), gcx.clone(), model.to_string()).await
 }
 
-async fn format_diff_prompt(
-    ccx: Arc<AMutex<AtCommandsContext>>,
-) -> String {
-    let gcx = ccx.lock().await.global_context.clone();
+async fn format_diff_prompt(gcx: Arc<ARwLock<GlobalContext>>) -> String {
     let mut workspace_dirs = {
         let workspace_dirs_arc = gcx.read().await.documents_state.workspace_folders.clone();
         let dirs_lock = workspace_dirs_arc.lock().unwrap();
@@ -79,48 +56,54 @@ async fn format_diff_prompt(
     DefaultToolPatch::prompt(&workspace_project_dirs, first_workspace_dir)
 }
 
-async fn get_locate_data(
+async fn find_last_valid_locate_message(
     ccx: Arc<AMutex<AtCommandsContext>>,
-) -> Option<LocateData> {
+) -> Result<LocateData, String> {
     let messages = ccx.lock().await.messages.clone();
-    let mut locate_tool_ids = vec![];
-    for message in messages.iter().rev() {
-        for tools in message.tool_calls.iter() {
-            for tool in tools.iter() {
-                if tool.function.name == "locate" {
-                    locate_tool_ids.push(tool.id.clone());
-                }
-            }
-        }
-    }
+    let locate_tool_ids = messages.iter()
+        .flat_map(|message| message.tool_calls.iter().flat_map(|tools| tools.iter()))
+        .filter(|tool| tool.function.name == "locate")
+        .map(|tool| tool.id.clone())
+        .collect::<Vec<_>>();
+    
+    let locate_messages = locate_tool_ids.iter().filter_map(|id|{
+        messages.iter().find_or_first(|x|x.tool_call_id == *id)
+    }).collect::<Vec<_>>();
 
-    let mut locate_data = vec![];
-    for id in locate_tool_ids.iter() {
-        let data = match messages.iter().find_or_first(|x| x.tool_call_id == *id) {
-            Some(data) => {
-                let locate_data: LocateData = match serde_json::from_str(&data.content) {
-                    Ok(res) => res,
-                    Err(err) => {
-                        warn!("failed to parse locate data: {}", err);
-                        continue;
-                    }
-                };
-                locate_data
-            }
-            None => {
-                continue
-            }
-        };
-        locate_data.push(data);
-    }
-    locate_data.first().cloned()
+    let locate_data_vec = locate_messages.iter().filter_map(|msg| {
+       serde_json::from_str::<Option<LocateData>>(&msg.content).unwrap_or_else(|err|{
+           warn!("failed to parse locate data: {:?}", err);
+           None
+       })
+    }).collect::<Vec<_>>();
+
+    locate_data_vec.last().cloned()
+        .ok_or("locate data could not be located even though it was requested for use, call `locate` tool or pass the filenames directly".to_string())
 }
 
-async fn create_extra_context(
+fn pretend_tool_call(tool_name: &str, arguments: String) -> ChatMessage {
+    let tool_call = ChatToolCall {
+        id: format!("{tool_name}_123"),
+        function: ChatToolFunction {
+            arguments,
+            name: tool_name.to_string()
+        },
+        tool_type: "function".to_string(),
+    };
+    ChatMessage {
+        role: "assistant".to_string(),
+        content: "".to_string(),
+        tool_calls: Some(vec![tool_call]),
+        tool_call_id: "".to_string(),
+        ..Default::default()
+    }
+}
+
+async fn cat_paths_context_and_symbols(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    paths: Vec<(String, Option<String>)>,
-    extra_paths_mb: Option<Vec<String>>,
-    extra_symbols_mb: Option<Vec<String>>,
+    paths_to_change: Vec<(String, Option<String>)>,
+    paths_context: Vec<String>,
+    symbols: Vec<String>,
     messages: &Vec<ChatMessage>,
     tool_call_id: &String,
     usage: &mut ChatUsage,
@@ -128,77 +111,66 @@ async fn create_extra_context(
     temperature: Option<f32>,
     max_new_tokens: usize,
 ) -> Result<Vec<ChatMessage>, String> {
+    let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let gcx = ccx.lock().await.global_context.clone();
-    let mut new_messages = messages.clone();
-    let cat_args = if extra_paths_mb.is_some() && extra_symbols_mb.is_some() {
-        let mut cat_args = HashMap::new();
-        cat_args.insert("paths".to_string(), extra_paths_mb
-            .expect("checked above")
-            .join(",")
-        );
-        if let Some(extra_symbols) = extra_symbols_mb {
-            if !extra_symbols.is_empty() {
-                cat_args.insert("symbols".to_string(), extra_symbols.join(","));
-            }
-        }
-        cat_args.insert("skeleton".to_string(), "true".to_string());
-        Some(cat_args)
-    } else {
-        if let Some(paths) = get_signatures_by_imports_traversal(
-            &paths.iter().map(|x| x.0.clone()).collect(), gcx.clone()
-        ).await {
-            let mut cat_args = HashMap::new();
-            cat_args.insert("paths".to_string(), paths
-                .iter()
-                .map(|x| x.to_string_lossy())
-                .join(",")
-            );
-            cat_args.insert("skeleton".to_string(), "true".to_string());
-            Some(cat_args)
-        } else {
-            None
-        }
-    };
-    if let Some(cat_args) = cat_args {
-        new_messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: "".to_string(),
-            tool_calls: Some(vec![ChatToolCall {
-                id: "patch_cat_42".to_string(),
-                function: ChatToolFunction {
-                    arguments: serde_json::to_string(&cat_args).unwrap().to_string(),
-                    name: "cat".to_string()
-                },
-                tool_type: "function".to_string(),
-            }]),
-            tool_call_id: "".to_string(),
-            ..Default::default()
-        });
-        let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-        let messages = subchat_single(
-            ccx.clone(),
-            &model,
-            new_messages,
-            vec!["cat".to_string()],
-            None,
-            true,
-            temperature,
-            Some(max_new_tokens),
-            N_CHOICES,
-            Some(usage),
-            Some(format!("{log_prefix}-patch")),
-            Some(tool_call_id.clone()),
-            Some(format!("{log_prefix}-patch")),
-        )
-            .await?
-            .get(0)
-            .ok_or("relevant_files: tree deterministic message was empty. Try again later".to_string())?
-            .clone();
-        Ok(messages)
-    } else {
-        warn!("no extra context for the patch is using");
-        Ok(new_messages)
+    let mut messages = messages.clone();
+    let mut cat_args = HashMap::new();
+
+    if !paths_context.is_empty() {
+        cat_args.insert("paths".to_string(), paths_context.join(","));
     }
+    if !symbols.is_empty() {
+        cat_args.insert("symbols".to_string(), symbols.join(","));
+    }
+    cat_args.insert("skeleton".to_string(), "true".to_string());
+    
+    if cat_args.get("paths").is_none() && cat_args.get("symbols").is_none() {
+        if let Some(paths) = get_signatures_by_imports_traversal(
+            &paths_to_change.iter().map(|x| x.0.clone()).collect(), gcx.clone()
+        ).await {
+            cat_args.insert("paths".to_string(), paths.iter().map(|x| x.to_string_lossy()).join(","));
+        }
+    }
+    if cat_args.get("paths").unwrap_or(&"".to_string()).is_empty() {
+        warn!("cat_paths_context_and_symbols: no cat will be performed: no paths provided");
+        return Ok(messages);
+    }
+    
+    messages.push(pretend_tool_call("cat", serde_json::to_string(&cat_args).unwrap()));
+
+    Ok(subchat_single(
+        ccx.clone(),
+        &model,
+        messages,
+        vec!["cat".to_string()],
+        None,
+        true,
+        temperature,
+        Some(max_new_tokens),
+        N_CHOICES,
+        Some(usage),
+        Some(format!("{log_prefix}-cat_paths_context_and_symbols")),
+        Some(tool_call_id.clone()),
+        Some(format!("{log_prefix}-cat_paths_context_and_symbols")),
+    ).await?.get(0)
+        .ok_or("cat_paths_context_and_symbols: deterministic message was empty".to_string())?.clone())
+}
+
+async fn path_to_change_to_message(gcx: Arc<ARwLock<GlobalContext>>, path: String, description: Option<String>) -> ChatMessage {
+    let mut text = "".to_string();
+    text.push_str(&format!("File to modify: {}\n", path));
+    if let Some(d) = description {
+        text.push_str(&format!("Description: {}\n", d));
+    }
+
+    let candidates = file_repair_candidates(gcx.clone(), &path, 10, false).await;
+    match context_file_from_file_path(gcx.clone(), candidates, path.clone()).await {
+        Ok(context_file) => text.push_str(&format!("Content:\n```\n{}\n```", context_file.file_content)),
+        Err(e) => {
+            text = format!("The file `{}` cannot be found on the disk; it needs to be added to the project (use add format).\nERROR: {}", path, e);
+        }
+    }
+    ChatMessage::new("user".to_string(), text)
 }
 
 async fn make_chat_history(
@@ -211,94 +183,65 @@ async fn make_chat_history(
     tool_call_id: &String,
     usage: &mut ChatUsage,
 ) -> Result<Vec<ChatMessage>, String> {
-    let tokenizer = match load_tokenizer(ccx.clone(), model).await {
-        Ok(t) => t,
-        Err(e) => return Err(e),
+    let gcx = ccx.lock().await.global_context.clone();
+    let tokenizer = { 
+        let tokenizer_arc = load_tokenizer(gcx.clone(), model).await?; 
+        tokenizer_arc.clone().read().unwrap().clone()
     };
 
     let mut tokens: usize = 0;
-    let max_tokens: usize = max_tokens.saturating_sub(max_new_tokens);
-    let system_prompt = format_diff_prompt(ccx.clone()).await;
-    let tokenizer_ref = tokenizer.read().unwrap().clone();
+    let max_tokens = max_tokens.saturating_sub(max_new_tokens);
+    let system_prompt = format_diff_prompt(gcx.clone()).await;
     let task_message = args.todo.clone();
-    let mut chat_messages = vec![
-        ChatMessage::new(
-            "system".to_string(),
-            system_prompt.to_string(),
-        )
-    ];
-    tokens += 3 + count_tokens(&tokenizer_ref, &system_prompt);
-    tokens += 3 + count_tokens(&tokenizer_ref, &task_message);
+    
+    let mut chat_messages = vec![];
+    chat_messages.push(ChatMessage::new("system".to_string(), system_prompt.to_string()));
+
+    tokens += 3 + count_tokens(&tokenizer, &system_prompt);
+    tokens += 3 + count_tokens(&tokenizer, &task_message);
+
     if tokens > max_tokens {
         return Err(format!("too many tokens for the todo message: {tokens} > {max_tokens}, reduce the todo message length"));
     }
 
-    let (paths, extra_paths_mb, extra_symbols_mb) = {
-        if args.use_locate_for_context {
-            if let Some(locate_data) = get_locate_data(ccx.clone()).await {
-                let paths = locate_data.files.iter()
-                    .filter(|x| x.reason.to_lowercase() == "to_change")
-                    .map(|x| (x.file_path.clone(), Some(x.description.clone())))
-                    .collect::<Vec<_>>();
-                let extra_paths = locate_data.files.iter()
-                    .filter(|x| x.reason.to_lowercase() != "to_change")
-                    .map(|x| x.file_path.clone())
-                    .collect::<Vec<_>>();
-                (paths, Some(extra_paths), Some(locate_data.symbols))
-            } else {
-                return Err("locate data could not be located even though it was requested for use, call `locate` tool or pass the filenames directly".to_string());
-            }
-        } else {
-            (
-                args.paths.iter().map(|x| (x.clone(), None)).collect::<Vec<_>>(),
-                None,
-                None
-            )
-        }
+    let (paths_to_change, paths_context, symbols) = if args.pick_locate_json_above {
+        let locate_data = find_last_valid_locate_message(ccx.clone()).await?;
+        let paths_to_change = locate_data.files.iter()
+            .filter(|x| x.reason.to_lowercase() == "to_change")
+            .map(|x| (x.file_path.clone(), Some(x.description.clone())))
+            .collect::<Vec<_>>();
+        let paths_context = locate_data.files.iter()
+            .filter(|x| x.reason.to_lowercase() != "to_change")
+            .map(|x| x.file_path.clone())
+            .collect::<Vec<_>>();
+        (paths_to_change, paths_context, locate_data.symbols)
+    } else {
+        (args.paths.iter().map(|x| (x.clone(), None)).collect::<Vec<_>>(), vec![], vec![])
     };
-
-    let has_single_file = paths.len() == 1;
-    for (idx, (file, description_mb)) in paths.iter().enumerate() {
-        match read_file(ccx.clone(), file.clone()).await {
-            Some(res) => {
-                let message = if let Some(description) = description_mb {
-                    format!(
-                        "File to modify: {}\nDescription: {}\nContent:\n```\n{}\n```",
-                        res.file_name,
-                        description,
-                        res.file_content
-                    ).to_string()
-                } else {
-                    format!(
-                        "File to modify: {}\nContent:\n```\n{}\n```",
-                        res.file_name,
-                        res.file_content
-                    ).to_string()
-                };
-                tokens += 3 + count_tokens(&tokenizer_ref, &message);
-                if tokens > max_tokens {
-                    let err_message = if has_single_file || idx == 0 {
-                        format!("the provided file {file} is too large for the patch tool: {tokens} > {max_tokens}")
-                    } else {
-                        format!("too many files are provided: {tokens} ctx > {max_tokens} max available ctx, use the tool for each file separately")
-                    };
-                    return Err(err_message);
-                }
-                chat_messages.push(ChatMessage::new("user".to_string(), message));
-            }
-            None => {
-                let message = format!(
-                    "The file `{}` cannot be found on the disk; it needs to be added to the project (use add format)",
-                    file,
-                ).to_string();
-                tokens += 3 + count_tokens(&tokenizer_ref, &message);
-                chat_messages.push(ChatMessage::new("user".to_string(), message));
-            }
-        }
+    
+    let mut tokens_per_path_to_change = vec![];
+    for path in paths_to_change.iter() {
+        let msg = path_to_change_to_message(gcx.clone(), path.0.clone(), path.1.clone()).await;
+        let n_ctx = 3 + count_tokens(&tokenizer, &msg.content);
+        tokens += n_ctx;
+        // todo: shortify path for a clearer error
+        tokens_per_path_to_change.push((n_ctx, path.clone()));
+        chat_messages.push(msg);
     }
-
-    let mut chat_messages = create_extra_context(
-        ccx.clone(), paths, extra_paths_mb, extra_symbols_mb, &mut chat_messages, tool_call_id,
+    
+    if tokens > max_tokens {
+        // todo: print as well all files that were not found
+        let err_msg = format!(
+            "Provided files exceeded tokens limit (tokens: {tokens} > {max_tokens}):\n{}", 
+            tokens_per_path_to_change.iter().map(|x|format!("{:?}: {} tokens", x.1, x.0)).collect::<Vec<_>>().join("\n")
+        );
+        info!(err_msg);
+        return Err(err_msg);
+    }
+    
+    // todo: refactor code below
+    let mut chat_messages = cat_paths_context_and_symbols(
+        ccx.clone(), paths_to_change, paths_context, symbols, &mut chat_messages, tool_call_id,
         usage, model, temperature, max_new_tokens
     ).await?
         .iter()
@@ -315,6 +258,7 @@ async fn make_chat_history(
     Ok(chat_messages)
 }
 
+// todo: refactor this function
 pub async fn execute_chat_model(
     ccx: Arc<AMutex<AtCommandsContext>>,
     model: &str,

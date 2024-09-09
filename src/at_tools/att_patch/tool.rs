@@ -21,7 +21,7 @@ pub type DefaultToolPatch = UnifiedDiffFormat;
 pub struct PatchArguments {
     pub paths: Vec<String>,
     pub todo: String,
-    pub use_locate_for_context: bool,
+    pub pick_locate_json_above: bool,
 }
 
 pub struct ToolPatch {
@@ -44,7 +44,7 @@ pub async fn parse_arguments(
         Some(v) => { return Err(format!("argument `paths` is not a string: {:?}", v)) }
         None => { return Err("argument `path` is not a string".to_string()) }
     };
-    let use_locate_for_context = if let Some(p) = paths.get(0) {
+    let pick_locate_json_above = if let Some(p) = paths.get(0) {
         p == "pick_locate_json_above"
     } else {
         false
@@ -57,7 +57,7 @@ pub async fn parse_arguments(
     Ok(PatchArguments {
         paths,
         todo,
-        use_locate_for_context,
+        pick_locate_json_above,
     })
 }
 
