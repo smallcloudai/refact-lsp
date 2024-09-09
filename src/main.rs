@@ -46,6 +46,7 @@ mod knowledge;
 mod integrations;
 mod cmd_commands;
 mod privacy;
+mod privacy_compiled_in;
 
 #[tokio::main]
 async fn main() {

@@ -7,8 +7,10 @@ use tokio::fs;
 use tracing::{error, info};
 use glob::Pattern;
 use std::time::SystemTime;
+use std::io::Write;
 
 use crate::global_context::GlobalContext;
+use crate::privacy_compiled_in::COMPILED_IN_INITIAL_PRIVACY_YAML;
 
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum FilePrivacyLevel {
@@ -70,6 +72,19 @@ async fn load_privacy_if_needed(global_context: Arc<ARwLock<GlobalContext>>) {
 
     if !should_reload {
         return;
+    }
+
+    if !path.exists() {
+        match std::fs::File::create(&path) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(COMPILED_IN_INITIAL_PRIVACY_YAML.as_bytes()) {
+                    error!("Failed to write to file: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to create file: {}", e);
+            }
+        }
     }
 
     let new_privacy_settings = read_privacy_yaml(&path).await;
