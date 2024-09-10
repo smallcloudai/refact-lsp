@@ -6,10 +6,12 @@ file_privacy:
   only_send_to_servers_I_control:
     # Files here will only be sent to servers you control (e.g., self-hosted).
     # You can add specific files or use patterns (e.g., "*.config").
-    - 
+    - "*.env"
+    - "*.env.*"
 
   blocked:
     # Files listed here are completely blocked from being accessed.
-    # Add specific files or use patterns (e.g., "*.pem", "*.env").
-    - 
+    - "*.pem"
+    - "*.key"
+    - "*.pub"
 "#;
