@@ -14,9 +14,9 @@ use crate::privacy_compiled_in::COMPILED_IN_INITIAL_PRIVACY_YAML;
 
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum FilePrivacyLevel {
-    AllowToSendEverywhere = 0,
+    Blocked = 0,
     OnlySendToServersIControl = 1,
-    Blocked = 2,
+    AllowToSendEverywhere = 2,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -115,24 +115,24 @@ async fn get_file_privacy_level(global_context: Arc<ARwLock<GlobalContext>>, pat
     }
 }
 
-pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
+pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, min_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
     load_privacy_if_needed(global_context.clone()).await;
 
     let file_privacy_level = get_file_privacy_level(global_context.clone(), path).await;
-    if file_privacy_level > *max_allowed_privacy_level {
+    if file_privacy_level < *min_allowed_privacy_level {
         Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
     } else {
         Ok(())
     }
 }
 
-pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
+pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, min_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
     let file_privacy_level = futures::executor::block_on(async {
         load_privacy_if_needed(global_context.clone()).await;
         get_file_privacy_level(global_context.clone(), path).await
     });
 
-    if file_privacy_level > *max_allowed_privacy_level {
+    if file_privacy_level < *min_allowed_privacy_level {
         Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
     } else {
         Ok(())
