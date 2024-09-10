@@ -744,9 +744,7 @@ mod tests {
 @@ ... @@
 ```
 Another text"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
@@ -756,9 +754,7 @@ Another text"#;
     #[tokio::test]
     async fn test_empty_2() {
         let input = r#""#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
@@ -770,9 +766,7 @@ Another text"#;
         let input = r#"Initial text
 ```diff
 Another text"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
     }
@@ -781,9 +775,7 @@ Another text"#;
     async fn test_empty_4() {
         let input = r#"Initial text
 ```"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
         );
@@ -798,9 +790,7 @@ some invalid text
 ```
 ```
 ```diff"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
     }
@@ -812,9 +802,7 @@ some invalid text
 +++
 ```
 Another text"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().starts_with("cannot get a correct 'before' file name from the diff chunk:"));
@@ -830,9 +818,7 @@ Another text"#;
 @@ ... @@
 ```
 Another text"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_ok());
     }
@@ -847,9 +833,7 @@ Another text"#;
 @@ ... @@
 ```
 Another text"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await;
         assert!(result.is_ok());
     }
@@ -871,9 +855,7 @@ DT = 0.01
 
 class AnotherFrog:
     def __init__(self, x, y, vx, vy):"#;
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -919,9 +901,7 @@ DT = 0.01
 
     def __init__(self, x, y, vx, vy):"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -969,9 +949,7 @@ class Frog:
     # Frog class description
     def __init__(self, x, y, vx, vy):"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1013,9 +991,7 @@ import numpy as np
 
 DT = 0.01"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1076,9 +1052,7 @@ class Frog:
         self.x += self.vx * DT
         self.y += self.vy * DT"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1140,9 +1114,7 @@ class Frog:
         self.x += self.vx * DT
         self.y += self.vy * DT"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1215,9 +1187,7 @@ class Frog:
         elif self.y > pond_height:
             self.vx = -np.abs(self.vy)"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1280,9 +1250,7 @@ class Frog:
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1340,9 +1308,7 @@ Another text"#;
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1428,6 +1394,10 @@ class Frog:
         # extra row 2
         # extra row 3
 "#;
+
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
+
+        #[allow(unused_mut)]
         let mut gt_changed_text = String::from(gt_changed_text);
         #[cfg(target_os = "windows")]
         {
@@ -1513,9 +1483,7 @@ class EuropeanCommonToad(frog.Frog):
         super().__init__(x, y, vx, vy)
         self.name = "EU Toad""#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1579,9 +1547,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1658,9 +1624,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1758,9 +1722,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1833,9 +1795,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1898,9 +1858,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -1962,9 +1920,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2028,9 +1984,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
         
         let gt_result = vec![
             DiffChunk {
@@ -2068,9 +2022,7 @@ if __name__ == __main__:
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2102,9 +2054,7 @@ frog2 = frog.Frog()
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2140,9 +2090,7 @@ if __name__ == __main__:
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2174,9 +2122,7 @@ Another text"#;
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2208,9 +2154,7 @@ Another text"#;
 ```
 Another text"#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2269,9 +2213,7 @@ if __name__ == __main__:
     frog2.jump()
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let gt_result = vec![
             DiffChunk {
@@ -2416,9 +2358,7 @@ gameLoop();
 ```
 "#;
 
-        let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-        let cache_dir = home_dir.join(".cache/refact");
-        let (gcx, _, _, _) = global_context::create_global_context(cache_dir.clone()).await; 
+        let (gcx, _, _, _) = global_context::tests::create_mock_global_context().await; 
 
         let result = UnifiedDiffFormat::parse_message(input, gcx.clone()).await.expect(
             "Failed to parse diff message"
