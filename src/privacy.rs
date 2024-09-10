@@ -115,28 +115,162 @@ async fn get_file_privacy_level(global_context: Arc<ARwLock<GlobalContext>>, pat
     }
 }
 
-pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: FilePrivacyLevel) -> Result<(), String> {
+pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
     load_privacy_if_needed(global_context.clone()).await;
 
     let file_privacy_level = get_file_privacy_level(global_context.clone(), path).await;
-    if file_privacy_level > max_allowed_privacy_level {
+    if file_privacy_level > *max_allowed_privacy_level {
         Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
     } else {
         Ok(())
     }
 }
 
-pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: FilePrivacyLevel) -> Result<(), String> {
+pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, max_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
     let file_privacy_level = futures::executor::block_on(async {
         load_privacy_if_needed(global_context.clone()).await;
         get_file_privacy_level(global_context.clone(), path).await
     });
 
-    if file_privacy_level > max_allowed_privacy_level {
+    if file_privacy_level > *max_allowed_privacy_level {
         Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
     } else {
         Ok(())
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::global_context::GlobalContext;
+    use tokio::sync::RwLock;
+
+    use std::{path::PathBuf, sync::Arc};
+
+    async fn get_global_context_with_privacy_settings(privacy_settings: PrivacySettings) -> Arc<RwLock<GlobalContext>> {
+        let (gcx, _, _, _) = crate::global_context::tests::create_mock_global_context().await; 
+
+        gcx.clone().write().await.privacy_settings = Arc::new(privacy_settings);
+        gcx
+    }
+
+    #[tokio::test]
+    async fn test_get_file_privacy_level() {
+        // Arrange
+        let gcx = get_global_context_with_privacy_settings(PrivacySettings {
+            file_privacy: FilePrivacySettings {
+                only_send_to_servers_I_control: vec!["*.cat.txt".to_string(), "*.md".to_string(), "*/.venv/*".to_string(), "**/tests_dir/**/*".to_string()],
+                blocked: vec!["*/make.png".to_string(), "*.txt".to_string()],
+            },
+            expiry_time: default_expiry_time(),
+        }).await;
+
+        let current_dir = std::env::current_dir().unwrap();
+
+        // Cases to test
+        let cases: Vec<(PathBuf, FilePrivacyLevel)> = vec![
+            (current_dir.join("test.txt"), FilePrivacyLevel::Blocked),
+            (current_dir.join("test.cat.txt"), FilePrivacyLevel::Blocked),
+            (current_dir.join("car/steps/make.png"), FilePrivacyLevel::Blocked),
+            (current_dir.join("build/rename.md"), FilePrivacyLevel::OnlySendToServersIControl),
+            (current_dir.join(".venv/bin/activate"), FilePrivacyLevel::OnlySendToServersIControl),
+            (PathBuf::from("/home/user/.venv/bin/activate"), FilePrivacyLevel::OnlySendToServersIControl),
+            (PathBuf::from("/home/user/venv/bin/activate"), FilePrivacyLevel::AllowToSendEverywhere),
+            (current_dir.join("car/steps/load.make.png"), FilePrivacyLevel::AllowToSendEverywhere),
+            (current_dir.join("test.cat.txt.zip"), FilePrivacyLevel::AllowToSendEverywhere),
+            (current_dir.join("car/steps/make.pngs"), FilePrivacyLevel::AllowToSendEverywhere),
+            (current_dir.join("car/tests_dir/cars.rs"), FilePrivacyLevel::OnlySendToServersIControl),
+            (current_dir.join("car/tests_dir/bul/tar/gip.rs"), FilePrivacyLevel::OnlySendToServersIControl),
+            (current_dir.join("tests_dir/.hidden"), FilePrivacyLevel::OnlySendToServersIControl),
+            (current_dir.join("/tests_dir/.hidden"), FilePrivacyLevel::OnlySendToServersIControl),
+        ];
+        
+        // Act and assert
+        for (path, expected_privacy_level) in cases {
+            let actual_privacy_level = get_file_privacy_level(gcx.clone(), &path).await;
+            assert_eq!(
+                actual_privacy_level, 
+                expected_privacy_level, 
+                "Testing get_file_privacy_level with path {} and expected privacy level {:?}, got {:?}",
+                path.display(), 
+                expected_privacy_level,
+                actual_privacy_level,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_check_file_privacy() {
+        // Arrange
+        let gcx = get_global_context_with_privacy_settings(PrivacySettings {
+            file_privacy: FilePrivacySettings {
+                only_send_to_servers_I_control: vec!["*.txt".to_string()],
+                blocked: vec!["*.cat.txt".to_string()],
+            },
+            expiry_time: default_expiry_time(),
+        }).await;
+
+        let current_dir = std::env::current_dir().unwrap();
+
+        // Cases to test
+        let cases: Vec<(PathBuf, FilePrivacyLevel, bool)> = vec![
+            (current_dir.join("test.zip"), FilePrivacyLevel::AllowToSendEverywhere, true),
+            (current_dir.join("test.txt"), FilePrivacyLevel::AllowToSendEverywhere, false),
+            (current_dir.join("test.txt"), FilePrivacyLevel::OnlySendToServersIControl, true),
+            (current_dir.join("test.cat.txt"), FilePrivacyLevel::OnlySendToServersIControl, false),
+        ];
+        
+        // Act and assert: check_file_privacy
+        for (path, expected_privacy_level, expected_result) in &cases {
+            let result = check_file_privacy(gcx.clone(), path, expected_privacy_level).await;
+            if *expected_result {
+                assert!(
+                    result.is_ok(), 
+                    "Testing check_file_privacy with path {} and expected privacy level {:?}, got {:?} and it should have been ok",
+                    path.display(), 
+                    expected_privacy_level,
+                    result.unwrap_err(),
+                );
+            } else {
+                assert!(
+                    result.is_err(), 
+                    "Testing check_file_privacy with path {} and expected privacy level {:?}, got {:?} and it should have been err",
+                    path.display(), 
+                    expected_privacy_level,
+                    result.unwrap(),
+                );
+            }
+        }
+
+        // Act and assert: check_file_privacy_sync
+        for (path, expected_privacy_level, expected_result) in &cases {
+            let result = check_file_privacy_sync(gcx.clone(), path, expected_privacy_level);
+            if *expected_result {
+                assert!(
+                    result.is_ok(), 
+                    "Testing check_file_privacy_sync with path {} and expected privacy level {:?}, got {:?} and it should have been ok",
+                    path.display(), 
+                    expected_privacy_level,
+                    result.unwrap_err(),
+                );
+            } else {
+                assert!(
+                    result.is_err(), 
+                    "Testing check_file_privacy_sync with path {} and expected privacy level {:?}, got {:?} and it should have been err",
+                    path.display(), 
+                    expected_privacy_level,
+                    result.unwrap(),
+                );
+            }
+        }
+    }
+}
+        
+
+
+
+
+
 
 
