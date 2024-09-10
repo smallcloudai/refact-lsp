@@ -165,8 +165,9 @@ pub async fn execute_chat_model(
     }?;
 
     let mut succ_chunks = vec![];
+    let global_context = ccx.lock().await.global_context.clone();
     for m in last_messages {
-        match DefaultToolPatch::parse_message(&m).await {
+        match DefaultToolPatch::parse_message(&m, global_context.clone()).await {
             Ok(chunks) => {
                 succ_chunks.push(chunks);
             }
