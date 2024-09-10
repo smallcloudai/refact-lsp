@@ -120,10 +120,10 @@ pub async fn check_file_privacy(global_context: Arc<ARwLock<GlobalContext>>, pat
 
     let file_privacy_level = get_file_privacy_level(global_context.clone(), path).await;
     if file_privacy_level < *min_allowed_privacy_level {
-        Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
-    } else {
-        Ok(())
-    }
+        return Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level));
+    } 
+    
+    Ok(())
 }
 
 pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path: &Path, min_allowed_privacy_level: &FilePrivacyLevel) -> Result<(), String> {
@@ -133,10 +133,10 @@ pub fn check_file_privacy_sync(global_context: Arc<ARwLock<GlobalContext>>, path
     });
 
     if file_privacy_level < *min_allowed_privacy_level {
-        Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level))
-    } else {
-        Ok(())
-    }
+        return Err(format!("File privacy level for file is too restrictive, {} is {:?}", path.display(), file_privacy_level));
+    } 
+
+    Ok(())
 }
 
 
