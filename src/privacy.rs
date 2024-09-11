@@ -31,10 +31,10 @@ fn default_expiry_time() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() + PRIVACY_RELOAD_EACH_N_SECONDS.as_secs()
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct FilePrivacySettings {
     #[serde(default)]
-    #[allow(non_snake_case)]
     pub only_send_to_servers_I_control: Vec<String>,
     #[serde(default)]
     pub blocked: Vec<String>,
@@ -128,7 +128,6 @@ pub fn check_file_privacy(privacy_settings: Arc<PrivacySettings>, path: &Path, m
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use std::{path::PathBuf, sync::Arc};
 
     #[test]
