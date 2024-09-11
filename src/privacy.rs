@@ -7,7 +7,7 @@ use tokio::fs;
 use tracing::{error, info};
 use glob::Pattern;
 use std::time::SystemTime;
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
 
 use crate::global_context::GlobalContext;
 use crate::privacy_compiled_in::COMPILED_IN_INITIAL_PRIVACY_YAML;
@@ -75,9 +75,9 @@ pub async fn load_privacy_if_needed(gcx: Arc<ARwLock<GlobalContext>>) -> Arc<Pri
     };
 
     if !path.exists() {
-        match std::fs::File::create(&path) {
+        match fs::File::create(&path).await {
             Ok(mut file) => {
-                if let Err(e) = file.write_all(COMPILED_IN_INITIAL_PRIVACY_YAML.as_bytes()) {
+                if let Err(e) = file.write_all(COMPILED_IN_INITIAL_PRIVACY_YAML.as_bytes()).await {
                     error!("Failed to write to file: {}", e);
                 }
             }
