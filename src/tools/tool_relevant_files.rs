@@ -4,23 +4,26 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use regex::Regex;
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 use futures_util::future::join_all;
 
-use crate::at_commands::at_commands::AtCommandsContext;
 use crate::subchat::subchat;
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, SubchatParameters};
 
+use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, SubchatParameters, ContextFile};
 use crate::global_context::GlobalContext;
 
+use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
+use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
+use crate::at_commands::at_file::file_repair_candidates;
+use crate::ast::ast_index::RequestSymbolType;
 
 
-const RF_OUTPUT_FILES: usize = 6;
-const RF_ATTEMPTS: usize = 1;
+use log::info;
 
 
 pub struct ToolRelevantFiles;
@@ -61,15 +64,105 @@ impl Tool for ToolRelevantFiles {
             problem_statement,
         ).await?;
 
+        // cat output
+        let (gcx, top_n) = {
+            let ccx_lock = ccx.lock().await;
+            (ccx_lock.global_context.clone(), ccx_lock.top_n)
+        };
+
         let mut results = vec![];
-        results.push(ContextEnum::ChatMessage(ChatMessage {
-            role: "tool".to_string(),
-            content: format!("{}", serde_json::to_string_pretty(&res).unwrap()),
-            tool_calls: None,
-            tool_call_id: tool_call_id.clone(),
-            usage: Some(usage),
-            ..Default::default()
-        }));
+        if let Value::Object(files) = res {
+            let mut refined_res = serde_json::json!({});
+            let mut context_files_in = vec![];
+            for (file_path, file_info) in files {
+                // refine file_path
+                let candidates_file = file_repair_candidates(gcx.clone(), &file_path, top_n, false).await;
+                if candidates_file.is_empty() {
+                    info!("No candidates found for file {}, skip...", file_path);
+                    continue;
+                }
+                if candidates_file.len() > 1 {
+                    info!("Found multiple candidates for file {}: {:?}, skip...", file_path, candidates_file);
+                    continue;
+                }
+                let refined_file_path = candidates_file[0].clone();
+
+                // refine symbols
+                let mut symbols = vec![];
+                if let Some(Value::String(symbols_str)) = file_info.get("SYMBOLS") {
+                    if symbols_str != "*" {
+                        symbols = symbols_str.split(",").map(|x|x.trim().to_string()).collect::<Vec<_>>()
+                    }
+                };
+                let text = get_file_text_from_memory_or_disk(gcx.clone(), &PathBuf::from(&refined_file_path)).await?.to_string();
+                let mut doc = Document::new(&PathBuf::from(&refined_file_path));
+                doc.update_text(&text);
+
+                let ast_arc = gcx.read().await.ast_module.clone().unwrap();
+                let ast_lock = ast_arc.read().await;
+                let doc_syms = ast_lock.get_file_symbols(RequestSymbolType::All, &doc).await?.symbols;
+                let symbols_intersection = doc_syms.into_iter().filter(|s|symbols.contains(&s.name)).collect::<Vec<_>>();
+
+                let mut usefulness = 0f32;
+                if let Some(relevancy) = file_info.get("RELEVANCY").and_then(Value::as_f64) {
+                    usefulness = (relevancy / 5. * 100.) as f32;
+                };
+
+                if symbols_intersection.is_empty() {
+                    context_files_in.push(ContextFile {
+                        file_name: refined_file_path.clone(),
+                        file_content: "".to_string(),
+                        line1: 0,
+                        line2: text.lines().count(),
+                        symbols: vec![],
+                        gradient_type: -1,
+                        usefulness: usefulness,
+                        is_body_important: false,
+                    });
+                }
+
+                let mut symbols_found = vec![];
+                for symbol in symbols_intersection {
+                    symbols_found.push(symbol.name.clone());
+                    context_files_in.push(ContextFile {
+                        file_name: refined_file_path.clone(),
+                        file_content: "".to_string(),
+                        line1: symbol.full_range.start_point.row + 1,
+                        line2: symbol.full_range.end_point.row + 1,
+                        symbols: vec![symbol.guid.clone()],
+                        gradient_type: -1,
+                        usefulness: 100.,
+                        is_body_important: false,
+                    });
+                }
+
+                if let Some(refined_res_obj) = refined_res.as_object_mut() {
+                    let mut refined_file_info = file_info.clone();
+                    refined_file_info["SYMBOLS"] = Value::String(symbols_found.join(","));
+                    refined_res_obj.insert(file_path, refined_file_info);
+                }
+            }
+
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "tool".to_string(),
+                content: format!("{}", serde_json::to_string_pretty(&refined_res).unwrap()),
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                usage: Some(usage),
+                ..Default::default()
+            }));
+            results.extend(vec_context_file_to_context_tools(context_files_in));
+
+        } else {
+            results.push(ContextEnum::ChatMessage(ChatMessage {
+                role: "tool".to_string(),
+                content: format!("{}", serde_json::to_string_pretty(&res).unwrap()),
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                usage: Some(usage),
+                ..Default::default()
+            }));
+        }
 
         Ok((false, results))
     }
