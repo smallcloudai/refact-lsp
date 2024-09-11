@@ -6,6 +6,7 @@ use tracing::warn;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::at_file::{context_file_from_file_path, file_repair_candidates};
+use crate::privacy::load_privacy_if_needed;
 use crate::tools::patch::snippets::CodeSnippet;
 use crate::tools::patch::tool_patch::{DefaultToolPatch, N_CHOICES};
 use crate::subchat::subchat_single;
@@ -165,9 +166,9 @@ pub async fn execute_chat_model(
     }?;
 
     let mut succ_chunks = vec![];
-    let global_context = ccx.lock().await.global_context.clone();
+    let privacy_settings = load_privacy_if_needed(ccx.lock().await.global_context.clone()).await;
     for m in last_messages {
-        match DefaultToolPatch::parse_message(&m, global_context.clone()).await {
+        match DefaultToolPatch::parse_message(&m, privacy_settings.clone()).await {
             Ok(chunks) => {
                 succ_chunks.push(chunks);
             }
