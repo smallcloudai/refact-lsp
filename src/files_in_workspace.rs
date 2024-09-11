@@ -27,7 +27,7 @@ pub struct Document {
 
 pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String>
 {
-    check_file_privacy(load_privacy_if_needed(global_context.clone()).await, &file_path, &FilePrivacyLevel::AllowToSendEverywhere);
+    check_file_privacy(load_privacy_if_needed(global_context.clone()).await, &file_path, &FilePrivacyLevel::AllowToSendEverywhere)?;
 
     if let Some(doc) = global_context.read().await.documents_state.memory_document_map.get(file_path) {
         let doc = doc.read().await;
@@ -212,7 +212,7 @@ pub async fn file_watcher_total_reset(gcx_weak: Weak<ARwLock<GlobalContext>>) {
     }
 }
 
-pub async fn read_file_from_disk_after_privacy_check(
+async fn read_file_from_disk_after_privacy_check(
     path: &PathBuf,
 ) -> Result<Rope, String> {
     tokio::fs::read_to_string(path).await
@@ -226,7 +226,7 @@ pub async fn read_file_from_disk(
     privacy_settings: Arc<PrivacySettings>,
     path: &PathBuf,
 ) -> Result<Rope, String> {
-    check_file_privacy(privacy_settings, path, &FilePrivacyLevel::AllowToSendEverywhere);
+    check_file_privacy(privacy_settings, path, &FilePrivacyLevel::AllowToSendEverywhere)?;
     read_file_from_disk_after_privacy_check(path).await
 }
 
