@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak, Mutex as StdMutex};
 use std::time::Instant;
 use crate::global_context::GlobalContext;
-use crate::privacy::{check_file_privacy, check_file_privacy_sync, FilePrivacyLevel};
+use crate::privacy::{check_file_privacy, load_privacy_if_needed, FilePrivacyLevel};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
 use ropey::Rope;
 use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
+use crate::privacy::PrivacySettings;
 
 use tracing::info;
 use walkdir::WalkDir;
@@ -26,8 +27,8 @@ pub struct Document {
 
 pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<GlobalContext>>, file_path: &PathBuf) -> Result<String, String>
 {
-    check_file_privacy(global_context.clone(), &file_path, &FilePrivacyLevel::AllowToSendEverywhere).await?;
-    
+    check_file_privacy(load_privacy_if_needed(global_context.clone()).await, &file_path, &FilePrivacyLevel::AllowToSendEverywhere);
+
     if let Some(doc) = global_context.read().await.documents_state.memory_document_map.get(file_path) {
         let doc = doc.read().await;
         if doc.doc_text.is_some() {
@@ -45,7 +46,7 @@ impl Document {
     }
 
     pub async fn update_text_from_disk(&mut self, global_context: Arc<ARwLock<GlobalContext>>) -> Result<(), String> {
-        match read_file_from_disk(global_context.clone(), &self.doc_path).await {
+        match read_file_from_disk(load_privacy_if_needed(global_context.clone()).await, &self.doc_path).await {
             Ok(res) => {
                 self.doc_text = Some(res);
                 return Ok(());
@@ -60,7 +61,7 @@ impl Document {
         if self.doc_text.is_some() {
             return Ok(self.doc_text.as_ref().unwrap().to_string());
         }
-        read_file_from_disk(global_context.clone(), &self.doc_path).await.map(|x|x.to_string())
+        read_file_from_disk(load_privacy_if_needed(global_context.clone()).await, &self.doc_path).await.map(|x|x.to_string())
     }
 
     pub fn update_text(&mut self, text: &String) {
@@ -222,18 +223,18 @@ pub async fn read_file_from_disk_after_privacy_check(
 }
 
 pub async fn read_file_from_disk(
-    global_context: Arc<ARwLock<GlobalContext>>, 
+    privacy_settings: Arc<PrivacySettings>,
     path: &PathBuf,
 ) -> Result<Rope, String> {
-    check_file_privacy(global_context, path, &FilePrivacyLevel::AllowToSendEverywhere).await?;
+    check_file_privacy(privacy_settings, path, &FilePrivacyLevel::AllowToSendEverywhere);
     read_file_from_disk_after_privacy_check(path).await
 }
 
 pub fn read_file_from_disk_sync(
-    global_context: Arc<ARwLock<GlobalContext>>, 
+    privacy_settings: Arc<PrivacySettings>,
     path: &PathBuf,
 ) -> Result<Rope, String> {
-    check_file_privacy_sync(global_context, path, &FilePrivacyLevel::AllowToSendEverywhere)?;
+    check_file_privacy(privacy_settings, path, &FilePrivacyLevel::AllowToSendEverywhere)?;
     match std::fs::read_to_string(path) {
         Ok(content) => {
             let rope = Rope::from_str(&content);

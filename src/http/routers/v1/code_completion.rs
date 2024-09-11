@@ -13,7 +13,7 @@ use crate::caps::CodeAssistantCaps;
 use crate::completion_cache;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::privacy::check_file_privacy;
+use crate::privacy::{check_file_privacy, load_privacy_if_needed};
 use crate::files_correction::canonical_path;
 use crate::scratchpads;
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -53,8 +53,8 @@ pub async fn handle_v1_code_completion(
     validate_post(code_completion_post.clone())?;
 
     let cpath = canonical_path(&code_completion_post.inputs.cursor.file);
-    check_file_privacy(gcx.clone(), &cpath, &crate::privacy::FilePrivacyLevel::OnlySendToServersIControl)
-        .await.map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    check_file_privacy(load_privacy_if_needed(gcx.clone()).await, &cpath, &crate::privacy::FilePrivacyLevel::OnlySendToServersIControl)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e))?;
 
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(gcx.clone(), 0).await?;
     let maybe = _lookup_code_completion_scratchpad(
@@ -143,8 +143,8 @@ pub async fn handle_v1_code_completion_prompt(
     validate_post(post.clone())?;
 
     let cpath = canonical_path(&post.inputs.cursor.file);
-    check_file_privacy(gcx.clone(), &cpath, &crate::privacy::FilePrivacyLevel::OnlySendToServersIControl)
-        .await.map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    check_file_privacy(load_privacy_if_needed(gcx.clone()).await, &cpath, &crate::privacy::FilePrivacyLevel::OnlySendToServersIControl)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e))?;
 
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(gcx.clone(), 0).await?;
     let maybe = _lookup_code_completion_scratchpad(caps.clone(), &post).await;

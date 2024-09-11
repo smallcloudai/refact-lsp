@@ -9,6 +9,7 @@ use crate::tools::patch::ast_interaction::{lint_and_get_error_messages, parse_an
 use crate::call_validation::DiffChunk;
 use crate::diffs::{apply_diff_chunks_to_text, correct_and_validate_chunks, unwrap_diff_apply_outputs};
 use crate::files_in_workspace::read_file_from_disk;
+use crate::privacy::load_privacy_if_needed;
 
 
 pub async fn postprocess_diff_chunks_from_message(
@@ -41,7 +42,7 @@ pub async fn postprocess_diff_chunks_from_message(
         let text_before = if action == "add" {
             Rope::new()
         } else {
-            match read_file_from_disk(gcx.clone(), &path).await {
+            match read_file_from_disk(load_privacy_if_needed(gcx.clone()).await, &path).await {
                 Ok(text) => text,
                 Err(err) => {
                     let message = format!("Error reading file: {:?}", err);

@@ -19,6 +19,7 @@ use crate::files_in_workspace::{Document, read_file_from_disk};
 use crate::global_context::GlobalContext;
 use crate::vecdb::vdb_highlev::memories_block_until_vectorized;
 use crate::vecdb::vdb_thread::vectorizer_enqueue_files;
+use crate::privacy::load_privacy_if_needed;
 
 
 const MAX_FUZZY_N: usize = 10;
@@ -40,7 +41,7 @@ impl DiffPost {
     }
 }
 
-async fn write_results_on_disk(global_context: Arc<ARwLock<GlobalContext>>, results: Vec<ApplyDiffResult>) -> Result<Vec<Document>, String> {
+async fn write_results_on_disk(gcx: Arc<ARwLock<GlobalContext>>, results: Vec<ApplyDiffResult>) -> Result<Vec<Document>, String> {
     async fn write_to_file(path: &String, text: &str) -> Result<(), String> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -120,7 +121,7 @@ async fn write_results_on_disk(global_context: Arc<ARwLock<GlobalContext>>, resu
             apply_rename_action(rename_from, rename_into)?;
             if PathBuf::from(rename_into).is_file() {
                 let mut doc = Document::new(&PathBuf::from(rename_into));
-                let text = read_file_from_disk(global_context.clone(), &doc.doc_path).await?.to_string();
+                let text = read_file_from_disk(load_privacy_if_needed(gcx.clone()).await, &doc.doc_path).await?.to_string();
                 doc.update_text(&text);
                 docs2index.push(doc);
             }
@@ -199,7 +200,7 @@ pub async fn handle_v1_diff_apply(
         diff_state.get(&post.id).map(|x| x.clone()).unwrap_or_default()
     };
     let desired_state = post.apply.clone();
-    let (results, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (results, outputs) = read_files_n_apply_diff_chunks(load_privacy_if_needed(global_context.clone()).await, &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
 
     let docs2index = write_results_on_disk(global_context.clone(), results.clone()).await.map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
@@ -238,7 +239,7 @@ pub async fn handle_v1_diff_preview(
         diff_state.get(&post.id).map(|x| x.clone()).unwrap_or_default()
     };
     let desired_state = post.apply.clone();
-    let (results, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (results, outputs) = read_files_n_apply_diff_chunks(load_privacy_if_needed(global_context.clone()).await, &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
 
     let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, post.chunks);
 
@@ -292,7 +293,7 @@ pub async fn handle_v1_diff_state(
     };
     let desired_state = vec![true; post.chunks.len()];
 
-    let (_, outputs) = read_files_n_apply_diff_chunks(global_context.clone(), &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
+    let (_, outputs) = read_files_n_apply_diff_chunks(load_privacy_if_needed(global_context.clone()).await, &post.chunks, &applied_state, &desired_state, MAX_FUZZY_N);
     let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, post.chunks);
 
     let can_apply = outputs_unwrapped.iter().map(|x|x.applied).collect::<Vec<_>>();
