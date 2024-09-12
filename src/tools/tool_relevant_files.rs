@@ -20,7 +20,7 @@ use crate::global_context::GlobalContext;
 use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
 use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
 use crate::at_commands::at_file::file_repair_candidates;
-use crate::ast::ast_index::RequestSymbolType;
+use crate::ast::ast_mem_db::RequestSymbolType;
 
 
 use log::info;
