@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use crate::global_context::GlobalContext;
 use itertools::Itertools;
+use nucleo::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo::{Matcher, Config};
 use tokio::sync::RwLock as ARwLock;
-use strsim::normalized_damerau_levenshtein;
 use tracing::info;
 
 
@@ -95,21 +96,19 @@ fn fuzzy_search<I>(
     top_n: usize,
 ) -> Vec<String>
 where I: Iterator<Item = String> {
-    let mut top_n_records = Vec::with_capacity(top_n);
-    for p in candidates {
-        let dist = normalized_damerau_levenshtein(&correction_candidate, &p);
-        top_n_records.push((p.clone(), dist));
-        if top_n_records.len() >= top_n {
-            top_n_records.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            top_n_records.pop();
-        }
-    }
-    let mut sorted_paths  = vec![];
-    for path in top_n_records.iter().sorted_by(|a, b|a.1.partial_cmp(&b.1).unwrap()).rev().map(|(path, _)| path) {
-        if let Some(fixed) = (*cache_correction_arc).get(path) {
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+    let pattern = Pattern::parse(correction_candidate, CaseMatching::Ignore, Normalization::Smart);
+    let candidate_vec: Vec<String> = candidates.collect();
+    let matches = pattern.match_list(&candidate_vec, &mut matcher);
+
+    let top_n_records = matches.into_iter().take(top_n).collect::<Vec<_>>();
+
+    let mut sorted_paths = vec![];
+    for (path, _) in top_n_records.iter().sorted_by(|a, b| b.1.partial_cmp(&a.1).unwrap()).rev() {
+        if let Some(fixed) = (*cache_correction_arc).get(*path) {
             sorted_paths.extend(fixed.into_iter().cloned());
         } else {
-            sorted_paths.push(path.clone());
+            sorted_paths.push((*path).to_string());
         }
     }
     sorted_paths
