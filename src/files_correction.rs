@@ -124,7 +124,7 @@ where I: IntoIterator<Item = (String, String)> {
         let filename_dist = normalized_distance(&correction_candidate_filename, &p.0);
         let path_dist = normalized_distance(&correction_candidate, &p.1);
 
-        top_n_records.push((p.1.clone(), filename_dist * 2.0 + path_dist));
+        top_n_records.push((p.1.clone(), filename_dist * 2.5 + path_dist));
         if top_n_records.len() >= top_n {
             top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             top_n_records.pop();
@@ -274,3 +274,57 @@ pub fn canonical_path(s: &String) -> PathBuf {
     res
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files_in_workspace::_retrieve_files_in_workspace_folders;
+
+    async fn get_candidates_from_workspace_files() -> Vec<(String, String)> {
+        let proj_folders = vec![PathBuf::from(".").canonicalize().unwrap()];
+        let proj_folder = &proj_folders[0];
+
+        let workspace_files = _retrieve_files_in_workspace_folders(proj_folders.clone()).await;
+
+        workspace_files
+            .iter()
+            .filter_map(|path| {
+                let filename = path.file_name()?.to_string_lossy().to_string();
+
+                let relative_path = path.strip_prefix(proj_folder)
+                    .unwrap_or(path) // If strip_prefix fails, use the full path
+                    .to_string_lossy()
+                    .to_string();
+
+                Some((filename, relative_path))
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_fuzzy_search_finds_frog_py() {
+        let correction_candidate = "frog.p".to_string();
+        let top_n = 2;
+
+        let candidates = get_candidates_from_workspace_files().await;
+
+        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+
+        let expected_result = vec!["tests/emergency_frog_situation/frog.py".to_string()];
+
+        assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
+    }
+
+    #[tokio::test]
+    async fn test_fuzzy_search_path_helps_finding_file() {
+        let correction_candidate = "tests/emergency_frog_situation/w".to_string();
+        let top_n = 2;
+
+        let candidates = get_candidates_from_workspace_files().await;
+
+        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+
+        let expected_result = vec!["tests/emergency_frog_situation/work_day.py".to_string()];
+
+        assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
+    }
+}
