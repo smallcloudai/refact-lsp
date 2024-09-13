@@ -107,7 +107,7 @@ pub struct DocumentsState {
     pub memory_document_map: HashMap<PathBuf, Arc<ARwLock<Document>>>,   // if a file is open in IDE, and it's outside workspace dirs, it will be in this map and not in workspace_files
     pub cache_dirty: Arc<AMutex<bool>>,
     pub cache_correction: Arc<HashMap<String, HashSet<String>>>,  // map dir3/file.ext -> to /dir1/dir2/dir3/file.ext
-    pub cache_fuzzy: Arc<Vec<String>>,                            // slow linear search
+    pub cache_fuzzy: Arc<Vec<(String, String)>>,                            // slow linear search
     pub fs_watcher: Arc<ARwLock<RecommendedWatcher>>,
     pub diffs_applied_state: HashMap<u64, Vec<bool>>,
 }
@@ -142,7 +142,7 @@ impl DocumentsState {
             memory_document_map: HashMap::new(),
             cache_dirty: Arc::new(AMutex::<bool>::new(false)),
             cache_correction: Arc::new(HashMap::<String, HashSet<String>>::new()),
-            cache_fuzzy: Arc::new(Vec::<String>::new()),
+            cache_fuzzy: Arc::new(Vec::<(String, String)>::new()),
             fs_watcher: Arc::new(ARwLock::new(watcher)),
             diffs_applied_state: HashMap::new(),
         }

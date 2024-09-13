@@ -3,11 +3,8 @@ use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use crate::global_context::GlobalContext;
-use nucleo::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo::{Matcher, Config};
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
-
 
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
     let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
@@ -18,14 +15,15 @@ pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) ->
 }
 
 fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
-    HashMap<String, HashSet<String>>, Vec<String>, usize
+    HashMap<String, HashSet<String>>, Vec<(String, String)>, usize
 ) where I: IntoIterator<Item = PathBuf> {
     let mut cache_correction = HashMap::<String, HashSet<String>>::new();
-    let mut cache_fuzzy_set = HashSet::<String>::new();
+    let mut cache_fuzzy_set = HashSet::<(String, String)>::new();
     let mut cnt = 0;
 
     for path in paths_iter {
         let path_str = path.to_str().unwrap_or_default().to_string();
+        let filename = path.file_name().unwrap().to_string_lossy().to_string();
         
         // get path in workspace, stripping off everything before workspace root
         let workspace_path = workspace_folders.iter()
@@ -38,7 +36,8 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
             })
             .min_by_key(|s| s.len())
             .unwrap_or(path_str.clone());
-        cache_fuzzy_set.insert(workspace_path.clone());
+        
+        cache_fuzzy_set.insert((filename.clone(), workspace_path.clone()));
         cnt += 1;
 
         cache_correction.entry(path_str.clone()).or_insert_with(HashSet::new).insert(path_str.clone());
@@ -54,7 +53,7 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
         }
     }
 
-    (cache_correction, cache_fuzzy_set.into_iter().collect(), cnt)
+    (cache_correction, cache_fuzzy_set.into_iter().collect::<Vec<_>>(), cnt)
 }
 
 pub async fn get_files_in_dir(
@@ -67,7 +66,7 @@ pub async fn get_files_in_dir(
         .collect()
 }
 
-pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<String>>) {
+pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<(String, String)>>) {
     let (cache_dirty_arc, mut cache_correction_arc, mut cache_fuzzy_arc) = {
         let cx = global_context.read().await;
         (
@@ -100,19 +99,39 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_fuzzy_arc);
 }
 
+fn normalized_distance(a: &str, b: &str) -> f64 {
+    let max_length = std::cmp::max(a.len(), b.len()) as f64;
+    if max_length == 0.0 {
+        return 0.0;
+    }
+    sift4::simple(a, b) as f64 / max_length
+}
+
 fn fuzzy_search<I>(
     correction_candidate: &String,
     candidates: I,
     top_n: usize,
 ) -> Vec<String>
-where I: IntoIterator<Item = String> {
-    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+where I: IntoIterator<Item = (String, String)> {
+    let mut top_n_records = Vec::with_capacity(top_n);
+    for p in candidates {
+        let correction_candidate_filename = PathBuf::from(&correction_candidate)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
-    let pattern = Pattern::parse(correction_candidate, CaseMatching::Ignore, Normalization::Smart);
+        let filename_dist = normalized_distance(&correction_candidate_filename, &p.0);
+        let path_dist = normalized_distance(&correction_candidate, &p.1);
 
-    let matches = pattern.match_list(candidates, &mut matcher);
-
-    matches.into_iter().take(top_n).map(|(path, _)| path).collect()
+        top_n_records.push((p.1.clone(), filename_dist * 2.0 + path_dist));
+        if top_n_records.len() >= top_n {
+            top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            top_n_records.pop();
+        }
+    }
+    top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    top_n_records.into_iter().map(|x| x.0.clone()).collect()
 }
 
 pub async fn correct_to_nearest_filename(
@@ -146,16 +165,11 @@ pub async fn correct_to_nearest_dir_path(
     fuzzy: bool,
     top_n: usize,
 ) -> Vec<String> {
-    // TODO: unnecessary time and memory complexity, remove this function, rethink, do something
-
     fn get_parent(p: &String) -> Option<String> {
         PathBuf::from(p).parent().map(PathBuf::from).map(|x|x.to_string_lossy().to_string())
     }
-    fn get_last_component(p: &String) -> Option<String> {
-        PathBuf::from(p).components().last().map(|comp| comp.as_os_str().to_string_lossy().to_string())
-    }
 
-    let (cache_correction_arc, _) = files_cache_rebuild_as_needed(gcx.clone()).await;
+    let (cache_correction_arc, cache_fuzzy_set) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let mut paths_correction_map = HashMap::new();
     for (k, v) in cache_correction_arc.iter() {
         match get_parent(k) {
@@ -174,8 +188,7 @@ pub async fn correct_to_nearest_dir_path(
     }
 
     if fuzzy {
-        let paths_fuzzy = paths_correction_map.values().flat_map(|v| v).filter_map(get_last_component).collect::<HashSet<_>>();
-        return fuzzy_search(correction_candidate, paths_fuzzy.into_iter(), top_n);
+        return fuzzy_search(correction_candidate, cache_fuzzy_set.iter().cloned(), top_n);
     }
     vec![]
 }
