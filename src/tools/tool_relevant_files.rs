@@ -57,7 +57,7 @@ impl Tool for ToolRelevantFiles {
             Arc::new(AMutex::new(t))
         };
 
-        let (res, usage) = find_relevant_files(
+        let (res, usage, tool_message) = find_relevant_files(
             ccx_subchat,
             params,
             tool_call_id.clone(),
@@ -145,7 +145,7 @@ impl Tool for ToolRelevantFiles {
 
             results.push(ContextEnum::ChatMessage(ChatMessage {
                 role: "tool".to_string(),
-                content: format!("{}", serde_json::to_string_pretty(&refined_res).unwrap()),
+                content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&refined_res).unwrap(), tool_message),
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
                 usage: Some(usage),
@@ -156,7 +156,7 @@ impl Tool for ToolRelevantFiles {
         } else {
             results.push(ContextEnum::ChatMessage(ChatMessage {
                 role: "tool".to_string(),
-                content: format!("{}", serde_json::to_string_pretty(&res).unwrap()),
+                content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&res).unwrap(), tool_message),
                 tool_calls: None,
                 tool_call_id: tool_call_id.clone(),
                 usage: Some(usage),
@@ -349,13 +349,14 @@ async fn find_relevant_files(
     subchat_params: SubchatParameters,
     tool_call_id: String,
     user_query: String,
-) -> Result<(Value, ChatUsage), String> {
+) -> Result<(Value, ChatUsage, String), String> {
     let gcx: Arc<ARwLock<GlobalContext>> = ccx.lock().await.global_context.clone();
-    let vecdb_on = {
+    let (vecdb_on, workspace_files) = {
         let gcx = gcx.read().await;
         let vecdb = gcx.vec_db.lock().await;
-        vecdb.is_some()
+        (vecdb.is_some(), gcx.documents_state.workspace_files.clone())
     };
+    let total_files_in_project = workspace_files.lock().unwrap().len();
 
     let mut usage = ChatUsage { ..Default::default() };
     let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -415,13 +416,29 @@ async fn find_relevant_files(
 
     let results: Vec<Vec<Vec<ChatMessage>>> = join_all(futures).await.into_iter().filter_map(|x| x.ok()).collect();
 
-    let only_last_messages: Vec<ChatMessage> = results.into_iter()
-        .flat_map(|choices| {
-            choices.into_iter().filter_map(|mut messages| {
-                messages.pop().filter(|msg| msg.role == "assistant")
-            })
-        })
-        .collect();
+    let mut only_last_messages = Vec::new();
+    let mut experts_cnt = 0;
+    for choices in results.iter() {
+        for messages in choices.iter() {
+            if let Some(assistant_msg) = messages.iter().rfind(|msg| msg.role == "assistant").cloned() {
+                only_last_messages.push(assistant_msg);
+                experts_cnt += 1;
+            }
+        }
+    }
+
+    // TODO dedup files
+    let mut files_inspected = 0;
+    for choices in results.iter() {
+        for messages in choices.iter() {
+            let context_file_msgs: Vec<ChatMessage> = messages.iter().filter(|msg| msg.role == "context_file").cloned().collect();
+            for msg in context_file_msgs {
+                if let Ok(context_files) = serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
+                    files_inspected += context_files.len();
+                }
+            }
+        }
+    }
 
     // collect usages from experts
     for message in &only_last_messages {
@@ -470,5 +487,11 @@ async fn find_relevant_files(
     let answer = parse_reduce_output(&last_message.content)?;
     update_usage_from_message(&mut usage, &last_message);
 
-    Ok((answer, usage))
+    let tool_message = format!("Used {} experts, inspected {} files, project has {} files",
+        experts_cnt,
+        files_inspected,
+        total_files_in_project
+    );
+
+    Ok((answer, usage, tool_message))
 }
