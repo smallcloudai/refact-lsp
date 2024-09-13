@@ -3,7 +3,6 @@ use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use crate::global_context::GlobalContext;
-use itertools::Itertools;
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo::{Matcher, Config};
 use tokio::sync::RwLock as ARwLock;
@@ -18,7 +17,7 @@ pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) ->
     paths_from_anywhere.collect::<Vec<PathBuf>>()
 }
 
-fn make_cache<I>(paths_iter: I) -> (
+fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
     HashMap<String, HashSet<String>>, Vec<String>, usize
 ) where I: IntoIterator<Item = PathBuf> {
     let mut cache_correction = HashMap::<String, HashSet<String>>::new();
@@ -27,8 +26,19 @@ fn make_cache<I>(paths_iter: I) -> (
 
     for path in paths_iter {
         let path_str = path.to_str().unwrap_or_default().to_string();
-        let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        cache_fuzzy_set.insert(file_name);
+        
+        // get path in workspace, stripping off everything before workspace root
+        let workspace_path = workspace_folders.iter()
+            .filter_map(|workspace_folder| {
+                let workspace_folder_str = workspace_folder.to_str().unwrap_or_default();
+                if path_str.starts_with(workspace_folder_str) {
+                    return Some(path_str.strip_prefix(workspace_folder_str).unwrap_or(&path_str).to_string());
+                }
+                None
+            })
+            .min_by_key(|s| s.len())
+            .unwrap_or(path_str.clone());
+        cache_fuzzy_set.insert(workspace_path.clone());
         cnt += 1;
 
         cache_correction.entry(path_str.clone()).or_insert_with(HashSet::new).insert(path_str.clone());
@@ -73,7 +83,8 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
         // filter only get_project_dirs?
         let start_time = Instant::now();
         let paths_from_anywhere = paths_from_anywhere(global_context.clone()).await;
-        let (cache_correction, cache_fuzzy, cnt) = make_cache(paths_from_anywhere);
+        let workspace_folders = get_project_dirs(global_context.clone()).await;
+        let (cache_correction, cache_fuzzy, cnt) = make_cache(paths_from_anywhere, &workspace_folders);
 
         info!("rebuild completed in {:.3}s, {} URLs => cache_correction.len is now {}", start_time.elapsed().as_secs_f64(), cnt, cache_correction.len());
         cache_correction_arc = Arc::new(cache_correction);
@@ -90,28 +101,18 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
 }
 
 fn fuzzy_search<I>(
-    cache_correction_arc: Arc<HashMap<String, HashSet<String>>>,
     correction_candidate: &String,
     candidates: I,
     top_n: usize,
 ) -> Vec<String>
-where I: Iterator<Item = String> {
+where I: IntoIterator<Item = String> {
     let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+
     let pattern = Pattern::parse(correction_candidate, CaseMatching::Ignore, Normalization::Smart);
-    let candidate_vec: Vec<String> = candidates.collect();
-    let matches = pattern.match_list(&candidate_vec, &mut matcher);
 
-    let top_n_records = matches.into_iter().take(top_n).collect::<Vec<_>>();
+    let matches = pattern.match_list(candidates, &mut matcher);
 
-    let mut sorted_paths = vec![];
-    for (path, _) in top_n_records.iter().sorted_by(|a, b| b.1.partial_cmp(&a.1).unwrap()).rev() {
-        if let Some(fixed) = (*cache_correction_arc).get(*path) {
-            sorted_paths.extend(fixed.into_iter().cloned());
-        } else {
-            sorted_paths.push((*path).to_string());
-        }
-    }
-    sorted_paths
+    matches.into_iter().take(top_n).map(|(path, _)| path).collect()
 }
 
 pub async fn correct_to_nearest_filename(
@@ -133,7 +134,7 @@ pub async fn correct_to_nearest_filename(
 
     if fuzzy {
         info!("fuzzy search {:?}, cache_fuzzy_arc.len={}", correction_candidate, cache_fuzzy_arc.len());
-        return fuzzy_search(cache_correction_arc.clone(), correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n);
+        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n);
     }
 
     return vec![];
@@ -174,7 +175,7 @@ pub async fn correct_to_nearest_dir_path(
 
     if fuzzy {
         let paths_fuzzy = paths_correction_map.values().flat_map(|v| v).filter_map(get_last_component).collect::<HashSet<_>>();
-        return fuzzy_search(Arc::new(paths_correction_map), correction_candidate, paths_fuzzy.into_iter(), top_n);
+        return fuzzy_search(correction_candidate, paths_fuzzy.into_iter(), top_n);
     }
     vec![]
 }
