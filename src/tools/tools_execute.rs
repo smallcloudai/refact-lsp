@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
-use crate::call_validation::{ChatMessage, ContextEnum, SubchatParameters};
+use crate::call_validation::{ChatMessage, ChatToolCall, ContextEnum, ContextFile, SubchatParameters};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
@@ -15,24 +15,8 @@ use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
 
 
-pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
-    let (gcx, params_mb) = {
-        let ccx_locked = ccx.lock().await;
-        let gcx = ccx_locked.global_context.clone();
-        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
-        (gcx, params)
-    };
-    let params = match params_mb {
-        Some(params) => params,
-        None => {
-            let tconfig = load_customization(gcx.clone(), true).await?;
-            tconfig.subchat_tool_parameters.get(tool_name).cloned()
-                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
-        }
-    };
-    let _ = get_model_record(gcx, &params.subchat_model).await?; // check if the model exists
-    Ok(params)
-}
+const MAX_CALL_DUPS: usize = 1;
+
 
 pub async fn run_tools(
     ccx: Arc<AMutex<AtCommandsContext>>,
@@ -40,66 +24,67 @@ pub async fn run_tools(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-) -> (Vec<ChatMessage>, bool)
-{
-    let (n_ctx, top_n, correction_only_up_to_step) = {
-        let ccx_locked = ccx.lock().await;
-        (ccx_locked.n_ctx, ccx_locked.top_n, ccx_locked.correction_only_up_to_step)
+) -> (Vec<ChatMessage>, bool) {
+    let (n_ctx, at_tools) = {
+        let ccx_lock = ccx.lock().await;
+        (ccx_lock.n_ctx, ccx_lock.at_tools.clone())
     };
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let tokens_for_rag = reserve_for_context;
-    {
-        let mut ccx_locked = ccx.lock().await;
-        ccx_locked.tokens_for_rag = tokens_for_rag;
-    };
-
+    ccx.lock().await.tokens_for_rag = tokens_for_rag;
     info!("run_tools: reserve_for_context {} tokens", reserve_for_context);
-    if original_messages.is_empty() {
-        return (original_messages.clone(), false);
-    }
-    let ass_n = original_messages.len() - 1;
-    let ass_msg = original_messages.get(ass_n).unwrap();
 
-    if ass_msg.role != "assistant" {
-        return (original_messages.clone(), false);
-    }
-    if ass_msg.tool_calls.is_none() || ass_msg.tool_calls.as_ref().unwrap().len() == 0 {
+    if tokens_for_rag < MIN_RAG_CONTEXT_LIMIT {
+        warn!("There are tool results, but tokens_for_rag={tokens_for_rag} is very small, bad things will happen.");
         return (original_messages.clone(), false);
     }
 
-    let at_tools = ccx.lock().await.at_tools.clone();
+    let last_msg_tool_calls = match original_messages.last().filter(|m|m.role=="assistant") {
+        Some(m) => m.tool_calls.clone().unwrap_or(vec![]),
+        None => return (original_messages.clone(), false),
+    };
+    if last_msg_tool_calls.is_empty() {
+        return (original_messages.clone(), false);
+    }
 
-    let mut for_postprocessing = vec![];
+    if let Err(early_results) = detect_dup_calls(original_messages, &last_msg_tool_calls, stream_back_to_user).await {
+        return early_results;
+    }
+
+    let mut context_files_for_pp = vec![];
     let mut generated_tool = vec![];  // tool results must go first
     let mut generated_other = vec![];
     let mut any_corrections = false;
 
-    for t_call in ass_msg.tool_calls.as_ref().unwrap_or(&vec![]).iter() {
-        if let Some(cmd) = at_tools.get(&t_call.function.name) {
-
-            let args_maybe = serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments);
-            if let Err(e) = args_maybe {
-                let tool_failed_message = ChatMessage {
-                    role: "tool".to_string(),
-                    content: format!("couldn't deserialize arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e),
-                    tool_calls: None,
-                    tool_call_id: t_call.id.to_string(),
-                    ..Default::default()
-                };
+    for t_call in last_msg_tool_calls {
+        let cmd = match at_tools.get(&t_call.function.name) {
+            Some(cmd) => cmd.clone(),
+            None => {
+                let tool_failed_message = tool_answer(
+                    format!("tool use: function {:?} not found", &t_call.function.name), t_call.id.to_string()
+                );
+                warn!("{}", tool_failed_message.content);
                 generated_tool.push(tool_failed_message.clone());
                 continue;
             }
-            let args = args_maybe.unwrap();
-            info!("tool use {}({:?})", &t_call.function.name, args);
-            let tool_msg_and_maybe_more_mb = cmd.lock().await.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await;
-            if let Err(e) = tool_msg_and_maybe_more_mb {
-                let mut tool_failed_message = ChatMessage {
-                    role: "tool".to_string(),
-                    content: e.to_string(),
-                    tool_calls: None,
-                    tool_call_id: t_call.id.to_string(),
-                    ..Default::default()
-                };
+        };
+
+        let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
+            Ok(args) => args,
+            Err(e) => {
+                let tool_failed_message = tool_answer(
+                    format!("tool use: couldn't parse arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e), t_call.id.to_string()
+                );
+                generated_tool.push(tool_failed_message.clone());
+                continue;
+            }
+        };
+        info!("tool use {}({:?})", &t_call.function.name, args);
+
+        let (corrections, tool_execute_results) = match cmd.lock().await.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
+            Ok(msg_and_maybe_more) => msg_and_maybe_more,
+            Err(e) => {
+                let mut tool_failed_message = tool_answer(e, t_call.id.to_string());
                 {
                     let mut cmd_lock = cmd.lock().await;
                     if let Some(usage) = cmd_lock.usage() {
@@ -109,46 +94,77 @@ pub async fn run_tools(
                 }
                 generated_tool.push(tool_failed_message.clone());
                 continue;
-            };
-            let (corrections, tool_msg_and_maybe_more) = tool_msg_and_maybe_more_mb.unwrap();
-            any_corrections |= corrections;
-            let mut have_answer = false;
-            for msg in tool_msg_and_maybe_more {
-                if let ContextEnum::ChatMessage(ref raw_msg) = msg {
-                    if (raw_msg.role == "tool" || raw_msg.role == "diff") && raw_msg.tool_call_id == t_call.id {
-                        generated_tool.push(raw_msg.clone());
+            }
+        };
+        any_corrections |= corrections;
+
+        let mut have_answer = false;
+        for msg in tool_execute_results {
+            match msg {
+                ContextEnum::ChatMessage(m) => {
+                    if (m.role == "tool" || m.role == "diff") && m.tool_call_id == t_call.id {
+                        generated_tool.push(m);
                         have_answer = true;
                     } else {
-                        generated_other.push(raw_msg.clone());
-                        assert!(raw_msg.tool_call_id.is_empty());
+                        assert!(m.tool_call_id.is_empty());
+                        generated_other.push(m);
                     }
-                }
-                if let ContextEnum::ContextFile(ref cf) = msg {
-                    for_postprocessing.push(cf.clone());
+                },
+                ContextEnum::ContextFile(m) => {
+                    context_files_for_pp.push(m);
                 }
             }
-            assert!(have_answer);
-        } else {
-            let e = format!("tool use: function {:?} not found", &t_call.function.name);
-            warn!(e);
-            let tool_failed_message = ChatMessage {
-                role: "tool".to_string(),
-                content: e.to_string(),
-                tool_calls: None,
-                tool_call_id: t_call.id.to_string(),
-                ..Default::default()
-            };
-            generated_tool.push(tool_failed_message.clone());
         }
+        assert!(have_answer);
     }
+
+    let (generated_tool, generated_other) = pp_run_tools(
+        ccx.clone(),
+        original_messages,
+        any_corrections,
+        generated_tool,
+        generated_other,
+        context_files_for_pp,
+        tokens_for_rag,
+        tokenizer.clone(),
+    ).await;
+
+    let mut all_messages = original_messages.to_vec();
+    for msg in generated_tool.iter().chain(generated_other.iter()) {
+        all_messages.push(msg.clone());
+        stream_back_to_user.push_in_json(json!(msg));
+    }
+
+    ccx.lock().await.pp_skeleton = false;
+
+    (all_messages, true)
+}
+
+async fn pp_run_tools(
+    ccx: Arc<AMutex<AtCommandsContext>>,
+    original_messages: &Vec<ChatMessage>,
+    any_corrections: bool,
+    generated_tool: Vec<ChatMessage>,
+    generated_other: Vec<ChatMessage>,
+    context_files_for_pp: Vec<ContextFile>,
+    tokens_for_rag: usize,
+    tokenizer: Arc<RwLock<Tokenizer>>,
+) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
+    let mut generated_tool = generated_tool.to_vec();
+    let mut generated_other = generated_other.to_vec();
+    
+    let (top_n, correction_only_up_to_step) = {
+        let ccx_locked = ccx.lock().await;
+        (ccx_locked.top_n, ccx_locked.correction_only_up_to_step)
+    };
 
     if any_corrections && original_messages.len() <= correction_only_up_to_step {
         generated_other.clear();
-        generated_other.push(ChatMessage::new("user".to_string(), format!("💿 There are corrections in the tool calls, all the output files are suppressed. Call again with corrections.")));
+        generated_other.push(ChatMessage::new("user".to_string(), "💿 There are corrections in the tool calls, all the output files are suppressed. Call again with corrections.".to_string()));
 
     } else if tokens_for_rag > MIN_RAG_CONTEXT_LIMIT {
         let (tokens_limit_chat_msg, mut tokens_limit_files) = {
-            if for_postprocessing.is_empty() {
+            if context_files_for_pp.is_empty() {
                 (tokens_for_rag, 0)
             } else {
                 (tokens_for_rag / 2, tokens_for_rag / 2)
@@ -189,7 +205,7 @@ pub async fn run_tools(
 
         let context_file_vec = postprocess_context_files(
             gcx.clone(),
-            &for_postprocessing,
+            &context_files_for_pp,
             tokenizer.clone(),
             tokens_limit_files,
             false,
@@ -200,25 +216,76 @@ pub async fn run_tools(
             let json_vec = context_file_vec.iter().map(|p| json!(p)).collect::<Vec<_>>();
             let message = ChatMessage::new(
                 "context_file".to_string(),
-                serde_json::to_string(&json_vec).unwrap_or("".to_string()),
+                serde_json::to_string(&json_vec).unwrap()
             );
             generated_other.push(message.clone());
         }
+
     } else {
-        tracing::warn!("There are tool results, but tokens_for_rag={tokens_for_rag} is very small, bad things will happen.")
+        warn!("There are tool results, but tokens_for_rag={tokens_for_rag} is very small, bad things will happen.")
     }
+    (generated_tool, generated_other)
+}
 
-    let mut all_messages = original_messages.iter().map(|m| m.clone()).collect::<Vec<_>>();
-    for msg in generated_tool.iter() {
-        all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
+fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
+    ChatMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: None,
+        tool_call_id,
+        ..Default::default()
     }
-    for msg in generated_other.iter() {
-        all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
+}
+
+async fn detect_dup_calls(
+    original_messages: &Vec<ChatMessage>,
+    last_msg_tool_calls: &Vec<ChatToolCall>,
+    stream_back_to_user: &mut HasRagResults,
+) -> Result<(), (Vec<ChatMessage>, bool)> {
+    let messages_since_user = original_messages.iter()
+        .skip(original_messages.iter().rposition(|m| m.role == "user").unwrap_or(0) + 1).collect::<Vec<_>>();
+    let tool_functions_since_user = messages_since_user.iter()
+        .filter_map(|m|m.tool_calls.clone()).flatten()
+        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
+        .collect::<Vec<_>>();
+
+    let mut all_messages = original_messages.to_vec();
+    if last_msg_tool_calls.iter()
+        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
+        .any(|f|tool_functions_since_user.iter().filter(|x|**x==f).count() > MAX_CALL_DUPS) {
+        for t_call in last_msg_tool_calls {
+            let is_duplicate = tool_functions_since_user.iter()
+                .filter(|x|**x==(t_call.function.name.clone(), t_call.function.arguments.clone()))
+                .count() > MAX_CALL_DUPS;
+            let response_content = if is_duplicate {
+                "💿 Oops you are stuck in a loop. Don't call any more functions. Tell user to reformulate their question.".to_string()
+            } else {
+                "".to_string()
+            };
+            let tool_response = tool_answer(response_content, t_call.id.to_string());
+            all_messages.push(tool_response.clone());
+            stream_back_to_user.push_in_json(json!(tool_response));
+        }
+        return Err((all_messages, false));
     }
+    Ok(())
+}
 
-    ccx.lock().await.pp_skeleton = false;
-
-    (all_messages, true)
+pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
+    let (gcx, params_mb) = {
+        let ccx_locked = ccx.lock().await;
+        let gcx = ccx_locked.global_context.clone();
+        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
+        (gcx, params)
+    };
+    let params = match params_mb {
+        Some(params) => params,
+        None => {
+            let tconfig = load_customization(gcx.clone(), true).await?;
+            tconfig.subchat_tool_parameters.get(tool_name).cloned()
+                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
+        }
+    };
+    let _ = get_model_record(gcx, &params.subchat_model).await?; // check if the model exists
+    Ok(params)
 }
