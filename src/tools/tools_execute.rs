@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
-use crate::call_validation::{ChatMessage, ContextEnum, ContextFile, SubchatParameters};
+use crate::call_validation::{ChatMessage, ChatToolCall, ContextEnum, ContextFile, SubchatParameters};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
@@ -114,6 +114,46 @@ async fn pp_execute_tools_results(
     }
 }
 
+fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
+    ChatMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: None,
+        tool_call_id,
+        ..Default::default()
+    }
+}
+
+async fn run_tools_early_stop(
+    original_messages: &Vec<ChatMessage>,
+    last_msg_tool_calls: &Vec<ChatToolCall>,
+    stream_back_to_user: &mut HasRagResults,
+) -> Result<(), (Vec<ChatMessage>, bool)> {
+    let messages_since_user = original_messages.iter()
+        .skip(original_messages.iter().rposition(|m| m.role == "user").unwrap_or(0) + 1).collect::<Vec<_>>();
+    let tool_functions_since_user = messages_since_user.iter()
+        .filter_map(|m|m.tool_calls.clone()).flatten()
+        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
+        .collect::<Vec<_>>();
+
+    let mut all_messages = original_messages.to_vec();
+    if last_msg_tool_calls.iter().map(|c|(c.function.name.clone(), c.function.arguments.clone())).any(|f|tool_functions_since_user.iter().filter(|x|**x==f).count() > 1) {
+        for t_call in last_msg_tool_calls {
+            let is_duplicate = tool_functions_since_user.iter().filter(|x|**x==(t_call.function.name.clone(), t_call.function.arguments.clone())).count() > 1;
+            let response_content = if is_duplicate {
+                "💿 Calling the same (function, arguments) multiple times is not allowed.".to_string()
+            } else {
+                "".to_string()
+            };
+            let tool_response = tool_answer(response_content, t_call.id.to_string());
+            all_messages.push(tool_response.clone());
+            stream_back_to_user.push_in_json(json!(tool_response));
+        }
+        return Err((all_messages, false));
+    }
+    Ok(())
+}
+
 pub async fn run_tools(
     ccx: Arc<AMutex<AtCommandsContext>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
@@ -121,7 +161,10 @@ pub async fn run_tools(
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
 ) -> (Vec<ChatMessage>, bool) {
-    let n_ctx = ccx.lock().await.n_ctx.clone();
+    let (n_ctx, at_tools) = { 
+        let ccx_lock = ccx.lock().await;
+        (ccx_lock.n_ctx, ccx_lock.at_tools.clone()) 
+    };
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let tokens_for_rag = reserve_for_context;
     ccx.lock().await.tokens_for_rag = tokens_for_rag;
@@ -140,8 +183,10 @@ pub async fn run_tools(
         return (original_messages.clone(), false);
     }
 
-    let at_tools = ccx.lock().await.at_tools.clone();
-
+    if let Err(early_results) = run_tools_early_stop(original_messages, &last_msg_tool_calls, stream_back_to_user).await {
+        return early_results;
+    }
+    
     let mut context_files_for_pp = vec![];
     let mut generated_tool = vec![];  // tool results must go first
     let mut generated_other = vec![];
@@ -151,13 +196,9 @@ pub async fn run_tools(
         let cmd = match at_tools.get(&t_call.function.name) {
             Some(cmd) => cmd.clone(),
             None => {
-                let tool_failed_message = ChatMessage {
-                    role: "tool".to_string(),
-                    content: format!("tool use: function {:?} not found", &t_call.function.name),
-                    tool_calls: None,
-                    tool_call_id: t_call.id.to_string(),
-                    ..Default::default()
-                };
+                let tool_failed_message = tool_answer(
+                    format!("tool use: function {:?} not found", &t_call.function.name), t_call.id.to_string()
+                );
                 warn!("{}", tool_failed_message.content);
                 generated_tool.push(tool_failed_message.clone());
                 continue;
@@ -168,13 +209,9 @@ pub async fn run_tools(
         let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
             Ok(args) => args,
             Err(e) => {
-                let tool_failed_message = ChatMessage {
-                    role: "tool".to_string(),
-                    content: format!("couldn't deserialize arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e),
-                    tool_calls: None,
-                    tool_call_id: t_call.id.to_string(),
-                    ..Default::default()
-                };
+                let tool_failed_message = tool_answer(
+                    format!("tool use: couldn't parse arguments: {}. Error:\n{}\nTry again following JSON format", t_call.function.arguments, e), t_call.id.to_string()
+                );
                 generated_tool.push(tool_failed_message.clone());
                 continue;
             }
@@ -184,13 +221,7 @@ pub async fn run_tools(
         let (corrections, tool_execute_results) = match cmd.lock().await.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
             Ok(msg_and_maybe_more) => msg_and_maybe_more,
             Err(e) => {
-                let mut tool_failed_message = ChatMessage {
-                    role: "tool".to_string(),
-                    content: e.to_string(),
-                    tool_calls: None,
-                    tool_call_id: t_call.id.to_string(),
-                    ..Default::default()
-                };
+                let mut tool_failed_message = tool_answer(e, t_call.id.to_string());
                 {
                     let mut cmd_lock = cmd.lock().await;
                     if let Some(usage) = cmd_lock.usage() {
