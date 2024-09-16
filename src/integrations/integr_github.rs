@@ -30,7 +30,6 @@ impl ToolGithub {
             .get("github")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok());
         if let Some(my_stuff) = my_stuff_maybe {
-            info!("parsed GitHub: {:?}", my_stuff);
             return Some(Self { integration_github: my_stuff });
         }
         None
