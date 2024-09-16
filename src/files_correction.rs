@@ -5,6 +5,7 @@ use std::time::Instant;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
 
+use crate::files_in_workspace::PathInfo;
 use crate::global_context::GlobalContext;
 
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
@@ -16,10 +17,10 @@ pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) ->
 }
 
 fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
-    HashMap<String, HashSet<String>>, Vec<(String, String)>, usize
+    HashMap<String, HashSet<String>>, Vec<PathInfo>, usize
 ) where I: IntoIterator<Item = PathBuf> {
     let mut cache_correction = HashMap::<String, HashSet<String>>::new();
-    let mut cache_fuzzy_set = HashSet::<(String, String)>::new();
+    let mut cache_fuzzy_set = HashSet::<PathInfo>::new();
     let mut cnt = 0;
 
     for path in paths_iter {
@@ -38,7 +39,10 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
 
         let absolute_part = path_str.strip_suffix(&workspace_path).unwrap_or(&path_str).to_string();
         
-        cache_fuzzy_set.insert((workspace_path.clone(), absolute_part));
+        cache_fuzzy_set.insert(PathInfo {
+            relative_path: workspace_path.clone(),
+            absolute_part,
+        });
         cnt += 1;
 
         cache_correction.entry(path_str.clone()).or_insert_with(HashSet::new).insert(path_str.clone());
@@ -67,7 +71,7 @@ pub async fn get_files_in_dir(
         .collect()
 }
 
-pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<(String, String)>>) {
+pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<PathInfo>>) {
     let (cache_dirty_arc, mut cache_correction_arc, mut cache_fuzzy_arc) = {
         let cx = global_context.read().await;
         (
@@ -113,7 +117,7 @@ fn fuzzy_search<I>(
     candidates: I,
     top_n: usize,
 ) -> Vec<String>
-where I: IntoIterator<Item = (String, String)> {
+where I: IntoIterator<Item = PathInfo> {
     let correction_candidate_filename = PathBuf::from(&correction_candidate)
             .file_name()
             .unwrap()
@@ -122,11 +126,11 @@ where I: IntoIterator<Item = (String, String)> {
 
     let mut top_n_records = Vec::with_capacity(top_n);
     for path in candidates {
-        let filename = PathBuf::from(&path.0).file_name().unwrap_or_default().to_string_lossy().to_string();
-        let full_path = PathBuf::from(&path.1).join(path.0.trim_start_matches(std::path::MAIN_SEPARATOR)).to_string_lossy().to_string();
+        let filename = PathBuf::from(&path.relative_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+        let full_path = path.get_full_path();
 
         let filename_dist = normalized_distance(&correction_candidate_filename, &filename);
-        let path_dist = normalized_distance(&correction_candidate, &path.0);
+        let path_dist = normalized_distance(&correction_candidate, &path.relative_path);
 
         top_n_records.push((full_path, filename_dist * 2.5 + path_dist));
         if top_n_records.len() >= top_n {
@@ -192,12 +196,15 @@ pub async fn correct_to_nearest_dir_path(
     }
 
     if fuzzy {
-        let mut dirs = HashSet::<(String, String)>::new();
+        let mut dirs = HashSet::<PathInfo>::new();
 
         for p in cache_fuzzy_set.iter() {
-            let mut current_path = PathBuf::from(&p.0);
+            let mut current_path = PathBuf::from(&p.relative_path);
             while let Some(parent) = current_path.parent() {
-                dirs.insert((parent.to_string_lossy().to_string(), p.1.clone()));
+                dirs.insert(PathInfo {
+                    relative_path: parent.to_string_lossy().to_string(),
+                    absolute_part: p.absolute_part.clone(),
+                });
                 current_path = parent.to_path_buf();
             }
         }
@@ -294,7 +301,7 @@ mod tests {
     use super::*;
     use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 
-    async fn get_candidates_from_workspace_files() -> Vec<(String, String)> {
+    async fn get_candidates_from_workspace_files() -> Vec<PathInfo> {
         let proj_folders = vec![PathBuf::from(".").canonicalize().unwrap()];
         let proj_folder = &proj_folders[0];
 
@@ -308,7 +315,10 @@ mod tests {
                     .to_string_lossy()
                     .to_string();
 
-                Some((relative_path, "/home/user/workspace".to_string()))
+                    Some(PathInfo {
+                        relative_path,
+                        absolute_part: "/home/user/workspace".to_string(),
+                    })
             })
             .collect()
     }
@@ -322,7 +332,7 @@ mod tests {
 
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
-        let expected_result = vec!["tests/emergency_frog_situation/frog.py".to_string()];
+        let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/frog.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
     }
@@ -336,7 +346,7 @@ mod tests {
 
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
-        let expected_result = vec!["tests/emergency_frog_situation/work_day.py".to_string()];
+        let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/work_day.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
     }
