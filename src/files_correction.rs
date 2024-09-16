@@ -26,6 +26,7 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
     for path in paths_iter {
         let path_str = path.to_str().unwrap_or_default().to_string();
 
+        // get the path relative to the workspace
         let workspace_path = workspace_folders.iter()
             .filter_map(|workspace_folder| {
                 let workspace_folder_str = workspace_folder.to_str().unwrap_or_default();
@@ -311,7 +312,7 @@ mod tests {
             .iter()
             .filter_map(|path| {
                 let relative_path = path.strip_prefix(proj_folder)
-                    .unwrap_or(path) // If strip_prefix fails, use the full path
+                    .unwrap_or(path)
                     .to_string_lossy()
                     .to_string();
 
@@ -325,13 +326,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_fuzzy_search_finds_frog_py() {
+        // Arrange
         let correction_candidate = "frog.p".to_string();
         let top_n = 2;
 
         let candidates = get_candidates_from_workspace_files().await;
 
+        // Act
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
+        // Assert
         let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/frog.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
@@ -339,15 +343,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_fuzzy_search_path_helps_finding_file() {
+        // Arrange
         let correction_candidate = "tests/emergency_frog_situation/w".to_string();
         let top_n = 2;
 
         let candidates = get_candidates_from_workspace_files().await;
 
+        // Act
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
+        // Assert
         let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/work_day.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
+    }
+
+    #[tokio::test]
+    async fn test_fuzzy_search_filename_weights_more_than_path() {
+        // Arrange
+        let correction_candidate = "my_file.ext".to_string();
+        let top_n = 3;
+
+        let candidates = vec![
+            PathInfo {
+                relative_path: "my_library/implementation/my_file.ext".to_string(),
+                absolute_part: "/home/user/workspace".to_string(),
+            },
+            PathInfo {
+                relative_path: "my_library/my_file.ext".to_string(),
+                absolute_part: "/home/user/workspace".to_string(),
+            },
+            PathInfo {
+                relative_path: "another_file.ext".to_string(),
+                absolute_part: "/home/user/workspace".to_string(),
+            }
+        ];
+
+        // Act
+        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+
+        // Assert
+        let expected_result = vec![
+            "/home/user/workspace/my_library/my_file.ext".to_string(),
+            "/home/user/workspace/my_library/implementation/my_file.ext".to_string(),
+        ];
+        
+        let mut sorted_result = result.clone();
+        let mut sorted_expected = expected_result.clone();
+        
+        sorted_result.sort();
+        sorted_expected.sort();
+
+        assert_eq!(sorted_result, sorted_expected, "The result should contain the expected paths in any order, found {:?} instead", result);
     }
 }
