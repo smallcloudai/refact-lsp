@@ -120,10 +120,9 @@ fn fuzzy_search<I>(
 ) -> Vec<String>
 where I: IntoIterator<Item = PathInfo> {
     let correction_candidate_filename = PathBuf::from(&correction_candidate)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or(correction_candidate.clone());
 
     let mut top_n_records = Vec::with_capacity(top_n);
     for path in candidates {
@@ -135,11 +134,11 @@ where I: IntoIterator<Item = PathInfo> {
 
         top_n_records.push((full_path, filename_dist * 2.5 + path_dist));
         if top_n_records.len() >= top_n {
-            top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             top_n_records.pop();
         }
     }
-    top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
     top_n_records.into_iter().map(|x| x.0.clone()).collect()
 }
 
@@ -244,38 +243,61 @@ fn get_shortest_unique_suffixes(paths: &[PathBuf]) -> Vec<String> {
         .into_iter()
         .map(|suffixes| {
             suffixes.iter()
-                .find(|suffix| suffix_count[suffix.as_str()] == 1)
-                .unwrap_or_else(|| suffixes.last().unwrap())
-                .clone()
+            .find(|suffix| suffix_count[suffix.as_str()] == 1)
+            .cloned() 
+            .unwrap_or_else(|| suffixes.last().cloned().unwrap_or_else(|| "".to_string()))
+        })
+        .collect()
+}
+
+fn shorten_paths_with_mapping(paths: Vec<String>, project_mapping: Vec<(PathBuf, String)>) -> Vec<String> {
+    let mut path_count = HashMap::new();
+
+    // First pass: Count shortened versions (but do not shorten yet)
+    for p in &paths {
+        if let Some((proj, _)) = project_mapping.iter()
+            .filter(|(proj, _)| p.starts_with(proj.to_string_lossy().as_ref())) 
+            .max_by_key(|(proj, _)| proj.to_string_lossy().len()) 
+        {
+            let shortened = p.strip_prefix(proj.to_string_lossy().as_ref()).unwrap_or(&p).trim_start_matches(std::path::MAIN_SEPARATOR);
+            *path_count.entry(shortened.to_string()).or_insert(0) += 1;
+        }
+    }
+    
+    // Second pass: Append shortened if unique, otherwise use the full path
+    paths
+        .into_iter()
+        .map(|p| {
+            if let Some((proj, suffix)) = project_mapping.iter()
+                .filter(|(proj, _)| p.starts_with(proj.to_string_lossy().as_ref()))  
+                .max_by_key(|(proj, _)| proj.to_string_lossy().len()) 
+            {
+                let shortened = p.strip_prefix(proj.to_string_lossy().as_ref()).unwrap_or(&p).trim_start_matches(std::path::MAIN_SEPARATOR);
+
+                if path_count[shortened] == 1 {
+                    shortened.to_string()
+                } else {
+                    let mut full_path = PathBuf::from(suffix);
+                    full_path.push(shortened);
+                    full_path.to_string_lossy().to_string()
+                }
+            } else {
+                p
+            }
         })
         .collect()
 }
 
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
-    let (cache_correction_arc, _) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let project_dirs = get_project_dirs(gcx.clone()).await;
-    let p_paths_str: Vec<String> = project_dirs.iter()
-        .map(|x| x.to_string_lossy().into_owned())
-        .collect();
 
-    let mut results = Vec::with_capacity(paths.len());
-    for p in paths {
-        let matching_proj = p_paths_str.iter().find(|proj| p.starts_with(*proj));
-        if let Some(proj) = matching_proj {
-            let p_no_base = p.strip_prefix(proj).unwrap_or(&p).trim_start_matches('/');
-            if !p_no_base.is_empty() {
-                if let Some(candidates) = cache_correction_arc.get(p_no_base) {
-                    if candidates.len() == 1 {
-                        results.push(p_no_base.to_string());
-                        continue;
-                    }
-                }
-            }
-        }
-        // If we reach here, we couldn't shorten the path unambiguously
-        results.push(p);
-    }
-    results
+    let project_mapping: Vec<(PathBuf, String)> = project_dirs
+        .iter()
+        .cloned()
+        .zip(get_shortest_unique_suffixes(&project_dirs).into_iter())
+        .collect();
+    
+    shorten_paths_with_mapping(paths, project_mapping)
 }
 
 fn absolute(path: &std::path::Path) -> std::io::Result<PathBuf> {
@@ -447,6 +469,35 @@ mod tests {
             "user/lib2/repo1/", 
             "lib1/lib2/repo1/", 
             "repo3/",
+        ];
+
+        assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
+    }
+
+    #[test]
+    fn test_shorten_paths_with_mapping() {
+        // Arrange
+        let paths = vec![
+            "/home/user/repo1/dir/file.ext".to_string(),
+            "/home/user/repo2/dir/file.ext".to_string(),
+            "/home/user/repo1/this_file.ext".to_string(),
+            "/home/user/repo2/dir/this_file.ext".to_string(),
+        ];
+
+        let project_mapping = vec![
+            (PathBuf::from("/home/user/repo1"), "repo1/".to_string()),
+            (PathBuf::from("/home/user/repo2"), "repo2/".to_string()),
+        ];
+
+        // Act
+        let result = shorten_paths_with_mapping(paths, project_mapping);
+
+        // Assert
+        let expected_result = vec![
+            "repo1/dir/file.ext".to_string(),
+            "repo2/dir/file.ext".to_string(),
+            "this_file.ext".to_string(),
+            "dir/this_file.ext".to_string(),
         ];
 
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
