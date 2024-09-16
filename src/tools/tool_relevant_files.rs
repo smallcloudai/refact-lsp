@@ -303,7 +303,7 @@ REDUCE_OUTPUT
 // "WHY_DESC": "string",         // Describe why this file matters wrt the task, what's going on inside? Put TBD if you didn't look inside.
 // "RELEVANCY": 0                // Critically evaluate how is this file really relevant to the task. Rate from 1 to 5. 1 = no evidence this file even exists, 2 = file exists but you didn't look inside, 3 = might provide good insight into the logic behind the program but not directly relevant, 5 = exactly what is needed.
 
-fn parse_reduce_output(content: &str) -> Result<Value, String> {
+fn parse_reduce_output(content: &str) -> Result<HashMap<String, ReduceFileOutput>, String> {
     let re = Regex::new(r"(?s)REDUCE_OUTPUT\s*```(?:json)?\s*(.+?)\s*```").unwrap();
     let json_str = re.captures(content)
         .and_then(|cap| cap.get(1))
@@ -312,7 +312,7 @@ fn parse_reduce_output(content: &str) -> Result<Value, String> {
             tracing::warn!("Unable to find REDUCE_OUTPUT section:\n{}", content);
             "Unable to find REDUCE_OUTPUT section".to_string()
         })?;
-    let output: Value = serde_json::from_str(json_str).map_err(|e| {
+    let output = serde_json::from_str::<HashMap<String, ReduceFileOutput>>(json_str).map_err(|e| {
             tracing::warn!("Unable to parse JSON:\n{}({})", json_str, e);
             format!("Unable to parse JSON: {:?}", e)
         })?;
@@ -330,9 +330,7 @@ fn update_usage_from_message(usage: &mut ChatUsage, message: &ChatMessage) {
 
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ReduceFileItem {
-    #[serde(rename = "FILE_PATH")]
-    file_path: String,
+struct ReduceFileOutput {
     #[serde(rename = "SYMBOLS")]
     symbols: String,
     #[serde(rename = "WHY_CODE")]
@@ -495,9 +493,9 @@ async fn find_relevant_files(
     }
 
     let last_message = result.last().unwrap();
-    let answer = parse_reduce_output(&last_message.content)?;
     update_usage_from_message(&mut usage, &last_message);
 
+    let answer = parse_reduce_output(&last_message.content)?;
     // TODO: move json res postprocessing here
     // 1. merge doubled files (desc, symbols)
     // 2. filter non-existing files, probably add them to the "tool_message"
@@ -509,5 +507,5 @@ async fn find_relevant_files(
         total_files_in_project
     );
 
-    Ok((answer, usage, tool_message))
+    Ok((serde_json::json!(answer), usage, tool_message))
 }
