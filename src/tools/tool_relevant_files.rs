@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 use futures_util::future::join_all;
-
+use hashbrown::HashSet;
 use crate::subchat::subchat;
 use crate::tools::tools_description::Tool;
 
@@ -356,9 +356,17 @@ async fn find_relevant_files(
         let vecdb = gcx.vec_db.lock().await;
         (vecdb.is_some(), gcx.documents_state.workspace_files.clone())
     };
-    let total_files_in_project = workspace_files.lock().unwrap().len();
 
     let mut usage = ChatUsage { ..Default::default() };
+    let mut inspected_context_files = HashSet::new();
+    let total_files_in_project = workspace_files.lock().unwrap().len();
+
+    if total_files_in_project == 0 {
+        let answer = serde_json::json!({});
+        let tool_message = format!("Used {} experts, inspected {} files, project has {} files", 0, 0, 0);
+        return Ok((answer, usage, tool_message))
+    }
+
     let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
 
     // STEP experts
@@ -416,32 +424,26 @@ async fn find_relevant_files(
 
     let results: Vec<Vec<Vec<ChatMessage>>> = join_all(futures).await.into_iter().filter_map(|x| x.ok()).collect();
 
-    let mut only_last_messages = Vec::new();
-    let mut experts_cnt = 0;
+    let mut expert_results = Vec::new();
     for choices in results.iter() {
         for messages in choices.iter() {
+            // collect last assistant messages to get expert results
             if let Some(assistant_msg) = messages.iter().rfind(|msg| msg.role == "assistant").cloned() {
-                only_last_messages.push(assistant_msg);
-                experts_cnt += 1;
+                expert_results.push(assistant_msg);
             }
-        }
-    }
-
-    // TODO dedup files
-    let mut files_inspected = 0;
-    for choices in results.iter() {
-        for messages in choices.iter() {
-            let context_file_msgs: Vec<ChatMessage> = messages.iter().filter(|msg| msg.role == "context_file").cloned().collect();
-            for msg in context_file_msgs {
-                if let Ok(context_files) = serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
-                    files_inspected += context_files.len();
+            // collect all context_file messages to get opened file names
+            for context_file_msg in messages.iter().filter(|msg| msg.role == "context_file").cloned().collect::<Vec<ChatMessage>>() {
+                if let Ok(context_files) = serde_json::from_str::<Vec<ContextFile>>(&context_file_msg.content) {
+                    for context_file in context_files {
+                        inspected_context_files.insert(context_file.file_name.clone());
+                    }
                 }
             }
         }
     }
 
     // collect usages from experts
-    for message in &only_last_messages {
+    for message in &expert_results {
         update_usage_from_message(&mut usage, &message);
     }
 
@@ -458,7 +460,7 @@ async fn find_relevant_files(
     let mut messages = vec![];
     messages.push(ChatMessage::new("system".to_string(), RF_REDUCE_SYSTEM_PROMPT.to_string()));
     messages.push(ChatMessage::new("user".to_string(), format!("User provided task:\n\n{}", user_query)));
-    for (i, expert_message) in only_last_messages.into_iter().enumerate() {
+    for (i, expert_message) in expert_results.clone().into_iter().enumerate() {
         messages.push(ChatMessage::new("user".to_string(), format!("Expert {} says:\n\n{}", i + 1, expert_message.content)));
     }
     messages.push(ChatMessage::new("user".to_string(), "Start your answer with STEP1_CAT".to_string()));
@@ -483,13 +485,27 @@ async fn find_relevant_files(
         Some(format!("{log_prefix}-rf-step2-reduce")),
     ).await?[0].clone();
 
+    // collect all context_file of expand/reduce step to get opened file names
+    for context_file_msg in result.iter().filter(|msg| msg.role == "context_file").cloned().collect::<Vec<ChatMessage>>() {
+        if let Ok(context_files) = serde_json::from_str::<Vec<ContextFile>>(&context_file_msg.content) {
+            for context_file in context_files {
+                inspected_context_files.insert(context_file.file_name.clone());
+            }
+        }
+    }
+
     let last_message = result.last().unwrap();
     let answer = parse_reduce_output(&last_message.content)?;
     update_usage_from_message(&mut usage, &last_message);
 
+    // TODO: move json res postprocessing here
+    // 1. merge doubled files (desc, symbols)
+    // 2. filter non-existing files, probably add them to the "tool_message"
+    // 3. filter non-existing symbols
+
     let tool_message = format!("Used {} experts, inspected {} files, project has {} files",
-        experts_cnt,
-        files_inspected,
+        expert_results.len(),
+        inspected_context_files.len(),  // TODO: probably we need to show some of these files
         total_files_in_project
     );
 
