@@ -20,7 +20,6 @@ use crate::global_context::GlobalContext;
 use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
 use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
 use crate::at_commands::at_file::file_repair_candidates;
-use crate::ast::ast_mem_db::RequestSymbolType;
 
 
 use log::info;
@@ -95,13 +94,14 @@ impl Tool for ToolRelevantFiles {
                     }
                 };
                 let text = get_file_text_from_memory_or_disk(gcx.clone(), &PathBuf::from(&refined_file_path)).await?.to_string();
-                let mut doc = Document::new(&PathBuf::from(&refined_file_path));
-                doc.update_text(&text);
 
-                let ast_arc = gcx.read().await.ast_module.clone().unwrap();
-                let ast_lock = ast_arc.read().await;
-                let doc_syms = ast_lock.get_file_symbols(RequestSymbolType::All, &doc).await?.symbols;
-                let symbols_intersection = doc_syms.into_iter().filter(|s|symbols.contains(&s.name)).collect::<Vec<_>>();
+                let mut symbols_intersection = vec![];
+                let gcx = ccx.lock().await.global_context.clone();
+                if let Some(ast_service) = gcx.read().await.ast_service.clone() {
+                    let ast_index = ast_service.lock().await.ast_index.clone();
+                    let doc_syms = crate::ast::ast_db::doc_symbols(ast_index.clone(), &refined_file_path).await;
+                    symbols_intersection = doc_syms.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
+                }
 
                 let mut usefulness = 0f32;
                 if let Some(relevancy) = file_info.get("RELEVANCY").and_then(Value::as_f64) {
@@ -123,13 +123,13 @@ impl Tool for ToolRelevantFiles {
 
                 let mut symbols_found = vec![];
                 for symbol in symbols_intersection {
-                    symbols_found.push(symbol.name.clone());
+                    symbols_found.push(symbol.name());
                     context_files_in.push(ContextFile {
                         file_name: refined_file_path.clone(),
                         file_content: "".to_string(),
                         line1: symbol.full_range.start_point.row + 1,
                         line2: symbol.full_range.end_point.row + 1,
-                        symbols: vec![symbol.guid.clone()],
+                        symbols: vec![symbol.path()],
                         gradient_type: -1,
                         usefulness: 100.,
                         is_body_important: false,
