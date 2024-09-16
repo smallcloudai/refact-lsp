@@ -277,13 +277,13 @@ pub fn canonical_path(s: &String) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files_in_workspace::_retrieve_files_in_workspace_folders;
+    use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 
     async fn get_candidates_from_workspace_files() -> Vec<(String, String)> {
         let proj_folders = vec![PathBuf::from(".").canonicalize().unwrap()];
         let proj_folder = &proj_folders[0];
 
-        let workspace_files = _retrieve_files_in_workspace_folders(proj_folders.clone()).await;
+        let workspace_files = retrieve_files_in_workspace_folders(proj_folders.clone()).await;
 
         workspace_files
             .iter()
