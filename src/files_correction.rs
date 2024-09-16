@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use crate::global_context::GlobalContext;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
+
+use crate::global_context::GlobalContext;
 
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
     let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
@@ -23,9 +24,7 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
 
     for path in paths_iter {
         let path_str = path.to_str().unwrap_or_default().to_string();
-        let filename = path.file_name().unwrap().to_string_lossy().to_string();
-        
-        // get path in workspace, stripping off everything before workspace root
+
         let workspace_path = workspace_folders.iter()
             .filter_map(|workspace_folder| {
                 let workspace_folder_str = workspace_folder.to_str().unwrap_or_default();
@@ -36,8 +35,10 @@ fn make_cache<I>(paths_iter: I, workspace_folders: &Vec<PathBuf>) -> (
             })
             .min_by_key(|s| s.len())
             .unwrap_or(path_str.clone());
+
+        let absolute_part = path_str.strip_suffix(&workspace_path).unwrap_or(&path_str).to_string();
         
-        cache_fuzzy_set.insert((filename.clone(), workspace_path.clone()));
+        cache_fuzzy_set.insert((workspace_path.clone(), absolute_part));
         cnt += 1;
 
         cache_correction.entry(path_str.clone()).or_insert_with(HashSet::new).insert(path_str.clone());
@@ -113,18 +114,21 @@ fn fuzzy_search<I>(
     top_n: usize,
 ) -> Vec<String>
 where I: IntoIterator<Item = (String, String)> {
-    let mut top_n_records = Vec::with_capacity(top_n);
-    for p in candidates {
-        let correction_candidate_filename = PathBuf::from(&correction_candidate)
+    let correction_candidate_filename = PathBuf::from(&correction_candidate)
             .file_name()
             .unwrap()
             .to_string_lossy()
             .to_string();
 
-        let filename_dist = normalized_distance(&correction_candidate_filename, &p.0);
-        let path_dist = normalized_distance(&correction_candidate, &p.1);
+    let mut top_n_records = Vec::with_capacity(top_n);
+    for path in candidates {
+        let filename = PathBuf::from(&path.0).file_name().unwrap_or_default().to_string_lossy().to_string();
+        let full_path = PathBuf::from(&path.1).join(path.0.trim_start_matches(std::path::MAIN_SEPARATOR)).to_string_lossy().to_string();
 
-        top_n_records.push((p.1.clone(), filename_dist * 2.5 + path_dist));
+        let filename_dist = normalized_distance(&correction_candidate_filename, &filename);
+        let path_dist = normalized_distance(&correction_candidate, &path.0);
+
+        top_n_records.push((full_path, filename_dist * 2.5 + path_dist));
         if top_n_records.len() >= top_n {
             top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             top_n_records.pop();
@@ -188,7 +192,18 @@ pub async fn correct_to_nearest_dir_path(
     }
 
     if fuzzy {
-        return fuzzy_search(correction_candidate, cache_fuzzy_set.iter().cloned(), top_n);
+        let mut dirs = HashSet::<(String, String)>::new();
+
+        for p in cache_fuzzy_set.iter() {
+            let mut current_path = PathBuf::from(&p.0);
+            while let Some(parent) = current_path.parent() {
+                dirs.insert((parent.to_string_lossy().to_string(), p.1.clone()));
+                current_path = parent.to_path_buf();
+            }
+        }
+
+        info!("fuzzy search {:?}, dirs.len={}", correction_candidate, dirs.len());
+        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n);
     }
     vec![]
 }
@@ -288,14 +303,12 @@ mod tests {
         workspace_files
             .iter()
             .filter_map(|path| {
-                let filename = path.file_name()?.to_string_lossy().to_string();
-
                 let relative_path = path.strip_prefix(proj_folder)
                     .unwrap_or(path) // If strip_prefix fails, use the full path
                     .to_string_lossy()
                     .to_string();
 
-                Some((filename, relative_path))
+                Some((relative_path, "/home/user/workspace".to_string()))
             })
             .collect()
     }
