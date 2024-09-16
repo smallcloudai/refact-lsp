@@ -222,6 +222,35 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
     workspace_folders.iter().cloned().collect::<Vec<_>>()
 }
 
+fn get_shortest_unique_suffixes(paths: &[PathBuf]) -> Vec<String> {
+    let mut suffix_count = HashMap::new();
+
+    // Collect all possible suffixes for each path and count occurrences
+    let paths_suffixes: Vec<Vec<String>> = paths
+        .iter()
+        .map(|path| {
+            let mut current_suffix = PathBuf::new();
+            path.components().rev().filter_map(|component| {
+                current_suffix = PathBuf::from(component.as_os_str()).join(&current_suffix);
+                let suffix = current_suffix.to_string_lossy().into_owned();
+                *suffix_count.entry(suffix.clone()).or_insert(0) += 1;
+                Some(suffix)
+            }).collect()
+        })
+        .collect();
+
+    // Find the shortest unique suffix for each path
+    paths_suffixes
+        .into_iter()
+        .map(|suffixes| {
+            suffixes.iter()
+                .find(|suffix| suffix_count[suffix.as_str()] == 1)
+                .unwrap_or_else(|| suffixes.last().unwrap())
+                .clone()
+        })
+        .collect()
+}
+
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
     let (cache_correction_arc, _) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let project_dirs = get_project_dirs(gcx.clone()).await;
@@ -395,5 +424,31 @@ mod tests {
         sorted_expected.sort();
 
         assert_eq!(sorted_result, sorted_expected, "The result should contain the expected paths in any order, found {:?} instead", result);
+    }
+
+    #[test]
+    fn test_get_shortest_unique_suffixes() {
+        // Arrange
+        let paths = vec![
+            PathBuf::from("/home/user/lib1/repo1"),
+            PathBuf::from("/home/user/lib1/repo2"),
+            PathBuf::from("/home/user/lib2/repo1"),
+            PathBuf::from("/home/user/lib1/lib2/repo1"),
+            PathBuf::from("/home/user/lib1/lib2/repo3"),
+        ];
+
+        // Act
+        let result = get_shortest_unique_suffixes(&paths);
+
+        // Assert
+        let expected_result = vec![
+            "lib1/repo1/", 
+            "repo2/", 
+            "user/lib2/repo1/", 
+            "lib1/lib2/repo1/", 
+            "repo3/",
+        ];
+
+        assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
     }
 }
