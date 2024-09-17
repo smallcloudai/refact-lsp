@@ -221,83 +221,59 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
     workspace_folders.iter().cloned().collect::<Vec<_>>()
 }
 
-fn get_shortest_unique_suffixes(paths: &[PathBuf]) -> Vec<String> {
+fn shortify_paths_with_project_dirs(paths: Vec<PathBuf>, project_dirs: Vec<PathBuf>) -> Vec<String> {
     let mut suffix_count = HashMap::new();
 
-    // Collect all possible suffixes for each path and count occurrences
-    let paths_suffixes: Vec<Vec<String>> = paths
-        .iter()
-        .map(|path| {
-            let mut current_suffix = PathBuf::new();
-            path.components().rev().filter_map(|component| {
+    // Count occurrences of all possible suffixes for each path
+    paths.iter().for_each(|path| {
+        let path_is_dir = path.to_string_lossy().ends_with(std::path::MAIN_SEPARATOR);
+        let mut current_suffix = PathBuf::new();
+        path.components().rev().for_each(|component| {
+            if !current_suffix.as_os_str().is_empty() || path_is_dir {
                 current_suffix = PathBuf::from(component.as_os_str()).join(&current_suffix);
-                let suffix = current_suffix.to_string_lossy().into_owned();
-                *suffix_count.entry(suffix.clone()).or_insert(0) += 1;
-                Some(suffix)
-            }).collect()
-        })
-        .collect();
-
-    // Find the shortest unique suffix for each path
-    paths_suffixes
-        .into_iter()
-        .map(|suffixes| {
-            suffixes.iter()
-            .find(|suffix| suffix_count[suffix.as_str()] == 1)
-            .cloned() 
-            .unwrap_or_else(|| suffixes.last().cloned().unwrap_or_else(|| "".to_string()))
-        })
-        .collect()
-}
-
-fn shorten_paths_with_mapping(paths: Vec<String>, project_mapping: Vec<(PathBuf, String)>) -> Vec<String> {
-    let mut path_count = HashMap::new();
-
-    // First pass: Count shortened versions (but do not shorten yet)
-    for p in &paths {
-        if let Some((proj, _)) = project_mapping.iter()
-            .filter(|(proj, _)| p.starts_with(proj.to_string_lossy().as_ref())) 
-            .max_by_key(|(proj, _)| proj.to_string_lossy().len()) 
-        {
-            let shortened = p.strip_prefix(proj.to_string_lossy().as_ref()).unwrap_or(&p).trim_start_matches(std::path::MAIN_SEPARATOR);
-            *path_count.entry(shortened.to_string()).or_insert(0) += 1;
-        }
-    }
-    
-    // Second pass: Append shortened if unique, otherwise use the full path
-    paths
-        .into_iter()
-        .map(|p| {
-            if let Some((proj, suffix)) = project_mapping.iter()
-                .filter(|(proj, _)| p.starts_with(proj.to_string_lossy().as_ref()))  
-                .max_by_key(|(proj, _)| proj.to_string_lossy().len()) 
-            {
-                let shortened = p.strip_prefix(proj.to_string_lossy().as_ref()).unwrap_or(&p).trim_start_matches(std::path::MAIN_SEPARATOR);
-
-                if path_count[shortened] == 1 {
-                    shortened.to_string()
-                } else {
-                    let mut full_path = PathBuf::from(suffix);
-                    full_path.push(shortened);
-                    full_path.to_string_lossy().to_string()
-                }
             } else {
-                p
+                current_suffix = PathBuf::from(component.as_os_str());
             }
-        })
-        .collect()
+            let suffix = current_suffix.to_string_lossy().into_owned();
+            *suffix_count.entry(suffix).or_insert(0) += 1;
+        });
+    });
+
+    // Find the shortest unique suffix for each path, that is at least the path from workspace root
+    paths.iter().map(|path| {
+        let workspace_components_len = project_dirs.iter()
+            .filter_map(|workspace_dir| {
+                if path.starts_with(workspace_dir) {
+                    Some(workspace_dir.components().count())
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+
+        let path_is_dir = path.to_string_lossy().ends_with(std::path::MAIN_SEPARATOR);
+        let mut current_suffix = PathBuf::new();
+        for component in path.components().rev() {
+            if !current_suffix.as_os_str().is_empty() || path_is_dir {
+                current_suffix = PathBuf::from(component.as_os_str()).join(&current_suffix);
+            } else {
+                current_suffix = PathBuf::from(component.as_os_str());
+            }
+            let suffix = current_suffix.to_string_lossy().into_owned();
+            if *suffix_count.get(suffix.as_str()).unwrap_or(&0) == 1 && 
+                current_suffix.components().count() + workspace_components_len >= path.components().count() {
+                return suffix;
+            }
+        }
+        path.to_string_lossy().into_owned()
+    }).collect()
 }
 
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
     let project_dirs = get_project_dirs(gcx.clone()).await;
-
-    let project_mapping: Vec<(PathBuf, String)> = project_dirs
-        .iter()
-        .cloned()
-        .zip(get_shortest_unique_suffixes(&project_dirs).into_iter())
-        .collect();
-    
-    shorten_paths_with_mapping(paths, project_mapping)
+    let paths_buf: Vec<PathBuf> = paths.iter().map(|p| PathBuf::from(p)).collect();
+    shortify_paths_with_project_dirs(paths_buf, project_dirs)
 }
 
 fn absolute(path: &std::path::Path) -> std::io::Result<PathBuf> {
@@ -449,55 +425,31 @@ mod tests {
     }
 
     #[test]
-    fn test_get_shortest_unique_suffixes() {
+    fn test_shorten_paths_with_project_dirs() {
         // Arrange
         let paths = vec![
-            PathBuf::from("/home/user/lib1/repo1"),
-            PathBuf::from("/home/user/lib1/repo2"),
-            PathBuf::from("/home/user/lib2/repo1"),
-            PathBuf::from("/home/user/lib1/lib2/repo1"),
-            PathBuf::from("/home/user/lib1/lib2/repo3"),
+            PathBuf::from("/home/user/repo1/dir/file.ext"),
+            PathBuf::from("/home/user/repo2/dir/file.ext"),
+            PathBuf::from("/home/user/repo1/this_file.ext"),
+            PathBuf::from("/home/user/repo2/dir/this_file.ext"),
+            PathBuf::from("/home/user/repo2/dir2/"),
+        ];
+
+        let project_dirs = vec![
+            PathBuf::from("/home/user/repo1"),
+            PathBuf::from("/home/user/repo2"),
         ];
 
         // Act
-        let result = get_shortest_unique_suffixes(&paths);
-
-        // Assert
-        let expected_result = vec![
-            "lib1/repo1/", 
-            "repo2/", 
-            "user/lib2/repo1/", 
-            "lib1/lib2/repo1/", 
-            "repo3/",
-        ];
-
-        assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
-    }
-
-    #[test]
-    fn test_shorten_paths_with_mapping() {
-        // Arrange
-        let paths = vec![
-            "/home/user/repo1/dir/file.ext".to_string(),
-            "/home/user/repo2/dir/file.ext".to_string(),
-            "/home/user/repo1/this_file.ext".to_string(),
-            "/home/user/repo2/dir/this_file.ext".to_string(),
-        ];
-
-        let project_mapping = vec![
-            (PathBuf::from("/home/user/repo1"), "repo1/".to_string()),
-            (PathBuf::from("/home/user/repo2"), "repo2/".to_string()),
-        ];
-
-        // Act
-        let result = shorten_paths_with_mapping(paths, project_mapping);
+        let result = shortify_paths_with_project_dirs(paths, project_dirs);
 
         // Assert
         let expected_result = vec![
             "repo1/dir/file.ext".to_string(),
             "repo2/dir/file.ext".to_string(),
-            "this_file.ext".to_string(),
+            "repo1/this_file.ext".to_string(),
             "dir/this_file.ext".to_string(),
+            "dir2/".to_string(),
         ];
 
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
