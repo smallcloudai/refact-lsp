@@ -17,12 +17,10 @@ use crate::tools::tools_description::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, SubchatParameters, ContextFile};
 use crate::global_context::GlobalContext;
 
-use crate::files_in_workspace::{Document, get_file_text_from_memory_or_disk};
-use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
-use crate::at_commands::at_file::file_repair_candidates;
-
-
-use log::info;
+use crate::files_in_workspace::get_file_text_from_memory_or_disk;
+use crate::files_correction::get_project_dirs;
+use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_or_a_good_error};
+use crate::at_commands::at_commands::AtCommandsContext;
 
 
 pub struct ToolRelevantFiles;
@@ -63,105 +61,54 @@ impl Tool for ToolRelevantFiles {
             problem_statement,
         ).await?;
 
-        // cat output
-        let (gcx, top_n) = {
-            let ccx_lock = ccx.lock().await;
-            (ccx_lock.global_context.clone(), ccx_lock.top_n)
-        };
-
         let mut results = vec![];
-        if let Value::Object(files) = res {
-            let mut refined_res = serde_json::json!({});
-            let mut context_files_in = vec![];
-            for (file_path, file_info) in files {
-                // refine file_path
-                let candidates_file = file_repair_candidates(gcx.clone(), &file_path, top_n, false).await;
-                if candidates_file.is_empty() {
-                    info!("No candidates found for file {}, skip...", file_path);
-                    continue;
-                }
-                if candidates_file.len() > 1 {
-                    info!("Found multiple candidates for file {}: {:?}, skip...", file_path, candidates_file);
-                    continue;
-                }
-                let refined_file_path = candidates_file[0].clone();
+        results.push(ContextEnum::ChatMessage(ChatMessage {
+            role: "tool".to_string(),
+            content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&serde_json::json!(res)).unwrap(), tool_message),
+            tool_calls: None,
+            tool_call_id: tool_call_id.clone(),
+            usage: Some(usage),
+            ..Default::default()
+        }));
 
-                // refine symbols
-                let mut symbols = vec![];
-                if let Some(Value::String(symbols_str)) = file_info.get("SYMBOLS") {
-                    if symbols_str != "*" {
-                        symbols = symbols_str.split(",").map(|x|x.trim().to_string()).collect::<Vec<_>>()
-                    }
-                };
-                let text = get_file_text_from_memory_or_disk(gcx.clone(), &PathBuf::from(&refined_file_path)).await?.to_string();
-
-                let mut symbols_intersection = vec![];
-                let gcx = ccx.lock().await.global_context.clone();
-                if let Some(ast_service) = gcx.read().await.ast_service.clone() {
-                    let ast_index = ast_service.lock().await.ast_index.clone();
-                    let doc_syms = crate::ast::ast_db::doc_defs(ast_index.clone(), &refined_file_path).await;
-                    symbols_intersection = doc_syms.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
-                }
-
-                let mut usefulness = 0f32;
-                if let Some(relevancy) = file_info.get("RELEVANCY").and_then(Value::as_f64) {
-                    usefulness = (relevancy / 5. * 100.) as f32;
-                };
-
-                if symbols_intersection.is_empty() {
-                    context_files_in.push(ContextFile {
-                        file_name: refined_file_path.clone(),
-                        file_content: "".to_string(),
-                        line1: 0,
-                        line2: text.lines().count(),
-                        symbols: vec![],
-                        gradient_type: -1,
-                        usefulness: usefulness,
-                        is_body_important: false,
-                    });
-                }
-
-                let mut symbols_found = vec![];
-                for symbol in symbols_intersection {
-                    symbols_found.push(symbol.name());
-                    context_files_in.push(ContextFile {
-                        file_name: refined_file_path.clone(),
-                        file_content: "".to_string(),
-                        line1: symbol.full_range.start_point.row + 1,
-                        line2: symbol.full_range.end_point.row + 1,
-                        symbols: vec![symbol.path()],
-                        gradient_type: -1,
-                        usefulness: 100.,
-                        is_body_important: false,
-                    });
-                }
-
-                if let Some(refined_res_obj) = refined_res.as_object_mut() {
-                    let mut refined_file_info = file_info.clone();
-                    refined_file_info["SYMBOLS"] = Value::String(symbols_found.join(","));
-                    refined_res_obj.insert(file_path, refined_file_info);
-                }
+        // cat output
+        let gcx = ccx.lock().await.global_context.clone();
+        for (file_path, file_info) in res {
+            let text = get_file_text_from_memory_or_disk(gcx.clone(), &PathBuf::from(&file_path)).await?.to_string();
+            let mut ast_symbols = vec![];
+            if let Some(ast_service) = gcx.read().await.ast_service.clone() {
+                let ast_index = ast_service.lock().await.ast_index.clone();
+                let doc_symbols = crate::ast::ast_db::doc_defs(ast_index.clone(), &file_path).await;
+                let symbols = file_info.symbols.split(",").map(|x|x.to_string()).collect::<Vec<_>>();
+                ast_symbols = doc_symbols.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
             }
 
-            results.push(ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&refined_res).unwrap(), tool_message),
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-                usage: Some(usage),
-                ..Default::default()
-            }));
-            results.extend(vec_context_file_to_context_tools(context_files_in));
+            if ast_symbols.is_empty() {
+                let usefulness = (file_info.relevancy as f32) / 5. * 100.;
+                results.push(ContextEnum::ContextFile(ContextFile {
+                    file_name: file_path.clone(),
+                    file_content: text.clone(),
+                    line1: 0,
+                    line2: text.lines().count(),
+                    symbols: vec![],
+                    gradient_type: -1,
+                    usefulness: usefulness,
+                    is_body_important: false,
+                }));
+            }
 
-        } else {
-            results.push(ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&res).unwrap(), tool_message),
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-                usage: Some(usage),
-                ..Default::default()
-            }));
+            for symbol in ast_symbols {
+                results.push(ContextEnum::ContextFile(ContextFile {
+                    file_name: file_path.clone(),
+                    file_content: "".to_string(),
+                    line1: symbol.full_range.start_point.row + 1,
+                    line2: symbol.full_range.end_point.row + 1,
+                    symbols: vec![symbol.path()],
+                    gradient_type: -1,
+                    usefulness: 100.,
+                    is_body_important: false,
+                }));
+            }
         }
 
         Ok((false, results))
@@ -329,7 +276,7 @@ fn update_usage_from_message(usage: &mut ChatUsage, message: &ChatMessage) {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct ReduceFileOutput {
     #[serde(rename = "SYMBOLS")]
     symbols: String,
@@ -347,7 +294,7 @@ async fn find_relevant_files(
     subchat_params: SubchatParameters,
     tool_call_id: String,
     user_query: String,
-) -> Result<(Value, ChatUsage, String), String> {
+) -> Result<(HashMap<String, ReduceFileOutput>, ChatUsage, String), String> {
     let gcx: Arc<ARwLock<GlobalContext>> = ccx.lock().await.global_context.clone();
     let (vecdb_on, workspace_files) = {
         let gcx = gcx.read().await;
@@ -356,13 +303,13 @@ async fn find_relevant_files(
     };
 
     let mut usage = ChatUsage { ..Default::default() };
+    let mut refined_files = HashMap::new();
     let mut inspected_context_files = HashSet::new();
     let total_files_in_project = workspace_files.lock().unwrap().len();
 
     if total_files_in_project == 0 {
-        let answer = serde_json::json!({});
         let tool_message = format!("Used {} experts, inspected {} files, project has {} files", 0, 0, 0);
-        return Ok((answer, usage, tool_message))
+        return Ok((refined_files, usage, tool_message))
     }
 
     let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -495,17 +442,61 @@ async fn find_relevant_files(
     let last_message = result.last().unwrap();
     update_usage_from_message(&mut usage, &last_message);
 
-    let answer = parse_reduce_output(&last_message.content)?;
-    // TODO: move json res postprocessing here
-    // 1. merge doubled files (desc, symbols)
-    // 2. filter non-existing files, probably add them to the "tool_message"
-    // 3. filter non-existing symbols
+    let reduced_files = parse_reduce_output(&last_message.content)?;
 
-    let tool_message = format!("Used {} experts, inspected {} files, project has {} files",
+    // refine reduced files according ot ast
+    let (gcx, top_n) = {
+        let ccx_lock = ccx.lock().await;
+        (ccx_lock.global_context.clone(), ccx_lock.top_n)
+    };
+
+    let mut refine_log = vec![];
+    for (file_path, file_output) in reduced_files {
+        // parse symbols str
+        let mut symbols = vec![];
+        if !vec!["", "*"].contains(&file_output.symbols.as_str()) {
+            symbols = file_output.symbols.split(",").map(|x|x.trim().to_string()).collect::<Vec<_>>()
+        };
+
+        // try to find single normalized file path
+        let candidates_file = file_repair_candidates(gcx.clone(), &file_path, top_n, false).await;
+        let refined_file_path = match return_one_candidate_or_a_good_error(gcx.clone(), &file_path, &candidates_file, &get_project_dirs(gcx.clone()).await, false).await {
+            Ok(f) => f,
+            Err(e) => { refine_log.push(e); continue; }
+        };
+        // TODO: I'm not sure that refined_files is "normalized"
+        if refined_files.contains_key(&refined_file_path) {
+            // NOTE: idk what should we say in tool message about this situation
+            continue;
+        }
+
+        // refine symbols according to ast
+        let mut symbols_intersection = vec![];
+        let gcx = ccx.lock().await.global_context.clone();
+        if let Some(ast_service) = gcx.read().await.ast_service.clone() {
+            let ast_index = ast_service.lock().await.ast_index.clone();
+            let doc_syms = crate::ast::ast_db::doc_defs(ast_index.clone(), &refined_file_path).await;
+            symbols_intersection = doc_syms.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
+        }
+        let mut refined_file_output = file_output.clone();
+        // NOTE: for now we are simply skipping non-existing symbols, but it can be presented in tool message
+        refined_file_output.symbols = symbols_intersection.iter().map(|x|x.name()).collect::<Vec<_>>().join(",");
+        refined_files.insert(refined_file_path, refined_file_output);
+    }
+
+    let mut tool_message = format!("Used {} experts, inspected {} files, project has {} files",
         expert_results.len(),
         inspected_context_files.len(),  // TODO: probably we need to show some of these files
         total_files_in_project
     );
+    if !inspected_context_files.is_empty() {
+        tool_message = format!("{}\n\nInspected context files:\n{}",
+            tool_message,
+            inspected_context_files.into_iter().collect::<Vec<_>>().join("\n"));
+    }
+    if !refine_log.is_empty() {
+        tool_message = format!("{}\n\nExpert's output refine log:\n{}", tool_message, refine_log.join("\n"));
+    }
 
-    Ok((serde_json::json!(answer), usage, tool_message))
+    Ok((refined_files, usage, tool_message))
 }
