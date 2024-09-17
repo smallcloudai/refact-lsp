@@ -99,7 +99,7 @@ impl Tool for ToolRelevantFiles {
                 let gcx = ccx.lock().await.global_context.clone();
                 if let Some(ast_service) = gcx.read().await.ast_service.clone() {
                     let ast_index = ast_service.lock().await.ast_index.clone();
-                    let doc_syms = crate::ast::ast_db::doc_symbols(ast_index.clone(), &refined_file_path).await;
+                    let doc_syms = crate::ast::ast_db::doc_defs(ast_index.clone(), &refined_file_path).await;
                     symbols_intersection = doc_syms.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
                 }
 
