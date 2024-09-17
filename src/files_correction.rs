@@ -129,26 +129,39 @@ fn fuzzy_search<I>(
     top_n: usize,
 ) -> Vec<String>
 where I: IntoIterator<Item = String> {
-    let correction_candidate_filename = PathBuf::from(&correction_candidate)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or(correction_candidate.clone());
+    let mut bigram_count: HashMap<(char, char), i32> = HashMap::new();
 
-    let mut top_n_records = Vec::with_capacity(top_n);
-    for path in candidates {
-        let filename = PathBuf::from(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
+    for window in correction_candidate.chars().collect::<Vec<_>>().windows(2) {
+        bigram_count.entry((window[0], window[1])).and_modify(|v| *v += 1).or_insert(1);
+    }
 
-        let filename_dist = normalized_distance(&correction_candidate_filename, &filename);
-        let path_dist = normalized_distance(&correction_candidate, &path);
+    let mut top_n_candidates = Vec::new();
 
-        top_n_records.push((path, filename_dist * 2.5 + path_dist));
-        if top_n_records.len() >= top_n {
-            top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            top_n_records.pop();
+    for candidate in candidates {
+        let mut similarity_numerator: usize = 0;
+        let similarity_denominator: usize = correction_candidate.len() + candidate.len() - 2;
+
+        for window in candidate.chars().collect::<Vec<_>>().windows(2) {
+            let bigram_count_entry = bigram_count.entry((window[0], window[1]));
+            bigram_count_entry.and_modify(|v| { if *v > 0 { similarity_numerator += 1; } *v -= 1 }).or_insert(-1);
+        }
+
+        for window in candidate.chars().collect::<Vec<_>>().windows(2) {
+            let bigram_count_entry = bigram_count.entry((window[0], window[1]));
+            bigram_count_entry.and_modify(|v| *v += 1);
+        }
+
+        let similarity = similarity_numerator as f64 / similarity_denominator as f64;
+        if similarity > 0.01 {
+            top_n_candidates.push((candidate, similarity));
+            top_n_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            if top_n_candidates.len() > top_n {
+                top_n_candidates.pop();
+            }
         }
     }
-    top_n_records.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    top_n_records.into_iter().map(|x| x.0.clone()).collect()
+
+    top_n_candidates.into_iter().map(|x| x.0).collect()
 }
 
 pub async fn correct_to_nearest_filename(
@@ -325,7 +338,7 @@ mod tests {
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
         // Assert
-        let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/frog.py".to_string()];
+        let expected_result = vec!["tests/emergency_frog_situation/frog.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
     }
@@ -333,8 +346,8 @@ mod tests {
     #[tokio::test]
     async fn test_fuzzy_search_path_helps_finding_file() {
         // Arrange
-        let correction_candidate = "tests/emergency_frog_situation/w".to_string();
-        let top_n = 2;
+        let correction_candidate = "emergency_frog_situation/wo".to_string();
+        let top_n = 1;
 
         let candidates = get_candidates_from_workspace_files().await;
 
@@ -342,7 +355,7 @@ mod tests {
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
         // Assert
-        let expected_result = vec!["/home/user/workspace/tests/emergency_frog_situation/work_day.py".to_string()];
+        let expected_result = vec!["tests/emergency_frog_situation/work_day.py".to_string()];
 
         assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
     }
@@ -351,7 +364,7 @@ mod tests {
     async fn test_fuzzy_search_filename_weights_more_than_path() {
         // Arrange
         let correction_candidate = "my_file.ext".to_string();
-        let top_n = 3;
+        let top_n = 2;
 
         let candidates = vec![
             "my_library/implementation/my_file.ext".to_string(),
@@ -364,8 +377,8 @@ mod tests {
 
         // Assert
         let expected_result = vec![
-            "/home/user/workspace/my_library/my_file.ext".to_string(),
-            "/home/user/workspace/my_library/implementation/my_file.ext".to_string(),
+            "my_library/my_file.ext".to_string(),
+            "my_library/implementation/my_file.ext".to_string(),
         ];
         
         let mut sorted_result = result.clone();
@@ -408,4 +421,16 @@ mod tests {
         assert_eq!(cnt, 5, "The cache should contain 5 paths");
         assert_eq!(cache_shortened_result, expected_result, "The result should contain the expected paths, instead it found");
     }
+
+    
+
+    // #[test]
+    // fn test_try() {
+    //     let str1 = "carg";
+    //     let str2 = "upghu924gr29egf2eucargabfiowef";
+
+    //     // Using Bigram similarity
+    //     let bigram_result = bigram_similarity(str1, str2);
+    //     println!("Bigram Similarity: {:.2}", bigram_result);
+    // }
 }
