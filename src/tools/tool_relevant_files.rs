@@ -18,9 +18,19 @@ use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, SubchatParamet
 use crate::global_context::GlobalContext;
 
 use crate::files_in_workspace::get_file_text_from_memory_or_disk;
-use crate::files_correction::get_project_dirs;
+use crate::files_correction::{get_project_dirs, shortify_paths};
 use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_or_a_good_error};
 use crate::at_commands::at_commands::AtCommandsContext;
+
+
+async fn result_to_json(gcx: Arc<ARwLock<GlobalContext>>, result: HashMap<String, ReduceFileOutput>) -> String {
+    let mut shortified = HashMap::new();
+    for (file_name, file_output) in result {
+        let shortified_file_name = shortify_paths(gcx.clone(), vec![file_name]).await.get(0).unwrap().clone();
+        shortified.insert(shortified_file_name, file_output);
+    }
+    return serde_json::to_string_pretty(&serde_json::json!(shortified)).unwrap();
+}
 
 
 pub struct ToolRelevantFiles;
@@ -61,18 +71,19 @@ impl Tool for ToolRelevantFiles {
             problem_statement,
         ).await?;
 
+        let gcx = ccx.lock().await.global_context.clone();
+        let tool_result = result_to_json(gcx.clone(), res.clone()).await;
+
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: format!("{}\n\n💿 {}", serde_json::to_string_pretty(&serde_json::json!(res)).unwrap(), tool_message),
+            content: format!("{}\n\n💿 {}", tool_result, tool_message),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             usage: Some(usage),
             ..Default::default()
         }));
 
-        // cat output
-        let gcx = ccx.lock().await.global_context.clone();
         for (file_path, file_info) in res {
             let text = get_file_text_from_memory_or_disk(gcx.clone(), &PathBuf::from(&file_path)).await?.to_string();
             let mut ast_symbols = vec![];
