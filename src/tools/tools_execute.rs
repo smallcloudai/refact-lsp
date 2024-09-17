@@ -14,145 +14,8 @@ use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_cha
 use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
 
+const MAX_CALL_DUPS: usize = 2;   // 2 is still allowed
 
-pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
-    let (gcx, params_mb) = {
-        let ccx_locked = ccx.lock().await;
-        let gcx = ccx_locked.global_context.clone();
-        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
-        (gcx, params)
-    };
-    let params = match params_mb {
-        Some(params) => params,
-        None => {
-            let tconfig = load_customization(gcx.clone(), true).await?;
-            tconfig.subchat_tool_parameters.get(tool_name).cloned()
-                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
-        }
-    };
-    let _ = get_model_record(gcx, &params.subchat_model).await?; // check if the model exists
-    Ok(params)
-}
-
-async fn pp_execute_tools_results(
-    ccx: Arc<AMutex<AtCommandsContext>>,
-    tokenizer: Arc<RwLock<Tokenizer>>,
-    tokens_for_rag: usize,
-    any_corrections: bool,
-    context_files_for_pp: Vec<ContextFile>,
-    original_messages: &Vec<ChatMessage>,
-    generated_tool: &mut Vec<ChatMessage>,
-    generated_other: &mut Vec<ChatMessage>,
-) {
-    let (top_n, correction_only_up_to_step) = {
-        let ccx_locked = ccx.lock().await;
-        (ccx_locked.top_n, ccx_locked.correction_only_up_to_step)
-    };
-
-    if any_corrections && original_messages.len() <= correction_only_up_to_step {
-        generated_other.clear();
-        generated_other.push(ChatMessage::new("user".to_string(), "💿 There are corrections in the tool calls, all the output files are suppressed. Call again with corrections.".to_string()));
-        return;
-    }
-
-    let (tokens_limit_chat_msg, mut tokens_limit_files) = {
-        if context_files_for_pp.is_empty() {
-            (tokens_for_rag, 0)
-        } else {
-            (tokens_for_rag / 2, tokens_for_rag / 2)
-        }
-    };
-    info!("run_tools: tokens_for_rag={} tokens_limit_chat_msg={} tokens_limit_files={}", tokens_for_rag, tokens_limit_chat_msg, tokens_limit_files);
-
-    let (pp_chat_msg, non_used_tokens_for_rag) = postprocess_plain_text(
-        generated_tool.iter().chain(generated_other.iter()).collect(),
-        tokenizer.clone(),
-        tokens_limit_chat_msg,
-    ).await;
-
-    // re-add potentially truncated messages, role="tool" will still go first
-    generated_tool.clear();
-    generated_other.clear();
-    for m in pp_chat_msg {
-        if !m.tool_call_id.is_empty() {
-            generated_tool.push(m.clone());
-        } else {
-            generated_other.push(m.clone());
-        }
-    }
-
-    tokens_limit_files += non_used_tokens_for_rag;
-    info!("run_tools: tokens_limit_files={} after postprocessing", tokens_limit_files);
-
-    let (gcx, mut pp_settings, pp_skeleton) = {
-        let ccx_locked = ccx.lock().await;
-        (ccx_locked.global_context.clone(), ccx_locked.postprocess_parameters.clone(), ccx_locked.pp_skeleton)
-    };
-    if pp_settings.max_files_n == 0 {
-        pp_settings.max_files_n = top_n;
-    }
-    if pp_skeleton && pp_settings.take_floor == 0.0 {
-        pp_settings.take_floor = 9.0;
-    }
-
-    let context_file_vec = postprocess_context_files(
-        gcx.clone(),
-        &context_files_for_pp,
-        tokenizer.clone(),
-        tokens_limit_files,
-        false,
-        &pp_settings,
-    ).await;
-
-    if !context_file_vec.is_empty() {
-        let json_vec = context_file_vec.iter().map(|p| json!(p)).collect::<Vec<_>>();
-        let message = ChatMessage::new(
-            "context_file".to_string(),
-            serde_json::to_string(&json_vec).unwrap()
-        );
-        generated_other.push(message.clone());
-    }
-}
-
-fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
-    ChatMessage {
-        role: "tool".to_string(),
-        content,
-        tool_calls: None,
-        tool_call_id,
-        ..Default::default()
-    }
-}
-
-async fn run_tools_early_stop(
-    original_messages: &Vec<ChatMessage>,
-    last_msg_tool_calls: &Vec<ChatToolCall>,
-    stream_back_to_user: &mut HasRagResults,
-) -> Result<(), (Vec<ChatMessage>, bool)> {
-    let messages_since_user = original_messages.iter()
-        .skip(original_messages.iter().rposition(|m| m.role == "user").unwrap_or(0) + 1).collect::<Vec<_>>();
-    let tool_functions_since_user = messages_since_user.iter()
-        .filter_map(|m|m.tool_calls.clone()).flatten()
-        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
-        .collect::<Vec<_>>();
-
-    let mut all_messages = original_messages.to_vec();
-    if last_msg_tool_calls.iter().map(|c|(c.function.name.clone(), c.function.arguments.clone())).any(|f|tool_functions_since_user.iter().filter(|x|**x==f).count() > 1) {
-        for t_call in last_msg_tool_calls {
-            let is_duplicate = tool_functions_since_user.iter().filter(|x|**x==(t_call.function.name.clone(), t_call.function.arguments.clone())).count() > 1;
-            let response_content = if is_duplicate {
-                "💿 Calling the same (function, arguments) multiple times is not allowed.".to_string()
-            } else {
-                "".to_string()
-            };
-            let tool_response = tool_answer(response_content, t_call.id.to_string());
-            all_messages.push(tool_response.clone());
-            stream_back_to_user.push_in_json(json!(tool_response));
-        }
-        return Err((all_messages, false));
-    }
-    Ok(())
-}
 
 pub async fn run_tools(
     ccx: Arc<AMutex<AtCommandsContext>>,
@@ -161,9 +24,9 @@ pub async fn run_tools(
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
 ) -> (Vec<ChatMessage>, bool) {
-    let (n_ctx, at_tools) = { 
+    let (n_ctx, at_tools) = {
         let ccx_lock = ccx.lock().await;
-        (ccx_lock.n_ctx, ccx_lock.at_tools.clone()) 
+        (ccx_lock.n_ctx, ccx_lock.at_tools.clone())
     };
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let tokens_for_rag = reserve_for_context;
@@ -183,10 +46,10 @@ pub async fn run_tools(
         return (original_messages.clone(), false);
     }
 
-    if let Err(early_results) = run_tools_early_stop(original_messages, &last_msg_tool_calls, stream_back_to_user).await {
+    if let Err(early_results) = detect_dup_calls(original_messages, &last_msg_tool_calls, stream_back_to_user).await {
         return early_results;
     }
-    
+
     let mut context_files_for_pp = vec![];
     let mut generated_tool = vec![];  // tool results must go first
     let mut generated_other = vec![];
@@ -204,7 +67,6 @@ pub async fn run_tools(
                 continue;
             }
         };
-        info!("tool use: trying to run {:?}", &t_call.function.name);
 
         let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
             Ok(args) => args,
@@ -216,7 +78,7 @@ pub async fn run_tools(
                 continue;
             }
         };
-        info!("tool use: args={:?}", args);
+        info!("tool use {}({:?})", &t_call.function.name, args);
 
         let (corrections, tool_execute_results) = match cmd.lock().await.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
             Ok(msg_and_maybe_more) => msg_and_maybe_more,
@@ -255,16 +117,77 @@ pub async fn run_tools(
         assert!(have_answer);
     }
 
-    pp_execute_tools_results(
-        ccx.clone(),
-        tokenizer.clone(),
-        tokens_for_rag,
-        any_corrections,
-        context_files_for_pp,
-        original_messages,
-        &mut generated_tool,
-        &mut generated_other,
-    ).await;
+    let (top_n, correction_only_up_to_step) = {
+        let ccx_locked = ccx.lock().await;
+        (ccx_locked.top_n, ccx_locked.correction_only_up_to_step)
+    };
+
+    if any_corrections && original_messages.len() <= correction_only_up_to_step {
+        generated_other.clear();
+        generated_other.push(ChatMessage::new("user".to_string(), "💿 There are corrections in the tool calls, all the output files are suppressed. Call again with corrections.".to_string()));
+
+    } else if tokens_for_rag > MIN_RAG_CONTEXT_LIMIT {
+        let (tokens_limit_chat_msg, mut tokens_limit_files) = {
+            if context_files_for_pp.is_empty() {
+                (tokens_for_rag, 0)
+            } else {
+                (tokens_for_rag / 2, tokens_for_rag / 2)
+            }
+        };
+        info!("run_tools: tokens_for_rag={} tokens_limit_chat_msg={} tokens_limit_files={}", tokens_for_rag, tokens_limit_chat_msg, tokens_limit_files);
+
+        let (pp_chat_msg, non_used_tokens_for_rag) = postprocess_plain_text(
+            generated_tool.iter().chain(generated_other.iter()).collect(),
+            tokenizer.clone(),
+            tokens_limit_chat_msg,
+        ).await;
+
+        // re-add potentially truncated messages, role="tool" will still go first
+        generated_tool.clear();
+        generated_other.clear();
+        for m in pp_chat_msg {
+            if !m.tool_call_id.is_empty() {
+                generated_tool.push(m.clone());
+            } else {
+                generated_other.push(m.clone());
+            }
+        }
+
+        tokens_limit_files += non_used_tokens_for_rag;
+        info!("run_tools: tokens_limit_files={} after postprocessing", tokens_limit_files);
+
+        let (gcx, mut pp_settings, pp_skeleton) = {
+            let ccx_locked = ccx.lock().await;
+            (ccx_locked.global_context.clone(), ccx_locked.postprocess_parameters.clone(), ccx_locked.pp_skeleton)
+        };
+        if pp_settings.max_files_n == 0 {
+            pp_settings.max_files_n = top_n;
+        }
+        if pp_skeleton && pp_settings.take_floor == 0.0 {
+            pp_settings.take_floor = 9.0;
+        }
+
+        let context_file_vec = postprocess_context_files(
+            gcx.clone(),
+            &context_files_for_pp,
+            tokenizer.clone(),
+            tokens_limit_files,
+            false,
+            &pp_settings,
+        ).await;
+
+        if !context_file_vec.is_empty() {
+            let json_vec = context_file_vec.iter().map(|p| json!(p)).collect::<Vec<_>>();
+            let message = ChatMessage::new(
+                "context_file".to_string(),
+                serde_json::to_string(&json_vec).unwrap()
+            );
+            generated_other.push(message.clone());
+        }
+
+    } else {
+        tracing::warn!("There are tool results, but tokens_for_rag={tokens_for_rag} is very small, bad things will happen.")
+    }
 
     let mut all_messages = original_messages.to_vec();
     for msg in generated_tool.iter() {
@@ -279,4 +202,64 @@ pub async fn run_tools(
     ccx.lock().await.pp_skeleton = false;
 
     (all_messages, true)
+}
+
+
+fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
+    ChatMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: None,
+        tool_call_id,
+        ..Default::default()
+    }
+}
+
+async fn detect_dup_calls(
+    original_messages: &Vec<ChatMessage>,
+    last_msg_tool_calls: &Vec<ChatToolCall>,
+    stream_back_to_user: &mut HasRagResults,
+) -> Result<(), (Vec<ChatMessage>, bool)> {
+    let messages_since_user = original_messages.iter()
+        .skip(original_messages.iter().rposition(|m| m.role == "user").unwrap_or(0) + 1).collect::<Vec<_>>();
+    let tool_functions_since_user = messages_since_user.iter()
+        .filter_map(|m|m.tool_calls.clone()).flatten()
+        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
+        .collect::<Vec<_>>();
+
+    let mut all_messages = original_messages.to_vec();
+    if last_msg_tool_calls.iter().map(|c|(c.function.name.clone(), c.function.arguments.clone())).any(|f|tool_functions_since_user.iter().filter(|x|**x==f).count() > 1) {
+        for t_call in last_msg_tool_calls {
+            let is_duplicate = tool_functions_since_user.iter().filter(|x|**x==(t_call.function.name.clone(), t_call.function.arguments.clone())).count() > MAX_CALL_DUPS;
+            let response_content = if is_duplicate {
+                "💿 Oops you are stuck in a loop. Don't call any more functions. Tell user to reformulate their question.".to_string()
+            } else {
+                "".to_string()
+            };
+            let tool_response = tool_answer(response_content, t_call.id.to_string());
+            all_messages.push(tool_response.clone());
+            stream_back_to_user.push_in_json(json!(tool_response));
+        }
+        return Err((all_messages, false));
+    }
+    Ok(())
+}
+
+pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
+    let (gcx, params_mb) = {
+        let ccx_locked = ccx.lock().await;
+        let gcx = ccx_locked.global_context.clone();
+        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
+        (gcx, params)
+    };
+    let params = match params_mb {
+        Some(params) => params,
+        None => {
+            let tconfig = load_customization(gcx.clone(), true).await?;
+            tconfig.subchat_tool_parameters.get(tool_name).cloned()
+                .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
+        }
+    };
+    let _ = get_model_record(gcx, &params.subchat_model).await?; // check if the model exists
+    Ok(params)
 }
