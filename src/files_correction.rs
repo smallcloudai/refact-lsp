@@ -7,6 +7,9 @@ use tracing::info;
 
 use crate::global_context::GlobalContext;
 
+const FILENAME_WEIGHT: i32 = 3;
+const SIMILARITY_THRESHOLD: f64 = 0.05;
+
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
     let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
     let paths_from_workspace: Vec<PathBuf> = global_context.read().await.documents_state.workspace_files.lock().unwrap().clone();
@@ -115,14 +118,6 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_shortened_arc);
 }
 
-fn normalized_distance(a: &str, b: &str) -> f64 {
-    let max_length = std::cmp::max(a.len(), b.len()) as f64;
-    if max_length == 0.0 {
-        return 0.0;
-    }
-    sift4::simple(a, b) as f64 / max_length
-}
-
 fn fuzzy_search<I>(
     correction_candidate: &String,
     candidates: I,
@@ -131,30 +126,57 @@ fn fuzzy_search<I>(
 where I: IntoIterator<Item = String> {
     let mut bigram_count: HashMap<(char, char), i32> = HashMap::new();
 
-    for window in correction_candidate.chars().collect::<Vec<_>>().windows(2) {
-        bigram_count.entry((window[0], window[1])).and_modify(|v| *v += 1).or_insert(1);
+    let mut valid_candidate_length = 0;
+    let mut weight = FILENAME_WEIGHT;
+    for window in correction_candidate.chars().collect::<Vec<_>>().windows(2).rev() {
+        if window[0] == std::path::MAIN_SEPARATOR {
+            weight = 1;
+        }
+        valid_candidate_length += weight;
+        bigram_count
+            .entry((window[0], window[1]))
+            .and_modify(|v| *v += weight)
+            .or_insert(weight);
     }
 
     let mut top_n_candidates = Vec::new();
 
     for candidate in candidates {
-        let mut similarity_numerator: usize = 0;
-        let similarity_denominator: usize = correction_candidate.len() + candidate.len() - 2;
+        let mut similarity_numerator: i32 = 0;
+        let mut similarity_denominator: i32 = valid_candidate_length;
 
-        for window in candidate.chars().collect::<Vec<_>>().windows(2) {
-            let bigram_count_entry = bigram_count.entry((window[0], window[1]));
-            bigram_count_entry.and_modify(|v| { if *v > 0 { similarity_numerator += 1; } *v -= 1 }).or_insert(-1);
+        let mut weight = FILENAME_WEIGHT;
+        for window in candidate.chars().collect::<Vec<_>>().windows(2).rev() {
+            if window[0] == std::path::MAIN_SEPARATOR {
+                weight = 1;
+            }
+            similarity_denominator += weight;
+            bigram_count
+                .entry((window[0], window[1]))
+                .and_modify(|v| {
+                    if *v > 0 {
+                        similarity_numerator += std::cmp::min(*v, weight);
+                    }
+                    *v -= weight;
+                });
         }
 
-        for window in candidate.chars().collect::<Vec<_>>().windows(2) {
-            let bigram_count_entry = bigram_count.entry((window[0], window[1]));
-            bigram_count_entry.and_modify(|v| *v += 1);
+        weight = FILENAME_WEIGHT;
+        for window in candidate.chars().collect::<Vec<_>>().windows(2).rev() {
+            if window[0] == std::path::MAIN_SEPARATOR {
+                weight = 1;
+            }
+            bigram_count
+                .entry((window[0], window[1]))
+                .and_modify(|v| *v += weight);
         }
 
         let similarity = similarity_numerator as f64 / similarity_denominator as f64;
-        if similarity > 0.01 {
+        if similarity > SIMILARITY_THRESHOLD {
             top_n_candidates.push((candidate, similarity));
-            top_n_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            top_n_candidates
+                .sort_by(|a, b| b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal));
             if top_n_candidates.len() > top_n {
                 top_n_candidates.pop();
             }
