@@ -449,15 +449,62 @@ mod tests {
         assert_eq!(cache_shortened_result_vec, expected_result, "The result should contain the expected paths, instead it found");
     }
 
-    
+    #[test]
+    fn test_make_cache_speed() {
+        // Arrange
+        let workspace_paths = vec![
+            PathBuf::from("/home/user/repo1"),
+            PathBuf::from("/home/user/repo2"),
+            PathBuf::from("/home/user/repo3"),
+            PathBuf::from("/home/user/repo4"),
+        ];
 
-    // #[test]
-    // fn test_try() {
-    //     let str1 = "carg";
-    //     let str2 = "upghu924gr29egf2eucargabfiowef";
+        let mut paths = Vec::new();
+        for i in 0..100000 {
+            let path = workspace_paths[i % workspace_paths.len()].join(format!("dir{}/dir{}/file{}.ext", i % 1000, i / 1000, i));
+            paths.push(path);
+        }
+        let start_time = std::time::Instant::now();
 
-    //     // Using Bigram similarity
-    //     let bigram_result = bigram_similarity(str1, str2);
-    //     println!("Bigram Similarity: {:.2}", bigram_result);
-    // }
+        // Act
+        let (_, cache_shortened_result, cnt) = make_cache(&paths, &workspace_paths);
+        
+        // Assert
+        let time_spent = start_time.elapsed();
+        println!("make_cache took {} ms", time_spent.as_millis());
+        assert!(time_spent.as_millis() < 5000, "make_cache took {} ms", time_spent.as_millis());
+
+        assert_eq!(cnt, 100000, "The cache should contain 100000 paths");
+        assert_eq!(cache_shortened_result.len(), cnt);
+    }
+
+    #[test]
+    fn test_fuzzy_search_speed() {
+        // Arrange
+        let workspace_paths = vec![
+            PathBuf::from("/home/user/repo1"),
+            PathBuf::from("/home/user/repo2"),
+            PathBuf::from("/home/user/repo3"),
+            PathBuf::from("/home/user/repo4"),
+        ];
+
+        let mut paths = Vec::new();
+        for i in 0..100000 {
+            let path = workspace_paths[i % workspace_paths.len()].join(format!("dir{}/dir{}/file{}.ext", i % 1000, i / 1000, i));
+            paths.push(path);
+        }
+        let start_time = std::time::Instant::now();
+        let paths_str = paths.iter().map(|x| x.to_string_lossy().to_string()).collect::<Vec<_>>();
+
+        // Act
+        let results = fuzzy_search(&"file100000/dir1000/file100000.ext".to_string(), paths_str, 10);
+
+        // Assert
+        let time_spent = start_time.elapsed();
+        println!("fuzzy_search took {} ms", time_spent.as_millis());
+        assert!(time_spent.as_millis() < 5000, "fuzzy_search took {} ms", time_spent.as_millis());
+
+        assert_eq!(results.len(), 10, "The result should contain 10 paths");
+        println!("{:?}", results);
+    }
 }
