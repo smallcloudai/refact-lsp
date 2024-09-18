@@ -19,7 +19,7 @@ pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) ->
 }
 
 fn make_cache(paths: &Vec<PathBuf>, workspace_folders: &Vec<PathBuf>) -> (
-    HashMap<String, HashSet<String>>, Vec<String>, usize
+    HashMap<String, HashSet<String>>, HashSet<String>, usize
 ) {
     let mut cache_correction = HashMap::<String, HashSet<String>>::new();
     let mut cnt = 0;
@@ -41,7 +41,7 @@ fn make_cache(paths: &Vec<PathBuf>, workspace_folders: &Vec<PathBuf>) -> (
     }
 
     // Find the shortest unique suffix for each path, that is at least the path from workspace root
-    let cache_shortened = paths.iter().map(|path| {
+    let cache_shortened: HashSet<String> = paths.iter().map(|path| {
         let workspace_components_len = workspace_folders.iter()
             .filter_map(|workspace_dir| {
                 if path.starts_with(workspace_dir) {
@@ -85,7 +85,7 @@ pub async fn get_files_in_dir(
         .collect()
 }
 
-pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<Vec<String>>) {
+pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<HashSet<String>>) {
     let (cache_dirty_arc, mut cache_correction_arc, mut cache_shortened_arc) = {
         let cx = global_context.read().await;
         (
@@ -265,14 +265,15 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
     let (_, shortened_paths) = files_cache_rebuild_as_needed(gcx.clone()).await;
 
-    // Temporary slow way, will change by a trie
-    paths.iter().map(|path| {
-        for shortened in (*shortened_paths).iter() {
-            if path.ends_with(shortened) {
-                return shortened.clone();
+    paths.into_iter().map(|mut path| {
+        let full_path = path.clone();
+        while !path.is_empty() {
+            if shortened_paths.get(&path).is_some() {
+                return path;
             }
+            path.drain(..1);
         }
-        path.clone()
+        full_path
     }).collect()
 }
 
@@ -432,7 +433,8 @@ mod tests {
         let(_, cache_shortened_result, cnt) = make_cache(&paths, &workspace_folders);
 
         // Assert
-        let expected_result = vec![
+        let mut cache_shortened_result_vec = cache_shortened_result.into_iter().collect::<Vec<_>>();
+        let mut expected_result = vec![
             "repo1/dir/file.ext".to_string(),
             "repo2/dir/file.ext".to_string(),
             "repo1/this_file.ext".to_string(),
@@ -440,8 +442,11 @@ mod tests {
             "dir2/".to_string(),
         ];
 
+        expected_result.sort();
+        cache_shortened_result_vec.sort();
+
         assert_eq!(cnt, 5, "The cache should contain 5 paths");
-        assert_eq!(cache_shortened_result, expected_result, "The result should contain the expected paths, instead it found");
+        assert_eq!(cache_shortened_result_vec, expected_result, "The result should contain the expected paths, instead it found");
     }
 
     
