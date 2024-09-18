@@ -258,3 +258,61 @@ system_prompts:
       a joke inspired by the code or play on words. For example ```\n// Hocus, pocus\ngetTheFocus();\n```.
 
 "#;
+
+pub const COMPILED_IN_INITIAL_BYOK: &str = r#"
+cloud_name: My own mix of clouds!
+
+chat_endpoint: "https://api.openai.com/v1/chat/completions"
+chat_apikey: "sk-..."       # or use $OPENAI_API_KEY if you have it in global environment variables
+chat_model: gpt-4o-mini
+
+embedding_endpoint: "https://api.openai.com/v1/embeddings"
+embedding_apikey: "sk-..."
+embedding_model: text-embedding-3-small
+embedding_size: 1536
+
+completion_endpoint: "https://api-inference.huggingface.co/models/$MODEL"
+completion_endpoint_style: "hf"
+completion_apikey: "hf_..."    # or use $HF_TOKEN if you have it in global environment variables
+completion_model: bigcode/starcoder2-3b
+
+running_models:   # all models mentioned in *_model are automatically running, but you can add more
+  - gpt-4o-mini
+  - gpt-4o
+
+# More examples https://github.com/smallcloudai/refact-lsp/tree/dev/bring_your_own_key
+
+# Refact sends basic telemetry (counters and errors), you can send it to a different address (a Refact self-hosting server is especially useful) or set to an empty string for no telemetry.
+# telemetry_basic_dest: <your-telemetry-address>             # default: https://www.smallcloud.ai/v1/telemetry-basic
+# telemetry_basic_retrieve_my_own: <your-telemetry-address>  # default: https://www.smallcloud.ai/v1/telemetry-retrieve-my-own-stats
+"#;
+
+pub const COMPILED_IN_INITIAL_INTEGRATIONS: &str = r#"#
+# Integrations will be here!
+#
+#
+#
+"#;
+
+pub const COMPILED_IN_INITIAL_PRIVACY_YAML: &str = r#"#
+# This config file determines if Refact is allowed to read, index or send a file to remote servers.
+#
+# If you have a syntax error in this file, the refact-lsp will revert to the default "block everything".
+#
+# Uses glob patterns: https://en.wikipedia.org/wiki/Glob_(programming)
+#
+# The most restrictive rule applies if a file matches multiple patterns.
+
+privacy_rules:
+    blocked:
+        - "*/secret_project1/*"           # Don't forget leading */ if you are matching directory names
+        - "*/secret_project2/*.txt"
+        - "*.pem"
+
+    only_send_to_servers_I_control:       # You can set up which ones you control in bring-your-own-key.yaml, otherwise you control none
+        - "secret_passwords.txt"
+
+
+# See unit tests in privacy.rs for more examples.
+"#;
+

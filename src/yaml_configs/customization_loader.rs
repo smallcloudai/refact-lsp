@@ -10,7 +10,7 @@ use tokio::sync::RwLock as ARwLock;
 
 use crate::call_validation::{ChatMessage, SubchatParameters};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
-use crate::yaml_configs::customization_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML;
+use crate::yaml_configs::yaml_configs_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML;
 
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -227,7 +227,7 @@ pub async fn get_default_system_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::yaml_configs::customization_compiled_in::COMPILED_IN_INITIAL_USER_YAML;
+    use crate::yaml_configs::yaml_configs_compiled_in::COMPILED_IN_INITIAL_USER_YAML;
     #[test]
     fn is_compiled_in_toolbox_valid_yaml() {
         let _config = load_and_mix_with_users_config(COMPILED_IN_INITIAL_USER_YAML, "", "", false, true);
