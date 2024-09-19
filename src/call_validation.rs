@@ -345,7 +345,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize, Clone, Hash, Debug, Eq, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Hash, Debug, Eq, PartialEq, Default, Ord, PartialOrd)]
 pub struct DiffChunk {
     pub file_name: String,
     pub file_action: String, // edit, rename, add, remove

@@ -15,7 +15,7 @@ use crate::privacy::load_privacy_if_needed;
 pub async fn postprocess_diff_chunks_from_message(
     ccx: Arc<AMutex<AtCommandsContext>>,
     chunks: &mut Vec<DiffChunk>,
-) -> Result<String, String> {
+) -> Result<Vec<DiffChunk>, String> {
     let gcx = ccx.lock().await.global_context.clone();
 
     if chunks.is_empty() {
@@ -124,7 +124,5 @@ pub async fn postprocess_diff_chunks_from_message(
             return Err(message);
         }
     }
-
-    serde_json::to_string_pretty(&chunks)
-        .map_err(|e| format!("Error diff chunks serializing: {:?}", e))
+    Ok(chunks.to_vec())
 }
