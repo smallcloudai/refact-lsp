@@ -289,7 +289,7 @@ fn shortify_paths_from_indexed(paths: Vec<String>, indexed_paths: Arc<HashSet<St
         let full_path = path.clone();
         while !path.is_empty() {
             if indexed_paths.get(&path).is_some() &&
-                workspace_part_len + 1 + path.len() >= full_path.len() {
+                workspace_part_len + if std::path::MAIN_SEPARATOR == '/' { 1 } else { 2 } + path.len() >= full_path.len() {
                 return path;
             }
             path.drain(..1);
@@ -383,7 +383,7 @@ mod tests {
 
         // Assert
         let expected_result = vec![
-            PathBuf::from("tests/emergency_frog_situation/frog.py").to_string_lossy().to_string(),
+            PathBuf::from("tests").join("emergency_frog_situation").join("frog.py").to_string_lossy().to_string(),
         ];
 
         assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
@@ -392,9 +392,7 @@ mod tests {
     #[tokio::test]
     async fn test_fuzzy_search_path_helps_finding_file() {
         // Arrange
-        let correction_candidate = PathBuf::from("emergency_frog_situation/wo")
-            .to_string_lossy().to_string();
-
+        let correction_candidate = PathBuf::from("emergency_frog_situation").join("wo").to_string_lossy().to_string();
         let top_n = 1;
 
         let candidates = get_candidates_from_workspace_files().await;
@@ -404,7 +402,7 @@ mod tests {
 
         // Assert
         let expected_result = vec![
-            PathBuf::from("tests/emergency_frog_situation/work_day.py").to_string_lossy().to_string(),
+            PathBuf::from("tests").join("emergency_frog_situation").join("work_day.py").to_string_lossy().to_string(),
         ];
 
         assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
@@ -417,8 +415,8 @@ mod tests {
         let top_n = 2;
 
         let candidates = vec![
-            PathBuf::from("my_library/implementation/my_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("my_library/my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library").join("implementation").join("my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library").join("my_file.ext").to_string_lossy().to_string(),
             PathBuf::from("another_file.ext").to_string_lossy().to_string(),
         ];
 
@@ -427,8 +425,8 @@ mod tests {
 
         // Assert
         let expected_result = vec![
-            PathBuf::from("my_library/my_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("my_library/implementation/my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library").join("my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library").join("implementation").join("my_file.ext").to_string_lossy().to_string(),
         ];
 
         let mut sorted_result = result.clone();
@@ -444,29 +442,29 @@ mod tests {
     fn test_make_cache() {
         // Arrange
         let paths = vec![
-            PathBuf::from("/home/user/repo1/dir/file.ext"),
-            PathBuf::from("/home/user/repo2/dir/file.ext"),
-            PathBuf::from("/home/user/repo1/this_file.ext"),
-            PathBuf::from("/home/user/repo2/dir/this_file.ext"),
-            PathBuf::from("/home/user/repo2/dir2/"),
+            PathBuf::from("home").join("user").join("repo1").join("dir").join("file.ext"),
+            PathBuf::from("home").join("user").join("repo2").join("dir").join("file.ext"),
+            PathBuf::from("home").join("user").join("repo1").join("this_file.ext"),
+            PathBuf::from("home").join("user").join("repo2").join("dir").join("this_file.ext"),
+            PathBuf::from("home").join("user").join("repo2").join("dir2"),
         ];
 
         let workspace_folders = vec![
-            PathBuf::from("/home/user/repo1"),
-            PathBuf::from("/home/user/repo2"),
+            PathBuf::from("home").join("user").join("repo1"),
+            PathBuf::from("home").join("user").join("repo2"),
         ];
 
         // Act
-        let(_, cache_shortened_result, cnt) = make_cache(&paths, &workspace_folders);
+        let (_, cache_shortened_result, cnt) = make_cache(&paths, &workspace_folders);
 
         // Assert
         let mut cache_shortened_result_vec = cache_shortened_result.into_iter().collect::<Vec<_>>();
         let mut expected_result = vec![
-            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("repo1/this_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("dir/this_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("dir2/").to_string_lossy().to_string(),
+            PathBuf::from("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1").join("this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir").join("this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2").to_string_lossy().to_string(),
         ];
 
         expected_result.sort();
@@ -479,36 +477,34 @@ mod tests {
     #[test]
     fn test_shortify_paths_from_indexed() {
         let workspace_folders = vec![
-            PathBuf::from("home/user/repo1").to_string_lossy().to_string(),
-            PathBuf::from("home/user/repo1/nested/repo2").to_string_lossy().to_string(),
-            PathBuf::from("home/user/repo3").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo1").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo1").join("nested").join("repo2").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo3").to_string_lossy().to_string(),
         ];
 
         let indexed_paths = Arc::new(HashSet::from([
-            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("repo1/this_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("custom_dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("dir2/another_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1").join("this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("custom_dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2").join("another_file.ext").to_string_lossy().to_string(),
         ]));
 
         let paths = vec![
-            PathBuf::from("home/user/repo1/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("home/user/repo1/nested/repo2/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("home/user/repo1/.hidden/custom_dir/file.ext").to_string_lossy().to_string(), 
+            PathBuf::from("home").join("user").join("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo1").join("nested").join("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(), 
             // Hidden file; should not be shortened as it's not in the cache and may be confused with custom_dir/file.ext.
-            PathBuf::from("home/user/repo3/dir2/another_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo3").join("dir2").join("another_file.ext").to_string_lossy().to_string(),
         ];
-
-
 
         let result = shortify_paths_from_indexed(paths, indexed_paths, workspace_folders);
 
         let expected_result = vec![
-            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("home/user/repo1/.hidden/custom_dir/file.ext").to_string_lossy().to_string(),
-            PathBuf::from("dir2/another_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2").join("another_file.ext").to_string_lossy().to_string(),
         ];
 
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
@@ -519,15 +515,18 @@ mod tests {
     fn test_make_cache_speed() {
         // Arrange
         let workspace_paths = vec![
-            PathBuf::from("/home/user/repo1"),
-            PathBuf::from("/home/user/repo2"),
-            PathBuf::from("/home/user/repo3"),
-            PathBuf::from("/home/user/repo4"),
+            PathBuf::from("home").join("user").join("repo1"),
+            PathBuf::from("home").join("user").join("repo2"),
+            PathBuf::from("home").join("user").join("repo3"),
+            PathBuf::from("home").join("user").join("repo4"),
         ];
 
         let mut paths = Vec::new();
         for i in 0..100000 {
-            let path = workspace_paths[i % workspace_paths.len()].join(format!("dir{}/dir{}/file{}.ext", i % 1000, i / 1000, i));
+            let path = workspace_paths[i % workspace_paths.len()]
+                .join(format!("dir{}", i % 1000))
+                .join(format!("dir{}", i / 1000))
+                .join(format!("file{}.ext", i));
             paths.push(path);
         }
         let start_time = std::time::Instant::now();
@@ -549,22 +548,31 @@ mod tests {
     fn test_fuzzy_search_speed() {
         // Arrange
         let workspace_paths = vec![
-            PathBuf::from("/home/user/repo1"),
-            PathBuf::from("/home/user/repo2"),
-            PathBuf::from("/home/user/repo3"),
-            PathBuf::from("/home/user/repo4"),
+            PathBuf::from("home").join("user").join("repo1"),
+            PathBuf::from("home").join("user").join("repo2"),
+            PathBuf::from("home").join("user").join("repo3"),
+            PathBuf::from("home").join("user").join("repo4"),
         ];
 
         let mut paths = Vec::new();
         for i in 0..100000 {
-            let path = workspace_paths[i % workspace_paths.len()].join(format!("dir{}/dir{}/file{}.ext", i % 1000, i / 1000, i));
+            let path = workspace_paths[i % workspace_paths.len()]
+                .join(format!("dir{}", i % 1000))
+                .join(format!("dir{}", i / 1000))
+                .join(format!("file{}.ext", i));
             paths.push(path);
         }
         let start_time = std::time::Instant::now();
         let paths_str = paths.iter().map(|x| x.to_string_lossy().to_string()).collect::<Vec<_>>();
 
+        let correction_candidate = PathBuf::from("file100000")
+            .join("dir1000")
+            .join("file100000.ext")
+            .to_string_lossy()
+            .to_string();
+
         // Act
-        let results = fuzzy_search(&"file100000/dir1000/file100000.ext".to_string(), paths_str, 10);
+        let results = fuzzy_search(&correction_candidate, paths_str, 10);
 
         // Assert
         let time_spent = start_time.elapsed();
