@@ -130,7 +130,7 @@ where I: IntoIterator<Item = String> {
     // Count bigrams of correction candidate
     let mut correction_candidate_length = 0;
     let mut weight = FILENAME_WEIGHT;
-    for window in correction_candidate.chars().collect::<Vec<_>>().windows(2).rev() {
+    for window in correction_candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
         if window[0] == std::path::MAIN_SEPARATOR {
             weight = 1;
         }
@@ -150,7 +150,7 @@ where I: IntoIterator<Item = String> {
 
         // Discount candidate's bigrams from correction candidate's ones
         let mut weight = FILENAME_WEIGHT;
-        for window in candidate.chars().collect::<Vec<_>>().windows(2).rev() {
+        for window in candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
             if window[0] == std::path::MAIN_SEPARATOR {
                 weight = 1;
             }
