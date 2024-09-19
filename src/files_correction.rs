@@ -170,7 +170,8 @@ where I: IntoIterator<Item = String> {
             }
         }
 
-        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) / (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
+        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) / 
+            (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
         if distance < DISTANCE_THRESHOLD {
             top_n_candidates.push((candidate, distance));
             top_n_candidates
@@ -448,6 +449,7 @@ mod tests {
         assert_eq!(cache_shortened_result_vec, expected_result, "The result should contain the expected paths, instead it found");
     }
 
+    #[cfg(not(debug_assertions))]
     #[test]
     fn test_make_cache_speed() {
         // Arrange
@@ -471,12 +473,13 @@ mod tests {
         // Assert
         let time_spent = start_time.elapsed();
         println!("make_cache took {} ms", time_spent.as_millis());
-        assert!(time_spent.as_millis() < 5000, "make_cache took {} ms", time_spent.as_millis());
+        assert!(time_spent.as_millis() < 2500, "make_cache took {} ms", time_spent.as_millis());
 
         assert_eq!(cnt, 100000, "The cache should contain 100000 paths");
         assert_eq!(cache_shortened_result.len(), cnt);
     }
 
+    #[cfg(not(debug_assertions))]
     #[test]
     fn test_fuzzy_search_speed() {
         // Arrange
@@ -501,7 +504,7 @@ mod tests {
         // Assert
         let time_spent = start_time.elapsed();
         println!("fuzzy_search took {} ms", time_spent.as_millis());
-        assert!(time_spent.as_millis() < 5000, "fuzzy_search took {} ms", time_spent.as_millis());
+        assert!(time_spent.as_millis() < 750, "fuzzy_search took {} ms", time_spent.as_millis());
 
         assert_eq!(results.len(), 10, "The result should contain 10 paths");
         println!("{:?}", results);
