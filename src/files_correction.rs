@@ -348,8 +348,6 @@ pub fn canonical_path(s: &String) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use lance::dataset::index;
-
     use super::*;
     use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 
@@ -384,7 +382,9 @@ mod tests {
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
         // Assert
-        let expected_result = vec!["tests/emergency_frog_situation/frog.py".to_string()];
+        let expected_result = vec![
+            PathBuf::from("tests/emergency_frog_situation/frog.py").to_string_lossy().to_string(),
+        ];
 
         assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
     }
@@ -392,7 +392,9 @@ mod tests {
     #[tokio::test]
     async fn test_fuzzy_search_path_helps_finding_file() {
         // Arrange
-        let correction_candidate = "emergency_frog_situation/wo".to_string();
+        let correction_candidate = PathBuf::from("emergency_frog_situation/wo")
+            .to_string_lossy().to_string();
+
         let top_n = 1;
 
         let candidates = get_candidates_from_workspace_files().await;
@@ -401,7 +403,9 @@ mod tests {
         let result = fuzzy_search(&correction_candidate, candidates, top_n);
 
         // Assert
-        let expected_result = vec!["tests/emergency_frog_situation/work_day.py".to_string()];
+        let expected_result = vec![
+            PathBuf::from("tests/emergency_frog_situation/work_day.py").to_string_lossy().to_string(),
+        ];
 
         assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
     }
@@ -413,9 +417,9 @@ mod tests {
         let top_n = 2;
 
         let candidates = vec![
-            "my_library/implementation/my_file.ext".to_string(),
-            "my_library/my_file.ext".to_string(),
-            "another_file.ext".to_string(),
+            PathBuf::from("my_library/implementation/my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library/my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("another_file.ext").to_string_lossy().to_string(),
         ];
 
         // Act
@@ -423,8 +427,8 @@ mod tests {
 
         // Assert
         let expected_result = vec![
-            "my_library/my_file.ext".to_string(),
-            "my_library/implementation/my_file.ext".to_string(),
+            PathBuf::from("my_library/my_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("my_library/implementation/my_file.ext").to_string_lossy().to_string(),
         ];
 
         let mut sorted_result = result.clone();
@@ -458,11 +462,11 @@ mod tests {
         // Assert
         let mut cache_shortened_result_vec = cache_shortened_result.into_iter().collect::<Vec<_>>();
         let mut expected_result = vec![
-            "repo1/dir/file.ext".to_string(),
-            "repo2/dir/file.ext".to_string(),
-            "repo1/this_file.ext".to_string(),
-            "dir/this_file.ext".to_string(),
-            "dir2/".to_string(),
+            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1/this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir/this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2/").to_string_lossy().to_string(),
         ];
 
         expected_result.sort();
@@ -475,25 +479,25 @@ mod tests {
     #[test]
     fn test_shortify_paths_from_indexed() {
         let workspace_folders = vec![
-            "home/user/repo1".to_string(),
-            "home/user/repo1/nested/repo2".to_string(),
-            "home/user/repo3".to_string(),
+            PathBuf::from("home/user/repo1").to_string_lossy().to_string(),
+            PathBuf::from("home/user/repo1/nested/repo2").to_string_lossy().to_string(),
+            PathBuf::from("home/user/repo3").to_string_lossy().to_string(),
         ];
 
         let indexed_paths = Arc::new(HashSet::from([
-            "repo1/dir/file.ext".to_string(),
-            "repo2/dir/file.ext".to_string(),
-            "repo1/this_file.ext".to_string(),
-            "custom_dir/file.ext".to_string(),
-            "dir2/another_file.ext".to_string(),
+            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo1/this_file.ext").to_string_lossy().to_string(),
+            PathBuf::from("custom_dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2/another_file.ext").to_string_lossy().to_string(),
         ]));
 
         let paths = vec![
-            "home/user/repo1/dir/file.ext".to_string(),
-            "home/user/repo1/nested/repo2/dir/file.ext".to_string(),
-            "home/user/repo1/.hidden/custom_dir/file.ext".to_string(), // hidden file, should not be shortened since
-                // it's not in the cache, it should not be confused with custom_dir/file.ext from the cache either
-            "home/user/repo3/dir2/another_file.ext".to_string(),
+            PathBuf::from("home/user/repo1/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home/user/repo1/nested/repo2/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home/user/repo1/.hidden/custom_dir/file.ext").to_string_lossy().to_string(), 
+            // Hidden file; should not be shortened as it's not in the cache and may be confused with custom_dir/file.ext.
+            PathBuf::from("home/user/repo3/dir2/another_file.ext").to_string_lossy().to_string(),
         ];
 
 
@@ -501,10 +505,10 @@ mod tests {
         let result = shortify_paths_from_indexed(paths, indexed_paths, workspace_folders);
 
         let expected_result = vec![
-            "repo1/dir/file.ext".to_string(),
-            "repo2/dir/file.ext".to_string(),
-            "home/user/repo1/.hidden/custom_dir/file.ext".to_string(),
-            "dir2/another_file.ext".to_string(),
+            PathBuf::from("repo1/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("repo2/dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("home/user/repo1/.hidden/custom_dir/file.ext").to_string_lossy().to_string(),
+            PathBuf::from("dir2/another_file.ext").to_string_lossy().to_string(),
         ];
 
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
