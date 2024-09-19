@@ -1,6 +1,6 @@
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::patch::chat_interaction::read_file;
-use crate::tools::patch::snippets::TicketToApply;
+use crate::tools::patch::tickets::TicketToApply;
 use crate::tools::patch::unified_diff_format::{diff_blocks_to_diff_chunks, DiffBlock, DiffLine, LineType};
 use crate::call_validation::DiffChunk;
 use std::path::PathBuf;
@@ -10,14 +10,14 @@ use tokio::sync::Mutex as AMutex;
 
 pub async fn full_rewrite_diff(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    snippet: &TicketToApply,
+    ticket: &TicketToApply,
 ) -> Result<Vec<DiffChunk>, String> {
     let gcx = ccx.lock().await.global_context.clone();
-    let context_file = read_file(gcx.clone(), snippet.filename_before.clone()).await
-        .map_err(|e|format!("cannot read file to modify: {}.\nError: {e}", snippet.filename_before))?;
+    let context_file = read_file(gcx.clone(), ticket.filename_before.clone()).await
+        .map_err(|e|format!("cannot read file to modify: {}.\nError: {e}", ticket.filename_before))?;
     let file_name = PathBuf::from(&context_file.file_name);
 
-    let diffs = diff::lines(&context_file.file_content, &snippet.code);
+    let diffs = diff::lines(&context_file.file_content, &ticket.code);
     let mut line_num: usize = 0;
     let mut blocks: Vec<DiffBlock> = vec![];
     let mut diff_lines = vec![];
@@ -72,17 +72,17 @@ pub async fn full_rewrite_diff(
 }
 
 pub fn new_file_diff(
-    snippet: &TicketToApply,
+    ticket: &TicketToApply,
 ) -> Vec<DiffChunk> {
     vec![
         DiffChunk {
-            file_name: snippet.filename_before.clone(),
+            file_name: ticket.filename_before.clone(),
             file_name_rename: None,
             file_action: "add".to_string(),
             line1: 1,
             line2: 1,
             lines_remove: "".to_string(),
-            lines_add: snippet.code.clone(),
+            lines_add: ticket.code.clone(),
             ..Default::default()
         }
     ]
