@@ -52,6 +52,7 @@ fn make_cache(paths: &Vec<PathBuf>, workspace_folders: &Vec<PathBuf>) -> (
 
         let path_is_dir = path.to_string_lossy().ends_with(std::path::MAIN_SEPARATOR);
         let mut current_suffix = PathBuf::new();
+        let path_components_count = path.components().count();
         for component in path.components().rev() {
             if !current_suffix.as_os_str().is_empty() || path_is_dir {
                 current_suffix = PathBuf::from(component.as_os_str()).join(&current_suffix);
@@ -60,7 +61,7 @@ fn make_cache(paths: &Vec<PathBuf>, workspace_folders: &Vec<PathBuf>) -> (
             }
             let suffix = current_suffix.to_string_lossy().into_owned();
             if cache_correction.get(suffix.as_str()).map_or(0, |v| v.len()) == 1 &&
-                current_suffix.components().count() + workspace_components_len >= path.components().count() {
+                current_suffix.components().count() + workspace_components_len >= path_components_count {
                 cnt += 1;
                 return suffix;
             }
@@ -115,7 +116,7 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_shortened_arc);
 }
 
-fn fuzzy_search<I>(
+pub fn fuzzy_search<I>(
     correction_candidate: &String,
     candidates: I,
     top_n: usize,
@@ -263,12 +264,32 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
 }
 
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
-    let (_, shortened_paths) = files_cache_rebuild_as_needed(gcx.clone()).await;
+    let (_, indexed_paths) = files_cache_rebuild_as_needed(gcx.clone()).await;
+    let workspace_folders = get_project_dirs(gcx.clone()).await
+        .iter().map(|x| x.to_string_lossy().to_string()).collect::<Vec<_>>();
+    shortify_paths_from_indexed(paths, indexed_paths, workspace_folders)
+}
 
+fn shortify_paths_from_indexed(paths: Vec<String>, indexed_paths: Arc<HashSet<String>>, workspace_folders: Vec<String>) -> Vec<String> {
     paths.into_iter().map(|mut path| {
+        // Get the length of the workspace part of the path
+        let workspace_part_len = workspace_folders.iter()
+            .filter_map(|workspace_dir| {
+                if path.starts_with(workspace_dir) {
+                    Some(workspace_dir.len())
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+
+        // Find the longest suffix of the path, that is in the indexed cache, make sure it is at 
+        // least as long as the part of the path relative to the workspace root
         let full_path = path.clone();
         while !path.is_empty() {
-            if shortened_paths.get(&path).is_some() {
+            if indexed_paths.get(&path).is_some() && 
+                workspace_part_len + 1 + path.len() >= full_path.len() {
                 return path;
             }
             path.drain(..1);
@@ -327,6 +348,8 @@ pub fn canonical_path(s: &String) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use lance::dataset::index;
+
     use super::*;
     use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 
@@ -447,6 +470,44 @@ mod tests {
 
         assert_eq!(cnt, 5, "The cache should contain 5 paths");
         assert_eq!(cache_shortened_result_vec, expected_result, "The result should contain the expected paths, instead it found");
+    }
+
+    #[test]
+    fn test_shortify_paths_from_indexed() {
+        let workspace_folders = vec![
+            "home/user/repo1".to_string(),
+            "home/user/repo1/nested/repo2".to_string(),
+            "home/user/repo3".to_string(),
+        ];
+
+        let indexed_paths = Arc::new(HashSet::from([
+            "repo1/dir/file.ext".to_string(),
+            "repo2/dir/file.ext".to_string(),
+            "repo1/this_file.ext".to_string(),
+            "custom_dir/file.ext".to_string(),
+            "dir2/another_file.ext".to_string(),
+        ]));
+
+        let paths = vec![
+            "home/user/repo1/dir/file.ext".to_string(),
+            "home/user/repo1/nested/repo2/dir/file.ext".to_string(),
+            "home/user/repo1/.hidden/custom_dir/file.ext".to_string(), // hidden file, should not be shortened since
+                // it's not in the cache, it should not be confused with custom_dir/file.ext from the cache either
+            "home/user/repo3/dir2/another_file.ext".to_string(),
+        ];
+
+        
+
+        let result = shortify_paths_from_indexed(paths, indexed_paths, workspace_folders);
+
+        let expected_result = vec![
+            "repo1/dir/file.ext".to_string(),
+            "repo2/dir/file.ext".to_string(),
+            "home/user/repo1/.hidden/custom_dir/file.ext".to_string(),
+            "dir2/another_file.ext".to_string(),
+        ];
+
+        assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
     }
 
     #[cfg(not(debug_assertions))]
