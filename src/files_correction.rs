@@ -125,7 +125,7 @@ where I: IntoIterator<Item = String> {
     const FILENAME_WEIGHT: i32 = 3;
     const DISTANCE_THRESHOLD: f64 = 0.45;
     const EXCESS_WEIGHT: f64 = 3.0;
-    
+
     let mut correction_bigram_count: HashMap<(char, char), i32> = HashMap::new();
 
     // Count bigrams of correction candidate
@@ -171,7 +171,7 @@ where I: IntoIterator<Item = String> {
             }
         }
 
-        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) / 
+        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) /
             (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
         if distance < DISTANCE_THRESHOLD {
             top_n_candidates.push((candidate, distance));
@@ -284,11 +284,11 @@ fn shortify_paths_from_indexed(paths: Vec<String>, indexed_paths: Arc<HashSet<St
             .max()
             .unwrap_or(0);
 
-        // Find the longest suffix of the path, that is in the indexed cache, make sure it is at 
+        // Find the longest suffix of the path, that is in the indexed cache, make sure it is at
         // least as long as the part of the path relative to the workspace root
         let full_path = path.clone();
         while !path.is_empty() {
-            if indexed_paths.get(&path).is_some() && 
+            if indexed_paths.get(&path).is_some() &&
                 workspace_part_len + 1 + path.len() >= full_path.len() {
                 return path;
             }
@@ -426,10 +426,10 @@ mod tests {
             "my_library/my_file.ext".to_string(),
             "my_library/implementation/my_file.ext".to_string(),
         ];
-        
+
         let mut sorted_result = result.clone();
         let mut sorted_expected = expected_result.clone();
-        
+
         sorted_result.sort();
         sorted_expected.sort();
 
@@ -496,7 +496,7 @@ mod tests {
             "home/user/repo3/dir2/another_file.ext".to_string(),
         ];
 
-        
+
 
         let result = shortify_paths_from_indexed(paths, indexed_paths, workspace_folders);
 
@@ -530,7 +530,7 @@ mod tests {
 
         // Act
         let (_, cache_shortened_result, cnt) = make_cache(&paths, &workspace_paths);
-        
+
         // Assert
         let time_spent = start_time.elapsed();
         println!("make_cache took {} ms", time_spent.as_millis());
