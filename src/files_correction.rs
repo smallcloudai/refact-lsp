@@ -7,9 +7,6 @@ use tracing::info;
 
 use crate::global_context::GlobalContext;
 
-const FILENAME_WEIGHT: i32 = 3;
-const SIMILARITY_THRESHOLD: f64 = 0.05;
-
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
     let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
     let paths_from_workspace: Vec<PathBuf> = global_context.read().await.documents_state.workspace_files.lock().unwrap().clone();
@@ -124,58 +121,60 @@ fn fuzzy_search<I>(
     top_n: usize,
 ) -> Vec<String>
 where I: IntoIterator<Item = String> {
-    let mut bigram_count: HashMap<(char, char), i32> = HashMap::new();
+    const FILENAME_WEIGHT: i32 = 3;
+    const DISTANCE_THRESHOLD: f64 = 0.45;
+    const EXCESS_WEIGHT: f64 = 3.0;
+    
+    let mut correction_bigram_count: HashMap<(char, char), i32> = HashMap::new();
 
-    let mut valid_candidate_length = 0;
+    // Count bigrams of correction candidate
+    let mut correction_candidate_length = 0;
     let mut weight = FILENAME_WEIGHT;
     for window in correction_candidate.chars().collect::<Vec<_>>().windows(2).rev() {
         if window[0] == std::path::MAIN_SEPARATOR {
             weight = 1;
         }
-        valid_candidate_length += weight;
-        bigram_count
+        correction_candidate_length += weight;
+        *correction_bigram_count
             .entry((window[0], window[1]))
-            .and_modify(|v| *v += weight)
-            .or_insert(weight);
+            .or_insert(0) += weight;
     }
 
     let mut top_n_candidates = Vec::new();
 
     for candidate in candidates {
-        let mut similarity_numerator: i32 = 0;
-        let mut similarity_denominator: i32 = valid_candidate_length;
+        let mut missing_count: i32 = 0;
+        let mut excess_count = 0;
+        let mut candidate_len = 0;
+        let mut bigram_count = correction_bigram_count.clone();
 
+        // Discount candidate's bigrams from correction candidate's ones
         let mut weight = FILENAME_WEIGHT;
         for window in candidate.chars().collect::<Vec<_>>().windows(2).rev() {
             if window[0] == std::path::MAIN_SEPARATOR {
                 weight = 1;
             }
-            similarity_denominator += weight;
-            bigram_count
-                .entry((window[0], window[1]))
-                .and_modify(|v| {
-                    if *v > 0 {
-                        similarity_numerator += std::cmp::min(*v, weight);
-                    }
-                    *v -= weight;
-                });
-        }
-
-        weight = FILENAME_WEIGHT;
-        for window in candidate.chars().collect::<Vec<_>>().windows(2).rev() {
-            if window[0] == std::path::MAIN_SEPARATOR {
-                weight = 1;
+            candidate_len += weight;
+            if let Some(entry) = bigram_count.get_mut(&(window[0], window[1])) {
+                *entry -= weight;
+            } else {
+                missing_count += weight;
             }
-            bigram_count
-                .entry((window[0], window[1]))
-                .and_modify(|v| *v += weight);
         }
 
-        let similarity = similarity_numerator as f64 / similarity_denominator as f64;
-        if similarity > SIMILARITY_THRESHOLD {
-            top_n_candidates.push((candidate, similarity));
+        for (&_, &count) in bigram_count.iter() {
+            if count > 0 {
+                excess_count += count;
+            } else {
+                missing_count += -count;
+            }
+        }
+
+        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) / (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
+        if distance < DISTANCE_THRESHOLD {
+            top_n_candidates.push((candidate, distance));
             top_n_candidates
-                .sort_by(|a, b| b.1.partial_cmp(&a.1)
+                .sort_by(|a, b| a.1.partial_cmp(&b.1)
                 .unwrap_or(std::cmp::Ordering::Equal));
             if top_n_candidates.len() > top_n {
                 top_n_candidates.pop();
@@ -353,7 +352,7 @@ mod tests {
     async fn test_fuzzy_search_finds_frog_py() {
         // Arrange
         let correction_candidate = "frog.p".to_string();
-        let top_n = 2;
+        let top_n = 1;
 
         let candidates = get_candidates_from_workspace_files().await;
 
