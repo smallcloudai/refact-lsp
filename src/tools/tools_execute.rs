@@ -7,15 +7,12 @@ use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
-use crate::call_validation::{ChatMessage, ChatToolCall, ContextEnum, ContextFile, SubchatParameters};
+use crate::call_validation::{ChatMessage, ContextEnum, ContextFile, SubchatParameters};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
 use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
-
-
-const MAX_CALL_DUPS: usize = 1;
 
 
 pub async fn run_tools(
@@ -45,10 +42,6 @@ pub async fn run_tools(
     };
     if last_msg_tool_calls.is_empty() {
         return (original_messages.clone(), false);
-    }
-
-    if let Err(early_results) = detect_dup_calls(original_messages, &last_msg_tool_calls, stream_back_to_user).await {
-        return early_results;
     }
 
     let mut context_files_for_pp = vec![];
@@ -235,40 +228,6 @@ fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
         tool_call_id,
         ..Default::default()
     }
-}
-
-async fn detect_dup_calls(
-    original_messages: &Vec<ChatMessage>,
-    last_msg_tool_calls: &Vec<ChatToolCall>,
-    stream_back_to_user: &mut HasRagResults,
-) -> Result<(), (Vec<ChatMessage>, bool)> {
-    let messages_since_user = original_messages.iter()
-        .skip(original_messages.iter().rposition(|m| m.role == "user").unwrap_or(0) + 1).collect::<Vec<_>>();
-    let tool_functions_since_user = messages_since_user.iter()
-        .filter_map(|m|m.tool_calls.clone()).flatten()
-        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
-        .collect::<Vec<_>>();
-
-    let mut all_messages = original_messages.to_vec();
-    if last_msg_tool_calls.iter()
-        .map(|c|(c.function.name.clone(), c.function.arguments.clone()))
-        .any(|f|tool_functions_since_user.iter().filter(|x|**x==f).count() > MAX_CALL_DUPS) {
-        for t_call in last_msg_tool_calls {
-            let is_duplicate = tool_functions_since_user.iter()
-                .filter(|x|**x==(t_call.function.name.clone(), t_call.function.arguments.clone()))
-                .count() > MAX_CALL_DUPS;
-            let response_content = if is_duplicate {
-                "💿 Oops you are stuck in a loop. Don't call any more functions. Tell user to reformulate their question.".to_string()
-            } else {
-                "".to_string()
-            };
-            let tool_response = tool_answer(response_content, t_call.id.to_string());
-            all_messages.push(tool_response.clone());
-            stream_back_to_user.push_in_json(json!(tool_response));
-        }
-        return Err((all_messages, false));
-    }
-    Ok(())
 }
 
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
