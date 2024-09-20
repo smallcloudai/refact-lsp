@@ -103,8 +103,9 @@ impl Tool for ToolRelevantFiles {
                 ast_symbols = doc_symbols.into_iter().filter(|s| symbols.contains(&s.name())).collect::<Vec<_>>();
             }
 
-            // relevancy 1..5, normalized to 0..1 and then multiplied by 100 for usefulness
-            let usefulness = (file_info.relevancy as f32) / 5. * 100.;
+            // relevancy 1..5, normalized to 0..1 (because of skeleton param behavior) and then multiplied by 80 for usefulness
+            // NOTE: 80 usefulness is the most controversial, probably we need to use some non-linear mapping from relevancy into usefulness
+            let usefulness = file_info.relevancy as f32 / 5. * 80.;
             results.push(ContextEnum::ContextFile(ContextFile {
                 file_name: file_path.clone(),
                 file_content: text.clone(),
@@ -129,6 +130,8 @@ impl Tool for ToolRelevantFiles {
                 }));
             }
         }
+
+        ccx.lock().await.pp_skeleton = true;
 
         Ok((false, results))
     }
