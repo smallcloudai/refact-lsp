@@ -8,7 +8,7 @@ pub fn fuzzy_search<I>(
 ) -> Vec<String>
 where I: IntoIterator<Item = String> {
     const FILENAME_WEIGHT: i32 = 3;
-    const DISTANCE_THRESHOLD: f64 = 0.40;
+    const COMPLETELTY_DROP_DISTANCE: f64 = 0.40;
     const EXCESS_WEIGHT: f64 = 3.0;
 
     let mut correction_bigram_count: HashMap<(char, char), i32> = HashMap::new();
@@ -58,7 +58,7 @@ where I: IntoIterator<Item = String> {
 
         let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) /
             (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
-        if distance < DISTANCE_THRESHOLD {
+        if distance < COMPLETELTY_DROP_DISTANCE {
             top_n_candidates.push((candidate, distance));
             top_n_candidates
                 .sort_by(|a, b| a.1.partial_cmp(&b.1)
