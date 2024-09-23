@@ -813,7 +813,7 @@ pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str
         }
     }
 
-    let results = fuzzy_search(&pattern.to_string(), candidates, top_n, ':');
+    let results = fuzzy_search(&pattern.to_string(), candidates, top_n, &[':']);
 
     results.into_iter()
         .map(|result| {

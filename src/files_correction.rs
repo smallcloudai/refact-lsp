@@ -136,7 +136,7 @@ pub async fn correct_to_nearest_filename(
 
     if fuzzy {
         info!("fuzzy search {:?}, cache_fuzzy_arc.len={}", correction_candidate, cache_fuzzy_arc.len());
-        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n, std::path::MAIN_SEPARATOR);
+        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n, &['/', '\\']);
     }
 
     return vec![];
@@ -182,7 +182,7 @@ pub async fn correct_to_nearest_dir_path(
         }
 
         info!("fuzzy search {:?}, dirs.len={}", correction_candidate, dirs.len());
-        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n, std::path::MAIN_SEPARATOR);
+        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n, &['/', '\\']);
     }
     vec![]
 }

@@ -78,7 +78,7 @@ impl AtParam for AtParamSymbolPathQuery {
         }
         let ast_index = ast_service_opt.unwrap().lock().await.ast_index.clone();
 
-        crate::ast::ast_db::definition_paths_fuzzy(ast_index, value, top_n, 500).await
+        crate::ast::ast_db::definition_paths_fuzzy(ast_index, value, top_n, 1000).await
     }
 
     fn param_completion_valid(&self) -> bool {
