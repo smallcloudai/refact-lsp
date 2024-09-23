@@ -11,7 +11,7 @@ use regex::Regex;
 
 use crate::ast::ast_structs::{AstDB, AstDefinition, AstCounters, AstErrorStats};
 use crate::ast::ast_parse_anything::{parse_anything_and_add_file_path, filesystem_path_to_double_colon_path};
-use crate::files_correction::fuzzy_search;
+use crate::fuzzy_search::fuzzy_search;
 
 // ## How the database works ##
 //
@@ -783,13 +783,11 @@ pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str
     let mut found = HashSet::new();
     let mut patterns_to_try = Vec::new();
 
-    // Generate patterns by chopping off parts from the beginning
     let parts: Vec<&str> = pattern.split("::").collect();
     for i in 0..parts.len() {
         patterns_to_try.push(parts[i..].join("::"));
     }
 
-    // Generate patterns by splitting the filename by halves
     if let Some(filename_part) = parts.last() {
         let mut filename = filename_part.to_string();
         while !filename.is_empty() {
