@@ -780,7 +780,7 @@ pub async fn type_hierarchy(ast_index: Arc<AMutex<AstDB>>, language: String, sub
 
 pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str, top_n: usize, max_candidates_to_consider: usize) -> Vec<String> {
     let db = ast_index.lock().await.sleddb.clone();
-    let mut found = HashSet::new();
+    let mut candidates = HashSet::new();
     let mut patterns_to_try = Vec::new();
 
     let parts: Vec<&str> = pattern.split("::").collect();
@@ -788,11 +788,11 @@ pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str
         patterns_to_try.push(parts[i..].join("::"));
     }
 
-    if let Some(filename_part) = parts.last() {
-        let mut filename = filename_part.to_string();
-        while !filename.is_empty() {
-            patterns_to_try.push(filename.clone());
-            let _ = filename.split_off(filename.len() / 2);
+    if let Some(symbol_name_part) = parts.last() {
+        let mut symbol_name = symbol_name_part.to_string();
+        while !symbol_name.is_empty() {
+            patterns_to_try.push(symbol_name.clone());
+            let _ = symbol_name.split_off(symbol_name.len() / 2);
         }
     }
 
@@ -802,62 +802,28 @@ pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str
         while let Some(Ok((key, _))) = iter.next() {
             let key_string = String::from_utf8(key.to_vec()).unwrap();
             if let Some((_, dest)) = key_string.split_once(" ⚡ ") {
-                found.insert(dest.to_string());
+                candidates.insert(dest.to_string());
             }
-            if found.len() >= max_candidates_to_consider {
+            if candidates.len() >= max_candidates_to_consider {
                 break;
             }
         }
-        if found.len() >= top_n * 2 {
+        if candidates.len() >= max_candidates_to_consider {
             break;
         }
     }
 
-    let results = fuzzy_search(&pattern.to_string(), found, top_n, ':');
+    let results = fuzzy_search(&pattern.to_string(), candidates, top_n, ':');
 
-    shortify_ast_paths(&results, pattern.matches("::").count())
-}
-
-pub fn shortify_ast_paths(results: &Vec<String>, min_colons: usize) -> Vec<String> {
-    let mut suffix_count: HashMap<String, usize> = HashMap::new();
-
-    // Count occurrences of each possible suffix
-    for path in results {
-        let parts: Vec<&str> = path.split("::").collect();
-        let total_parts = parts.len();
-
-        for i in (0..total_parts).rev() {
-            let suffix = parts[i..].join("::");
-            if suffix.matches("::").count() >= min_colons {
-                *suffix_count.entry(suffix).or_insert(0) += 1;
+    results.into_iter()
+        .map(|result| {
+            if let Some(pos) = result.find("::") {
+                result[pos + 2..].to_string()
+            } else {
+                result
             }
-        }
-    }
-
-    let mut shortened_paths = Vec::new();
-
-    // Select the shortest unique suffix for each original path
-    for path in results {
-        let parts: Vec<&str> = path.split("::").collect();
-        let total_parts = parts.len();
-        let mut selected_suffix = path.clone();
-
-        for i in (0..total_parts).rev() {
-            let suffix = parts[i..].join("::");
-            if suffix.matches("::").count() >= min_colons {
-                if let Some(&count) = suffix_count.get(&suffix) {
-                    if count == 1 {
-                        selected_suffix = suffix;
-                        break;
-                    }
-                }
-            }
-        }
-
-        shortened_paths.push(selected_suffix);
-    }
-
-    shortened_paths
+        })
+        .collect()
 }
 
 #[allow(dead_code)]
