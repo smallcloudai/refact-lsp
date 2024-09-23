@@ -120,6 +120,7 @@ pub fn fuzzy_search<I>(
     correction_candidate: &String,
     candidates: I,
     top_n: usize,
+    separator_first_char: char,
 ) -> Vec<String>
 where I: IntoIterator<Item = String> {
     const FILENAME_WEIGHT: i32 = 3;
@@ -132,7 +133,7 @@ where I: IntoIterator<Item = String> {
     let mut correction_candidate_length = 0;
     let mut weight = FILENAME_WEIGHT;
     for window in correction_candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
-        if window[0] == std::path::MAIN_SEPARATOR {
+        if window[0] == separator_first_char {
             weight = 1;
         }
         correction_candidate_length += weight;
@@ -152,7 +153,7 @@ where I: IntoIterator<Item = String> {
         // Discount candidate's bigrams from correction candidate's ones
         let mut weight = FILENAME_WEIGHT;
         for window in candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
-            if window[0] == std::path::MAIN_SEPARATOR {
+            if window[0] == separator_first_char {
                 weight = 1;
             }
             candidate_len += weight;
@@ -206,7 +207,7 @@ pub async fn correct_to_nearest_filename(
 
     if fuzzy {
         info!("fuzzy search {:?}, cache_fuzzy_arc.len={}", correction_candidate, cache_fuzzy_arc.len());
-        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n);
+        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n, std::path::MAIN_SEPARATOR);
     }
 
     return vec![];
@@ -252,7 +253,7 @@ pub async fn correct_to_nearest_dir_path(
         }
 
         info!("fuzzy search {:?}, dirs.len={}", correction_candidate, dirs.len());
-        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n);
+        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n, std::path::MAIN_SEPARATOR);
     }
     vec![]
 }
@@ -379,7 +380,7 @@ mod tests {
         let candidates = get_candidates_from_workspace_files().await;
 
         // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+        let result = fuzzy_search(&correction_candidate, candidates, top_n, std::path::MAIN_SEPARATOR);
 
         // Assert
         let expected_result = vec![
@@ -398,7 +399,7 @@ mod tests {
         let candidates = get_candidates_from_workspace_files().await;
 
         // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+        let result = fuzzy_search(&correction_candidate, candidates, top_n, std::path::MAIN_SEPARATOR);
 
         // Assert
         let expected_result = vec![
@@ -421,7 +422,7 @@ mod tests {
         ];
 
         // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
+        let result = fuzzy_search(&correction_candidate, candidates, top_n, std::path::MAIN_SEPARATOR);
 
         // Assert
         let expected_result = vec![
@@ -572,7 +573,7 @@ mod tests {
             .to_string();
 
         // Act
-        let results = fuzzy_search(&correction_candidate, paths_str, 10);
+        let results = fuzzy_search(&correction_candidate, paths_str, 10, std::path::MAIN_SEPARATOR);
 
         // Assert
         let time_spent = start_time.elapsed();
