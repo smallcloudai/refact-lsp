@@ -123,7 +123,7 @@ pub fn fuzzy_search<I>(
 ) -> Vec<String>
 where I: IntoIterator<Item = String> {
     const FILENAME_WEIGHT: i32 = 3;
-    const DISTANCE_THRESHOLD: f64 = 0.45;
+    const COMPLETELY_DROP_DISTANCE: f64 = 0.40;
     const EXCESS_WEIGHT: f64 = 3.0;
 
     let mut correction_bigram_count: HashMap<(char, char), i32> = HashMap::new();
@@ -173,7 +173,7 @@ where I: IntoIterator<Item = String> {
 
         let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) /
             (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
-        if distance < DISTANCE_THRESHOLD {
+        if distance < COMPLETELY_DROP_DISTANCE {
             top_n_candidates.push((candidate, distance));
             top_n_candidates
                 .sort_by(|a, b| a.1.partial_cmp(&b.1)
@@ -493,7 +493,7 @@ mod tests {
         let paths = vec![
             PathBuf::from("home").join("user").join("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
             PathBuf::from("home").join("user").join("repo1").join("nested").join("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
-            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(), 
+            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(),
             // Hidden file; should not be shortened as it's not in the cache and may be confused with custom_dir/file.ext.
             PathBuf::from("home").join("user").join("repo3").join("dir2").join("another_file.ext").to_string_lossy().to_string(),
         ];

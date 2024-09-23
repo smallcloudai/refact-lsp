@@ -145,7 +145,7 @@ pub async fn return_one_candidate_or_a_good_error(
         };
         if f_path.is_absolute() {
             if !project_paths.iter().any(|x|f_path.starts_with(x)) {
-                return Err(format!("Path {:?} is outside of project directories:\n{:?}\nThere are paths with similar names:\n{}", f_path, project_paths, similar_paths_str));
+                return Err(format!("Path {:?} is outside of project directories:\n{:?}", f_path, project_paths));
             }
             return if similar_paths_str.is_empty() {
                 // TODO: return shortified paths
