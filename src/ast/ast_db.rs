@@ -11,6 +11,7 @@ use regex::Regex;
 
 use crate::ast::ast_structs::{AstDB, AstDefinition, AstCounters, AstErrorStats};
 use crate::ast::ast_parse_anything::{parse_anything_and_add_file_path, filesystem_path_to_double_colon_path};
+use crate::files_correction::fuzzy_search;
 
 // ## How the database works ##
 //
@@ -777,51 +778,88 @@ pub async fn type_hierarchy(ast_index: Arc<AMutex<AstDB>>, language: String, sub
     result
 }
 
-pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str) -> Vec<String>
-{
+pub async fn definition_paths_fuzzy(ast_index: Arc<AMutex<AstDB>>, pattern: &str, top_n: usize, max_candidates_to_consider: usize) -> Vec<String> {
     let db = ast_index.lock().await.sleddb.clone();
-    let c_prefix = format!("c|{}", pattern);
-    let mut iter = db.scan_prefix(c_prefix);
-    let mut found: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut found = HashSet::new();
+    let mut patterns_to_try = Vec::new();
 
-    while let Some(Ok((key, _))) = iter.next() {
-        let key_string = String::from_utf8(key.to_vec()).unwrap();
-        if let Some((cmatch, dest)) = key_string.split_once(" ⚡ ") {
-            let cmatch_stripped = cmatch.strip_prefix("c|").unwrap();
-            found.entry(cmatch_stripped.to_string()).or_default().push(dest.to_string());
+    // Generate patterns by chopping off parts from the beginning
+    let parts: Vec<&str> = pattern.split("::").collect();
+    for i in 0..parts.len() {
+        patterns_to_try.push(parts[i..].join("::"));
+    }
+
+    // Generate patterns by splitting the filename by halves
+    if let Some(filename_part) = parts.last() {
+        let mut filename = filename_part.to_string();
+        while !filename.is_empty() {
+            patterns_to_try.push(filename.clone());
+            let _ = filename.split_off(filename.len() / 2);
         }
-        if found.len() >= 100 {
+    }
+
+    for pat in patterns_to_try {
+        let c_prefix = format!("c|{}", pat);
+        let mut iter = db.scan_prefix(&c_prefix);
+        while let Some(Ok((key, _))) = iter.next() {
+            let key_string = String::from_utf8(key.to_vec()).unwrap();
+            if let Some((_, dest)) = key_string.split_once(" ⚡ ") {
+                found.insert(dest.to_string());
+            }
+            if found.len() >= max_candidates_to_consider {
+                break;
+            }
+        }
+        if found.len() >= top_n * 2 {
             break;
         }
     }
 
-    let mut unique_found = Vec::new();
-    let mut ambiguity = false;
-    for (mat, destinations) in &found {
-        unique_found.push(mat.clone());
-        if destinations.len() > 1 {
-            ambiguity = true;
-            break;
-        }
-    }
+    let results = fuzzy_search(&pattern.to_string(), found, top_n, ':');
 
-    if ambiguity {
-        unique_found.clear();
-        let colons_pattern_already_has = pattern.matches("::").count();
-        let cut_colons_at = colons_pattern_already_has + 2;
-        // Dest always has pattern somewhere in the middle aaaa::bbbb::{pattern}cc
-        for destinations in found.values() {
-            for dest in destinations {
-                let parts: Vec<&str> = dest.split("::").collect();
-                if parts.len() >= cut_colons_at {
-                    let more_colons_match = parts[parts.len() - cut_colons_at..].join("::");
-                    unique_found.push(more_colons_match);
-                }
+    shortify_ast_paths(&results, pattern.matches("::").count())
+}
+
+pub fn shortify_ast_paths(results: &Vec<String>, min_colons: usize) -> Vec<String> {
+    let mut suffix_count: HashMap<String, usize> = HashMap::new();
+
+    // Count occurrences of each possible suffix
+    for path in results {
+        let parts: Vec<&str> = path.split("::").collect();
+        let total_parts = parts.len();
+
+        for i in (0..total_parts).rev() {
+            let suffix = parts[i..].join("::");
+            if suffix.matches("::").count() >= min_colons {
+                *suffix_count.entry(suffix).or_insert(0) += 1;
             }
         }
     }
 
-    unique_found.into_iter().collect()
+    let mut shortened_paths = Vec::new();
+
+    // Select the shortest unique suffix for each original path
+    for path in results {
+        let parts: Vec<&str> = path.split("::").collect();
+        let total_parts = parts.len();
+        let mut selected_suffix = path.clone();
+
+        for i in (0..total_parts).rev() {
+            let suffix = parts[i..].join("::");
+            if suffix.matches("::").count() >= min_colons {
+                if let Some(&count) = suffix_count.get(&suffix) {
+                    if count == 1 {
+                        selected_suffix = suffix;
+                        break;
+                    }
+                }
+            }
+        }
+
+        shortened_paths.push(selected_suffix);
+    }
+
+    shortened_paths
 }
 
 #[allow(dead_code)]
