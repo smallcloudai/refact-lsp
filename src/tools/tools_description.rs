@@ -15,6 +15,7 @@ use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
 use crate::integrations::integr_chrome::ToolChrome;
 
+use crate::integrations::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig { // todo: fix typo
@@ -105,6 +106,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(chrome_tool) = ToolChrome::new_if_configured(&integrations_value) {
             tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(chrome_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(docker_tool) = ToolDocker::new_if_configured(&integrations_value) {
+            tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(docker_tool) as Box<dyn Tool + Send>)));
         }
         #[cfg(feature="vecdb")]
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
@@ -289,6 +293,18 @@ tools:
         type: "string"
         description: "Chrome has this commands: navigate_to url, screenshot, html, reload."
     parameters_required:
+      - "command"
+
+  - name: "docker"
+    agentic: true
+    experimental: true
+    description: "Access to docker daemon, to create and manupulate images."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Examples: docker images"
+    parameters_required:
+      - "project_dir"
       - "command"
 "####;
 
