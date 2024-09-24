@@ -13,7 +13,7 @@ use crate::global_context::GlobalContext;
 pub enum PatchAction {
     #[default]
     PartialEdit,
-    FullRewrite,
+    RewriteWholeFile,
     NewFile,
     Other,
 }
@@ -22,7 +22,7 @@ impl PatchAction {
     pub fn from_string(action: &str) -> Result<PatchAction, String> {
         match action {
             "📍PARTIAL_EDIT" => Ok(PatchAction::PartialEdit),
-            "📍FULL_REWRITE" => Ok(PatchAction::FullRewrite),
+            "📍REWRITE_WHOLE_FILE" => Ok(PatchAction::RewriteWholeFile),
             "📍NEW_FILE" => Ok(PatchAction::NewFile),
             "📍OTHER" => Ok(PatchAction::Other),
             _ => Err(format!("invalid action: {}", action)),
@@ -56,7 +56,7 @@ pub async fn correct_and_validate_ticket(gcx: Arc<ARwLock<GlobalContext>>, ticke
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
                 .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
         },
-        PatchAction::FullRewrite => {
+        PatchAction::RewriteWholeFile => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
                 .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
         },

@@ -117,7 +117,7 @@ pub async fn get_active_tickets(
     ticket_ids: Vec<String>,
     all_tickets_from_above: HashMap<String, TicketToApply>,
 ) -> Result<Vec<TicketToApply>, String> {
-    let mut active_tickets =ticket_ids.iter().map(|t|all_tickets_from_above.get(t).cloned()
+    let mut active_tickets = ticket_ids.iter().map(|t|all_tickets_from_above.get(t).cloned()
         .ok_or(good_error_text(
             &format!("No code block found for the ticket {:?} did you forget to write one using 📍-notation?", t),
             &ticket_ids, Some("wrap the block of code in a 📍-notation, creating a ticket, do not call patch() until you do it. Do not prompt user again this time".to_string())
@@ -168,7 +168,7 @@ pub async fn tickets_to_diff_chunks(
                 ccx_subchat.clone(), active_tickets.clone(), params, tool_call_id, usage
             ).await.map_err(|(e, r)| good_error_text(e.as_str(), &ticket_ids, r))
         },
-            PatchAction::FullRewrite => {
+            PatchAction::RewriteWholeFile => {
             let mut chunks = full_rewrite_diff(ccx_subchat.clone(), &active_tickets[0]).await?;
             postprocess_diff_chunks_from_message(ccx_subchat.clone(), &mut chunks).await
         },
