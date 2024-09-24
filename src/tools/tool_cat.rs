@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use tokio::sync::Mutex as AMutex;
 use async_trait::async_trait;
-
+use tracing::info;
 use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
 use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_or_a_good_error};
 use crate::tools::tools_description::Tool;
@@ -94,7 +94,6 @@ impl Tool for ToolCat {
         let mut symbols_found = vec![];
 
         if !symbols_str.is_empty() {
-            let gcx = ccx.lock().await.global_context.clone();
             let ast_service_opt = gcx.read().await.ast_service.clone();
             if let Some(ast_service) = ast_service_opt {
                 let ast_index = ast_service.lock().await.ast_index.clone();
@@ -117,7 +116,7 @@ impl Tool for ToolCat {
                     }
                 }
             } else {
-                return Err("AST service is not available".to_string());
+                return Err("couldn't execute cat().\nReason: cannot accept 'symbols' arg -- AST is not available.\nResolution: remove 'symbols' argument and call again".to_string());
             }
         }
 
@@ -173,9 +172,5 @@ impl Tool for ToolCat {
         ccx.lock().await.pp_skeleton = skeleton;
 
         Ok((corrections, results))
-    }
-
-    fn tool_depends_on(&self) -> Vec<String> {
-        vec!["ast".to_string()]
     }
 }
