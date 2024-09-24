@@ -13,6 +13,7 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig {
@@ -95,6 +96,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(docker_tool) = ToolDocker::new_if_configured(&integrations_value) {
+            tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(docker_tool) as Box<dyn Tool + Send>)));
         }
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
@@ -267,6 +271,18 @@ tools:
         type: "string"
         description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
+      - "command"
+
+  - name: "docker"
+    agentic: true
+    experimental: true
+    description: "Access to docker daemon, to create and manupulate images."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Examples: docker images"
+    parameters_required:
+      - "project_dir"
       - "command"
 "####;
 
