@@ -5,12 +5,11 @@ use serde_json::Value;
 
 use tokio::sync::Mutex as AMutex;
 use async_trait::async_trait;
-use tracing::info;
 use crate::at_commands::at_commands::{AtCommandsContext, vec_context_file_to_context_tools};
 use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_or_a_good_error};
 use crate::tools::tools_description::Tool;
 use crate::call_validation::{ChatMessage, ContextEnum, ContextFile};
-use crate::files_correction::{correct_to_nearest_dir_path, get_project_dirs, get_files_in_dir};
+use crate::files_correction::{correct_to_nearest_dir_path, get_project_dirs};
 use crate::files_in_workspace::{get_file_text_from_memory_or_disk, ls_files};
 
 
