@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
+use glob::Pattern;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 use async_trait::async_trait;
@@ -18,6 +19,8 @@ use serde_json::Value;
 pub struct IntegrationGitHub {
     pub gh_binary_path: Option<String>,
     pub GH_TOKEN: String,
+    pub skip_confirmation: Vec<String>,
+    pub deny: Vec<String>,
 }
 
 pub struct ToolGithub {
@@ -67,6 +70,14 @@ impl Tool for ToolGithub {
             parsed_args.remove(0);
         }
 
+        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
+        if let Some(denied_glob) = self.integration_github.deny.iter().find(|glob| {
+            let pattern = Pattern::new(glob).unwrap();
+            pattern.matches(command_to_match)
+        }) {
+            return Err(format!("Denied command '{}', since it matches the rule '{}', from github integration settings", command, denied_glob));
+        }
+
         let gh_command = self.integration_github.gh_binary_path.as_deref().unwrap_or("gh");
         let output = Command::new(gh_command)
             .args(&parsed_args)
@@ -79,6 +90,7 @@ impl Tool for ToolGithub {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
         if !stderr.is_empty() {
+            error!("Error: {:?}", stderr);
             return Err(stderr);
         }
 
