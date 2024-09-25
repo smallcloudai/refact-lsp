@@ -3,6 +3,8 @@ import json
 import pathlib
 from termcolor import colored
 
+# TODO: SecretaryBird
+
 
 BASE_DIR = pathlib.Path(__file__).parent
 FROG_PY = BASE_DIR / "emergency_frog_situation" / "frog.py"
@@ -62,7 +64,7 @@ f"""📍NEW_FILE 001 {FN}
     assert res0["file_name_add"] == str(FN)
     assert res0["file_text"] == text_expected + "\n", res0["file_text"]
     print(colored("test01_new_file PASSED", "green"))
-    
+
 
 def test01_partial_edit():
     text_expected = (TEST11_DATA / "toad_partial_edit_01.py").read_text()
@@ -79,7 +81,7 @@ DT = 0.1
     assert res0["file_name_edit"] == str(TOAD_ORIG)
     assert res0["file_text"] == text_expected
     print(colored("test01_partial_edit PASSED", "green"))
-    
+
 
 def test02_partial_edit():
     text_expected = (TEST11_DATA / "toad_partial_edit_02.py").read_text()
@@ -98,8 +100,8 @@ def test02_partial_edit():
     resp = patch_request(messages, ["001"])
 
     res0 = resp["results"][0]
-    assert res0["file_name_edit"] == str(TOAD_ORIG)
-    assert res0["file_text"] == text_expected
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+    assert res0["file_text"] == text_expected, res0
     print(colored("test02_partial_edit PASSED", "green"))
 
 
