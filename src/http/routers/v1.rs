@@ -35,6 +35,7 @@ use crate::http::routers::v1::gui_help_handlers::handle_v1_fullpath;
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list, handle_ongoing_update_or_create, handle_ongoing_dump};
 use crate::http::routers::v1::patch::handle_v1_patch_single_file_from_ticket;
 use crate::http::routers::v1::subchat::{handle_v1_subchat, handle_v1_subchat_single};
+use crate::http::routers::v1::at_tools::handle_v1_tools_permission_check;
 
 use crate::http::utils::telemetry_wrapper;
 
@@ -80,6 +81,7 @@ pub fn make_v1_router() -> Router {
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
 
         .route("/tools", telemetry_get!(handle_v1_tools))
+        .route("/tools-permission-check", telemetry_post!(handle_v1_tools_permission_check))
 
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
         .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
