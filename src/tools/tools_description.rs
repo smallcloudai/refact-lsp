@@ -22,6 +22,20 @@ pub trait Tool: Send + Sync {
         args: &HashMap<String, Value>
     ) -> Result<(bool, Vec<ContextEnum>), String>;
 
+    fn check_for_confirmation_needed(
+        &self,
+        _args: &HashMap<String, Value>,
+    ) -> Result<(bool, String), String> { 
+        Ok((false, "".to_string()))
+    }
+
+    fn check_if_denied(
+        &self,
+        _args: &HashMap<String, Value>,
+    ) -> Result<(bool, String), String> { 
+        Ok((false, "".to_string()))
+    }
+
     fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
 
     fn usage(&mut self) -> &mut Option<ChatUsage> {

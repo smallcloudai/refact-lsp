@@ -70,14 +70,6 @@ impl Tool for ToolGithub {
             parsed_args.remove(0);
         }
 
-        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
-        if let Some(denied_glob) = self.integration_github.deny.iter().find(|glob| {
-            let pattern = Pattern::new(glob).unwrap();
-            pattern.matches(command_to_match)
-        }) {
-            return Err(format!("Denied command '{}', since it matches the rule '{}', from github integration settings", command, denied_glob));
-        }
-
         let gh_command = self.integration_github.gh_binary_path.as_deref().unwrap_or("gh");
         let output = Command::new(gh_command)
             .args(&parsed_args)
@@ -118,5 +110,47 @@ impl Tool for ToolGithub {
         }));
 
         Ok((false, results))
+    }
+
+    fn check_for_confirmation_needed(
+        &self,
+        args: &HashMap<String, Value>,
+    ) -> Result<(bool, String), String> {
+        let command = match args.get("command") {
+            Some(Value::String(s)) => s,
+            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+            None => return Err("Missing argument `command`".to_string())
+        };
+        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
+
+        if self.integration_github.skip_confirmation.iter().any(|glob| {
+            let pattern = Pattern::new(glob).unwrap();
+            pattern.matches(command_to_match)
+        }) {
+            return Ok((false, "".to_string()));
+        }
+       
+        Ok((true, format!("Command '{}' requires confirmation", command)))
+    }
+
+    fn check_if_denied(
+        &self,
+        args: &HashMap<String, Value>,
+    ) -> Result<(bool, String), String> { 
+        let command = match args.get("command") {
+            Some(Value::String(s)) => s,
+            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+            None => return Err("Missing argument `command`".to_string())
+        };
+        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
+
+        if let Some(rule) = self.integration_github.skip_confirmation.iter().find(|glob| {
+            let pattern = Pattern::new(glob).unwrap();
+            pattern.matches(command_to_match)
+        }) {
+            return Ok((true, format!("Command '{}' is denied by rule '{}' due to GitHub integration settings", command, rule)));
+        }
+
+        Ok((false, "".to_string()))
     }
 }
