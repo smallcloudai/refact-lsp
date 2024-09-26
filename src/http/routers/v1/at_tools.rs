@@ -41,7 +41,7 @@ pub async fn handle_v1_tools(
     )
 }
 
-pub async fn handle_v1_tools_permission_check(
+pub async fn handle_v1_tools_validate(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
