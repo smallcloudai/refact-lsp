@@ -3,11 +3,6 @@ import numpy as np
 DT = 0.01
 
 
-def hello_toad():
-    print("Hello Toad!")
-
-
-
 class Toad:
     def __init__(self, x, y, vx, vy):
         self.x = x
@@ -16,14 +11,8 @@ class Toad:
         self.vy = vy
 
     def bounce_off_banks(self, pond_width, pond_height):
-        if self.x < 0:
-            self.vx = np.abs(self.vx)
-        elif self.x > pond_width:
-            self.vx = -np.abs(self.vx)
-        if self.y < 0:
-            self.vy = np.abs(self.vy)
-        elif self.y > pond_height:
-            self.vy = -np.abs(self.vy)
+        pass
+
 
     def jump(self, pond_width, pond_height):
         self.x += self.vx * DT

@@ -11,14 +11,16 @@ use crate::tools::patch::chat_interaction::execute_chat_model;
 use crate::tools::patch::diff_formats::postprocess_diff_chunks_from_message;
 use crate::tools::patch::tickets::{TicketToApply, correct_and_validate_ticket, get_tickets_from_messages, PatchAction};
 use crate::tools::patch::unified_diff_format::UnifiedDiffFormat;
-use crate::tools::patch::whole_file_diff::{full_rewrite_diff, new_file_diff};
+use crate::tools::patch::ticket_to_chunks::{add_to_file_diff, full_rewrite_diff, new_file_diff, rewrite_symbol_diff};
 use crate::tools::tools_execute::unwrap_subchat_params;
 use crate::tools::tools_description::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, DiffChunk, SubchatParameters};
 use crate::global_context::GlobalContext;
 
+
 pub const N_CHOICES: usize = 16;
 pub type DefaultToolPatch = UnifiedDiffFormat;
+
 
 pub struct ToolPatch {
     pub usage: Option<ChatUsage>,
@@ -85,6 +87,7 @@ async fn partial_edit_tickets_to_diffs(
     tool_call_id: &String,
     usage: &mut ChatUsage,
 ) -> Result<Vec<DiffChunk>, (String, Option<String>)> {
+    let gcx = ccx_subchat.lock().await.global_context.clone();
     let mut all_chunks = execute_chat_model(
         ccx_subchat.clone(),
         tickets,
@@ -98,7 +101,7 @@ async fn partial_edit_tickets_to_diffs(
 
     let mut chunks_for_answers = vec![];
     for chunks in all_chunks.iter_mut() {
-        let diffs = postprocess_diff_chunks_from_message(ccx_subchat.clone(), chunks).await;
+        let diffs = postprocess_diff_chunks_from_message(gcx.clone(), chunks).await;
         chunks_for_answers.push(diffs);
     }
     choose_correct_chunk(chunks_for_answers).map_err(|e|(e, None))
@@ -161,20 +164,29 @@ pub async fn tickets_to_diff_chunks(
     tool_call_id: &String,
     usage: &mut ChatUsage,
 ) -> Result<Vec<DiffChunk>, String> {
+    let gcx = ccx_subchat.lock().await.global_context.clone();
     let action = active_tickets[0].action.clone();
     match action {
+        PatchAction::AddToFile => {
+            let mut chunks = add_to_file_diff(gcx.clone(), &active_tickets[0]).await?;
+            postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
+        },
+        PatchAction::RewriteSymbol => {
+            let mut chunks = rewrite_symbol_diff(gcx.clone(), &active_tickets[0]).await?;
+            postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
+        },
         PatchAction::PartialEdit => {
             partial_edit_tickets_to_diffs(
                 ccx_subchat.clone(), active_tickets.clone(), params, tool_call_id, usage
             ).await.map_err(|(e, r)| good_error_text(e.as_str(), &ticket_ids, r))
         },
-            PatchAction::RewriteWholeFile => {
-            let mut chunks = full_rewrite_diff(ccx_subchat.clone(), &active_tickets[0]).await?;
-            postprocess_diff_chunks_from_message(ccx_subchat.clone(), &mut chunks).await
+        PatchAction::RewriteWholeFile => {
+            let mut chunks = full_rewrite_diff(gcx.clone(), &active_tickets[0]).await?;
+            postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
         },
         PatchAction::NewFile => {
             let mut chunks = new_file_diff(&active_tickets[0]);
-            postprocess_diff_chunks_from_message(ccx_subchat.clone(), &mut chunks).await
+            postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
         },
         _ => Err(good_error_text(&format!("unknown action provided: '{:?}'.", action), &ticket_ids, None))
     }

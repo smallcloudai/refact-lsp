@@ -15,7 +15,7 @@ use crate::global_context::GlobalContext;
 pub enum PatchAction {
     #[default]
     AddToFile,
-    RewriteFunction,
+    RewriteSymbol,
     PartialEdit,
     RewriteWholeFile,
     NewFile,
@@ -26,7 +26,7 @@ pub enum PatchAction {
 pub enum PatchLocateAs {
     BEFORE,
     AFTER,
-    FUNC
+    INFILL
 }
 
 impl PatchLocateAs {
@@ -34,7 +34,7 @@ impl PatchLocateAs {
         match s {
             "BEFORE" => Ok(PatchLocateAs::BEFORE),
             "AFTER" => Ok(PatchLocateAs::AFTER),
-            "FUNC" => Ok(PatchLocateAs::FUNC),
+            "INFILL" => Ok(PatchLocateAs::INFILL),
             _ => Err(format!("invalid locate_as: {}", s)),
         }
     }
@@ -44,7 +44,7 @@ impl PatchAction {
     pub fn from_string(action: &str) -> Result<PatchAction, String> {
         match action {
             "📍ADD_TO_FILE" => Ok(PatchAction::AddToFile),
-            "📍REWRITE_FUNCTION" => Ok(PatchAction::RewriteFunction),
+            "📍REWRITE_SYMBOL" => Ok(PatchAction::RewriteSymbol),
             "📍REWRITE_WHOLE_FILE" => Ok(PatchAction::RewriteWholeFile),
             "📍PARTIAL_EDIT" => Ok(PatchAction::PartialEdit),
             "📍NEW_FILE" => Ok(PatchAction::NewFile),
@@ -64,6 +64,8 @@ pub struct TicketToApply {
     pub locate_as: Option<PatchLocateAs>,
     #[serde(default)]
     pub locate_symbol: Option<Arc<AstDefinition>>,
+    #[serde(default)]
+    pub all_symbols: Vec<Arc<AstDefinition>>,
     pub code: String,
 }
 
@@ -83,15 +85,16 @@ pub async fn correct_and_validate_ticket(gcx: Arc<ARwLock<GlobalContext>>, ticke
         PatchAction::AddToFile => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
                 .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
-            if ticket.locate_as != Some(PatchLocateAs::BEFORE) || ticket.locate_as != Some(PatchLocateAs::AFTER) {
+            if ticket.locate_as != Some(PatchLocateAs::BEFORE) && ticket.locate_as != Some(PatchLocateAs::AFTER) {
+                // todo: fix error, shouldn't be Option<>
                 return Err(good_error_text(&format!("failed to parse ticket: 📍ADD_TO_FILE only supports BEFORE, AFTER, not '{:?}'", ticket.locate_as), ticket));
             }
         },
-        PatchAction::RewriteFunction => {
+        PatchAction::RewriteSymbol => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
                .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
-            if ticket.locate_as != Some(PatchLocateAs::FUNC) {
-                return Err(good_error_text(&format!("failed to parse ticket: 📍REWRITE_FUNCTION only supports FUNC, not '{:?}'", ticket.locate_as), ticket));
+            if ticket.locate_as != Some(PatchLocateAs::INFILL) {
+                return Err(good_error_text(&format!("failed to parse ticket: 📍REWRITE_SYMBOL only supports INFILL, not '{:?}'", ticket.locate_as), ticket));
             }
         },
         PatchAction::PartialEdit => {
@@ -104,13 +107,10 @@ pub async fn correct_and_validate_ticket(gcx: Arc<ARwLock<GlobalContext>>, ticke
         },
         PatchAction::NewFile => {
             if path_before.is_relative() {
-                return Err(good_error_text(&format!("filename_before: '{}' must be absolute.", ticket.filename_before), ticket));
+                return Err(good_error_text(&format!("filename_before: '{}' must be absolute.", ticket.filename_before), ticket)); 
             }
         },
-        PatchAction::Other => {},
-        _ => {
-            return Err(good_error_text(&format!("action: {:?} is not implemented", ticket.action), ticket));
-        }
+        PatchAction::Other => {}
     }
     Ok(())
 }
@@ -119,15 +119,16 @@ async fn does_doc_have_symbol(
     gcx: Arc<ARwLock<GlobalContext>>, 
     symbol: &String, 
     doc_path: &String
-) -> Result<Arc<AstDefinition>, String> {
+) -> Result<(Arc<AstDefinition>, Vec<Arc<AstDefinition>>), String> {
+    let symbol_parts = symbol.split("::").map(|s|s.to_string()).collect::<Vec<_>>();
     let ast_service = gcx.read().await.ast_service.clone()
         .ok_or("ast_service is absent".to_string())?;
     let ast_index = ast_service.lock().await.ast_index.clone();
     let doc_syms = doc_defs(ast_index, doc_path).await;
-    let filtered_syms = doc_syms.into_iter().filter(|s|symbol == &s.name()).collect::<Vec<_>>();
+    let filtered_syms = doc_syms.iter().filter(|s|s.official_path.ends_with(&symbol_parts)).cloned().collect::<Vec<_>>();
     match filtered_syms.len() {
         0 => Err(format!("symbol '{}' not found in file '{}'", symbol, doc_path)),
-        1 => Ok(filtered_syms[0].clone()),
+        1 => Ok((filtered_syms[0].clone(), doc_syms)),
         _ => Err(format!("cannot locate symbol {}: multiple symbols found with this name" , symbol)),
     }
 }
@@ -156,8 +157,9 @@ async fn parse_tickets(gcx: Arc<ARwLock<GlobalContext>>, content: &str) -> Vec<T
                     return Err("failed to parse ticket: symbol is absent".to_string());
                 }
             };
-            let symbol = does_doc_have_symbol(gcx.clone(), &locate_symbol_str, &ticket.filename_before).await?;
+            let (symbol, all_symbols) = does_doc_have_symbol(gcx.clone(), &locate_symbol_str, &ticket.filename_before).await?;
             ticket.locate_symbol = Some(symbol);
+            ticket.all_symbols = all_symbols;
         }
 
         if let Some(code_block_fence_line) = lines.get(line_num + 1) {

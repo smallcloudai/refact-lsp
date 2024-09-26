@@ -106,6 +106,7 @@ f"""📍PARTIAL_EDIT 001 {TOAD_ORIG}
 
 
 def test01_add_to_file():
+    text_expected = (TEST11_DATA / "toad_add_to_file_01.py").read_text()
     ticket_text = \
 f"""📍ADD_TO_FILE 001 {TOAD_ORIG} BEFORE Toad
 ```python
@@ -115,9 +116,18 @@ def hello_toad():
 """
     messages = make_messages(ticket_text)
     resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_add_to_file_01_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test01_add_to_file PASSED", "green"))
 
 
 def test02_add_to_file():
+    text_expected = (TEST11_DATA / "toad_add_to_file_02.py").read_text()
     ticket_text = \
         f"""📍ADD_TO_FILE 001 {TOAD_ORIG} AFTER Toad
 ```python
@@ -127,28 +137,157 @@ def hello_toad():
 """
     messages = make_messages(ticket_text)
     resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_add_to_file_02_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test02_add_to_file PASSED", "green"))
 
 
 def test03_add_to_file():
+    text_expected = (TEST11_DATA / "toad_add_to_file_03.py").read_text()
     ticket_text = \
-f"""📍ADD_TO_FILE 001 {TOAD_ORIG} BEFORE Toad::bounce_off_banks
+f"""📍ADD_TO_FILE 001 {TOAD_ORIG} BEFORE Toad::__init__
+```python
+    def pre_init(self):
+        pass
+```
 """
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_add_to_file_03_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test03_add_to_file PASSED", "green"))
 
 
 def test04_add_to_file():
+    text_expected = (TEST11_DATA / "toad_add_to_file_04.py").read_text()
     ticket_text = \
 f"""📍ADD_TO_FILE 001 {TOAD_ORIG} AFTER Toad::bounce_off_banks
+```python
+    def post_bounce(self):
+        print("CROAK")
+```
 """
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_add_to_file_04_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test04_add_to_file PASSED", "green"))
 
 
-def test01_rewrite_function():
+def test05_add_to_file():
+    text_expected = (TEST11_DATA / "toad_add_to_file_05.py").read_text()
     ticket_text = \
-f"""📍REWRITE_FUNCTION 001 {TOAD_ORIG} FUNC standalone_jumping_function
+        f"""📍ADD_TO_FILE 001 {TOAD_ORIG} AFTER Toad::croak
+```python
+    def post_croak(self):
+        print("CROAK!")
+```
 """
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_add_to_file_05_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test05_add_to_file PASSED", "green"))
+
+
+def test01_rewrite_symbol():
+    text_expected = (TEST11_DATA / "toad_rewrite_symbol_01.py").read_text()
+    ticket_text = \
+f"""📍REWRITE_SYMBOL 001 {TOAD_ORIG} INFILL standalone_jumping_function
+```python
+def brand_new_function():
+    print("I am really a brand new function!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_rewrite_symbol_01_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test01_rewrite_symbol PASSED", "green"))
+
+
+def test02_rewrite_symbol():
+    text_expected = (TEST11_DATA / "toad_rewrite_symbol_02.py").read_text()
+    ticket_text = \
+        f"""📍REWRITE_SYMBOL 001 {TOAD_ORIG} INFILL Toad::bounce_off_banks
+```python
+    def bounce_off_banks(self, pond_width, pond_height):
+        pass
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_rewrite_symbol_02_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test02_rewrite_symbol PASSED", "green"))
+
+
+def test03_rewrite_symbol():
+    text_expected = (TEST11_DATA / "toad_rewrite_symbol_03.py").read_text()
+    ticket_text = \
+        f"""📍REWRITE_SYMBOL 001 {TOAD_ORIG} INFILL DT
+```python
+DT = 10.
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG), res0
+
+    with (TEST11_DATA / "toad_rewrite_symbol_03_res.py").open("w") as f:
+        f.write(res0["file_text"])
+
+    assert res0["file_text"] == text_expected, res0["file_text"]
+    print(colored("test03_rewrite_symbol PASSED", "green"))
 
 
 if __name__ == "__main__":
-    # test01_rewrite_whole_file()
-    # test01_new_file()
+    test01_rewrite_whole_file()
+    test01_new_file()
+
+    test01_add_to_file()
+    test02_add_to_file()
+    test03_add_to_file()
+    test04_add_to_file()
+    test05_add_to_file()
+
+    test01_rewrite_symbol()
+    test02_rewrite_symbol()
+    test03_rewrite_symbol()
+
+    # NON DETERMINISTIC TESTS
+
     # test01_partial_edit()
-    test02_partial_edit()
+    # test02_partial_edit()
+

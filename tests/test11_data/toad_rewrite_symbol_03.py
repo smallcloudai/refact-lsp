@@ -1,10 +1,6 @@
 import numpy as np
 
-DT = 0.01
-
-
-def hello_toad():
-    print("Hello Toad!")
+DT = 10.
 
 
 

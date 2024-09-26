@@ -3,11 +3,6 @@ import numpy as np
 DT = 0.01
 
 
-def hello_toad():
-    print("Hello Toad!")
-
-
-
 class Toad:
     def __init__(self, x, y, vx, vy):
         self.x = x
@@ -24,6 +19,10 @@ class Toad:
             self.vy = np.abs(self.vy)
         elif self.y > pond_height:
             self.vy = -np.abs(self.vy)
+
+    def post_bounce(self):
+        print("CROAK")
+
 
     def jump(self, pond_width, pond_height):
         self.x += self.vx * DT

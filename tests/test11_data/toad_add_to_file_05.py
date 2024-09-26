@@ -3,11 +3,6 @@ import numpy as np
 DT = 0.01
 
 
-def hello_toad():
-    print("Hello Toad!")
-
-
-
 class Toad:
     def __init__(self, x, y, vx, vy):
         self.x = x
@@ -35,6 +30,10 @@ class Toad:
     def croak(self, n_times):
         for n in range(n_times):
             print("croak")
+
+    def post_croak(self):
+        print("CROAK!")
+
 
 
 class AlternativeFrog:

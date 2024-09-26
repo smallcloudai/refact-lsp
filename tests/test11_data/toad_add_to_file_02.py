@@ -30,8 +30,11 @@ class Toad:
     def croak(self, n_times):
         for n in range(n_times):
             print("croak")
+
+
 def hello_toad():
     print("Hello Toad!")
+
 
 
 class AlternativeFrog:

@@ -3,12 +3,11 @@ import numpy as np
 DT = 0.01
 
 
-def hello_toad():
-    print("Hello Toad!")
-
-
-
 class Toad:
+    def pre_init(self):
+        pass
+
+
     def __init__(self, x, y, vx, vy):
         self.x = x
         self.y = y

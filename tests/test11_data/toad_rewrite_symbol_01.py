@@ -3,11 +3,6 @@ import numpy as np
 DT = 0.01
 
 
-def hello_toad():
-    print("Hello Toad!")
-
-
-
 class Toad:
     def __init__(self, x, y, vx, vy):
         self.x = x
@@ -42,5 +37,6 @@ class AlternativeFrog:
         pass
 
 
-def standalone_jumping_function():
-    print("I'm a frog! Jump! Jump! Really!")
+def brand_new_function():
+    print("I am really a brand new function!")
+
