@@ -101,7 +101,7 @@ def test02_partial_edit():
 
     res0 = resp["results"][0]
     assert res0["file_name_edit"] == str(TOAD_ORIG), res0
-    assert res0["file_text"] == text_expected, res0
+    assert res0["file_text"] == text_expected, print(res0["file_text"])
     print(colored("test02_partial_edit PASSED", "green"))
 
 
