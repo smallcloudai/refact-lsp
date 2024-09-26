@@ -112,7 +112,11 @@ impl Tool for ToolGithub {
         let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
 
         if self.integration_github.skip_confirmation.iter().any(|glob| {
-            let pattern = Pattern::new(glob).unwrap();
+            let pattern = if glob.starts_with("gh ") {
+                Pattern::new(&glob[3..]).unwrap()
+            } else {
+                Pattern::new(glob).unwrap()
+            };
             pattern.matches(command_to_match)
         }) {
             return Ok((false, "".to_string()));
@@ -130,7 +134,11 @@ impl Tool for ToolGithub {
         let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
 
         if let Some(rule) = self.integration_github.deny.iter().find(|glob| {
-            let pattern = Pattern::new(glob).unwrap();
+            let pattern = if glob.starts_with("gh ") {
+                Pattern::new(&glob[3..]).unwrap()
+            } else {
+                Pattern::new(glob).unwrap()
+            };
             pattern.matches(command_to_match)
         }) {
             let message = if detailed {
