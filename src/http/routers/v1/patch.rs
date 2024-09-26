@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatUsage};
+use crate::call_validation::{ChatMessage, ChatUsage, DiffChunk};
 use crate::custom_error::ScratchError;
 use crate::diffs::{ApplyDiffResult, ApplyDiffUnwrapped, correct_and_validate_chunks, read_files_n_apply_diff_chunks, unwrap_diff_apply_outputs};
 use crate::global_context::GlobalContext;
@@ -27,6 +27,7 @@ pub struct PatchPost {
 pub struct PatchResponse {
     state: Vec<ApplyDiffUnwrapped>,
     results: Vec<ApplyDiffResult>,
+    chunks: Vec<DiffChunk>,
 }
 
 pub async fn handle_v1_patch_single_file_from_ticket(
@@ -82,11 +83,12 @@ pub async fn handle_v1_patch_single_file_from_ticket(
         10
     );
 
-    let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, diff_chunks);
+    let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, diff_chunks.clone());
 
     let resp = PatchResponse {
         state: outputs_unwrapped,
         results,
+        chunks: diff_chunks
     };
     
     Ok(Response::builder()

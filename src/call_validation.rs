@@ -355,7 +355,7 @@ pub struct DiffChunk {
     pub lines_add: String,
     #[serde(default)]
     pub file_name_rename: Option<String>,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", skip_serializing)]
     pub is_file: bool,
 }
 
