@@ -80,6 +80,20 @@ pub async fn correct_and_validate_ticket(gcx: Arc<ARwLock<GlobalContext>>, ticke
     let _path_after = PathBuf::from(ticket.filename_after.as_str());
     
     match ticket.action {
+        PatchAction::AddToFile => {
+            ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
+                .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
+            if ticket.locate_as != Some(PatchLocateAs::BEFORE) || ticket.locate_as != Some(PatchLocateAs::AFTER) {
+                return Err(good_error_text(&format!("failed to parse ticket: 📍ADD_TO_FILE only supports BEFORE, AFTER, not '{:?}'", ticket.locate_as), ticket));
+            }
+        },
+        PatchAction::RewriteFunction => {
+            ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
+               .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
+            if ticket.locate_as != Some(PatchLocateAs::FUNC) {
+                return Err(good_error_text(&format!("failed to parse ticket: 📍REWRITE_FUNCTION only supports FUNC, not '{:?}'", ticket.locate_as), ticket));
+            }
+        },
         PatchAction::PartialEdit => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
                 .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;

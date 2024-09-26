@@ -86,7 +86,7 @@ DT = 0.1
 def test02_partial_edit():
     text_expected = (TEST11_DATA / "toad_partial_edit_02.py").read_text()
     ticket_text = \
-        f"""📍PARTIAL_EDIT 001 {TOAD_ORIG}
+f"""📍PARTIAL_EDIT 001 {TOAD_ORIG}
 ```python
     def croak(self, x, y, n_times):
         for _ in range(n_times):
@@ -103,6 +103,48 @@ def test02_partial_edit():
     assert res0["file_name_edit"] == str(TOAD_ORIG), res0
     assert res0["file_text"] == text_expected, print(res0["file_text"])
     print(colored("test02_partial_edit PASSED", "green"))
+
+
+def test01_add_to_file():
+    ticket_text = \
+f"""📍ADD_TO_FILE 001 {TOAD_ORIG} BEFORE Toad
+```python
+def hello_toad():
+    print("Hello Toad!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+
+
+def test02_add_to_file():
+    ticket_text = \
+        f"""📍ADD_TO_FILE 001 {TOAD_ORIG} AFTER Toad
+```python
+def hello_toad():
+    print("Hello Toad!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+
+
+def test03_add_to_file():
+    ticket_text = \
+f"""📍ADD_TO_FILE 001 {TOAD_ORIG} BEFORE Toad::bounce_off_banks
+"""
+
+
+def test04_add_to_file():
+    ticket_text = \
+f"""📍ADD_TO_FILE 001 {TOAD_ORIG} AFTER Toad::bounce_off_banks
+"""
+
+
+def test01_rewrite_function():
+    ticket_text = \
+f"""📍REWRITE_FUNCTION 001 {TOAD_ORIG} FUNC standalone_jumping_function
+"""
 
 
 if __name__ == "__main__":
