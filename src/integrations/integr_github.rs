@@ -48,18 +48,10 @@ impl Tool for ToolGithub {
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, Vec<ContextEnum>), String> {
-        let project_dir = match args.get("project_dir") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `project_dir` is not a string: {:?}", v)),
-            None => return Err("Missing argument `project_dir`".to_string())
-        };
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
+        let project_dir = parse_argument(args, "project_dir")?;
+        let command = parse_argument(args, "command")?;
 
-        let mut parsed_args = shell_words::split(command).map_err(|e| e.to_string())?;
+        let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
         if parsed_args.is_empty() {
             return Err("Parsed command is empty".to_string());
         }
@@ -73,7 +65,7 @@ impl Tool for ToolGithub {
         let gh_command = self.integration_github.gh_binary_path.as_deref().unwrap_or("gh");
         let output = Command::new(gh_command)
             .args(&parsed_args)
-            .current_dir(project_dir)
+            .current_dir(&project_dir)
             .env("GH_TOKEN", &self.integration_github.GH_TOKEN)
             .output()
             .await
@@ -116,12 +108,8 @@ impl Tool for ToolGithub {
         &self,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, String), String> {
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
-        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
+        let command = parse_argument(args, "command")?;
+        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
 
         if self.integration_github.skip_confirmation.iter().any(|glob| {
             let pattern = Pattern::new(glob).unwrap();
@@ -137,20 +125,24 @@ impl Tool for ToolGithub {
         &self,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, String), String> { 
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
-        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { command };
+        let command = parse_argument(args, "command")?;
+        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
 
-        if let Some(rule) = self.integration_github.skip_confirmation.iter().find(|glob| {
+        if let Some(rule) = self.integration_github.deny.iter().find(|glob| {
             let pattern = Pattern::new(glob).unwrap();
             pattern.matches(command_to_match)
         }) {
-            return Ok((true, format!("Command '{}' is denied by rule '{}' due to GitHub integration settings", command, rule)));
+            return Ok((true, format!("Command '{}' is denied by rule '{}'", command, rule)));
         }
 
         Ok((false, "".to_string()))
+    }
+}
+
+fn parse_argument(args: &HashMap<String, Value>, arg_name: &str) -> Result<String, String> {
+    match args.get(arg_name) {
+        Some(Value::String(s)) => Ok(s.clone()),
+        Some(v) => Err(format!("argument `{}` is not a string: {:?}", arg_name, v)),
+        None => Err(format!("Missing argument `{}`", arg_name)),
     }
 }
