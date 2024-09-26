@@ -124,6 +124,7 @@ impl Tool for ToolGithub {
     fn check_if_denied(
         &self,
         args: &HashMap<String, Value>,
+        detailed: bool
     ) -> Result<(bool, String), String> { 
         let command = parse_argument(args, "command")?;
         let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
@@ -132,7 +133,12 @@ impl Tool for ToolGithub {
             let pattern = Pattern::new(glob).unwrap();
             pattern.matches(command_to_match)
         }) {
-            return Ok((true, format!("Command '{}' is denied by rule '{}'", command, rule)));
+            let message = if detailed {
+                format!("Command '{}' is denied by rule '{}'", command, rule)
+            } else {
+                format!("Command '{}' is denied", command)
+            };
+            return Ok((true, message));
         }
 
         Ok((false, "".to_string()))

@@ -32,6 +32,7 @@ pub trait Tool: Send + Sync {
     fn check_if_denied(
         &self,
         _args: &HashMap<String, Value>,
+        _detailed: bool,
     ) -> Result<(bool, String), String> { 
         Ok((false, "".to_string()))
     }

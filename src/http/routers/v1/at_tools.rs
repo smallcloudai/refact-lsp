@@ -67,7 +67,7 @@ pub async fn handle_v1_tools_validate(
         };
 
         let tool_locked = tool.lock().await;
-        match tool_locked.check_if_denied(&args) {
+        match tool_locked.check_if_denied(&args, true) {
             Ok((is_denied, message)) => {
                 if is_denied {
                     result_messages.push(message);
