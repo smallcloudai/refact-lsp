@@ -115,11 +115,8 @@ async fn main() {
         }
     }
 
-    let byok_config_path = yaml_configs_try_create_all(gcx.clone()).await;
-    if cmdline.only_create_yaml_configs {
-        println!("{}", byok_config_path);
-        std::process::exit(0);
-    }
+    yaml_configs_try_create_all(gcx.clone(), cmdline.only_create_yaml_configs).await;
+    
     if cmdline.address_url == "" {
         info!("pass --address-url or try --help");
         std::process::exit(0);
