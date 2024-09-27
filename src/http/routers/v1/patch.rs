@@ -13,7 +13,7 @@ use crate::diffs::{ApplyDiffResult, ApplyDiffUnwrapped, correct_and_validate_chu
 use crate::global_context::GlobalContext;
 use crate::privacy::load_privacy_if_needed;
 use crate::tools::patch::tickets::get_tickets_from_messages;
-use crate::tools::patch::tool_patch::{get_active_tickets, tickets_to_diff_chunks};
+use crate::tools::patch::tool_patch::{get_and_correct_active_tickets, tickets_to_diff_chunks};
 use crate::tools::tools_execute::unwrap_subchat_params;
 
 
@@ -28,6 +28,7 @@ pub struct PatchResponse {
     state: Vec<ApplyDiffUnwrapped>,
     results: Vec<ApplyDiffResult>,
     chunks: Vec<DiffChunk>,
+    ticket_ids_already_applied: Vec<String>,
 }
 
 pub async fn handle_v1_patch_single_file_from_ticket(
@@ -56,39 +57,57 @@ pub async fn handle_v1_patch_single_file_from_ticket(
     }
     
     let all_tickets_from_above = get_tickets_from_messages(ccx.clone()).await;
-    let active_tickets = get_active_tickets(global_context.clone(), post.ticket_ids.clone(), all_tickets_from_above.clone()).await.map_err(|e|{
+    let mut active_tickets = get_and_correct_active_tickets(global_context.clone(), post.ticket_ids.clone(), all_tickets_from_above.clone()).await.map_err(|e|{
         ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e)
     })?;
 
     let mut usage = ChatUsage { ..Default::default() };
-    let mut diff_chunks = tickets_to_diff_chunks(
-        ccx,
-        active_tickets,
-        post.ticket_ids.clone(),
-        &params,
-        &"patch_123".to_string(),
-        &mut usage,
-    ).await.map_err(|e|
+
+    let mut res;
+    loop {
+        let diff_chunks = tickets_to_diff_chunks(
+            ccx.clone(),
+            &mut active_tickets,
+            post.ticket_ids.clone(),
+            &params,
+            &"patch_123".to_string(),
+            &mut usage,
+        ).await;
+        res = diff_chunks;
+        if active_tickets.is_empty() {
+            break;
+        }
+    }
+    let mut diff_chunks = res.map_err(|e|
         ScratchError::new(StatusCode::BAD_REQUEST, e)
     )?;
+    let (
+        results, 
+        outputs_unwrapped,
+        already_applied_tickets,
+    ) = if diff_chunks.is_empty() {
+        (vec![], vec![], post.ticket_ids.clone())
+    } else {
+        correct_and_validate_chunks(global_context.clone(), &mut diff_chunks).await
+            .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
 
-    correct_and_validate_chunks(global_context.clone(), &mut diff_chunks).await
-        .map_err(|e|ScratchError::new(StatusCode::BAD_REQUEST, e))?;
+        let (results, outputs) = read_files_n_apply_diff_chunks(
+            load_privacy_if_needed(global_context.clone()).await,
+            &diff_chunks,
+            &vec![false; diff_chunks.len()],
+            &vec![true; diff_chunks.len()],
+            10
+        );
 
-    let (results, outputs) = read_files_n_apply_diff_chunks(
-        load_privacy_if_needed(global_context.clone()).await, 
-        &diff_chunks, 
-        &vec![false; diff_chunks.len()], 
-        &vec![true; diff_chunks.len()],
-        10
-    );
-
-    let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, diff_chunks.clone());
+        let outputs_unwrapped = unwrap_diff_apply_outputs(outputs, diff_chunks.clone());
+        (results, outputs_unwrapped, vec![])
+    };
 
     let resp = PatchResponse {
         state: outputs_unwrapped,
         results,
-        chunks: diff_chunks
+        chunks: diff_chunks,
+        ticket_ids_already_applied: already_applied_tickets,
     };
     
     Ok(Response::builder()

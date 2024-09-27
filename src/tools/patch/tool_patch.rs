@@ -9,14 +9,13 @@ use tracing::warn;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::patch::chat_interaction::execute_chat_model;
 use crate::tools::patch::diff_formats::postprocess_diff_chunks_from_message;
-use crate::tools::patch::tickets::{TicketToApply, correct_and_validate_ticket, get_tickets_from_messages, PatchAction};
+use crate::tools::patch::tickets::{TicketToApply, get_tickets_from_messages, PatchAction, correct_and_validate_active_ticket};
 use crate::tools::patch::unified_diff_format::UnifiedDiffFormat;
-use crate::tools::patch::ticket_to_chunks::{add_to_file_diff, full_rewrite_diff, new_file_diff, rewrite_symbol_diff};
+use crate::tools::patch::ticket_to_chunks::{add_to_file_diff, full_rewrite_diff, new_file_diff, retain_non_applied_tickets, rewrite_symbol_diff};
 use crate::tools::tools_execute::unwrap_subchat_params;
 use crate::tools::tools_description::Tool;
 use crate::call_validation::{ChatMessage, ChatUsage, ContextEnum, DiffChunk, SubchatParameters};
 use crate::global_context::GlobalContext;
-
 
 pub const N_CHOICES: usize = 16;
 pub type DefaultToolPatch = UnifiedDiffFormat;
@@ -34,7 +33,7 @@ impl ToolPatch {
     }
 }
 
-fn choose_correct_chunk(chunks: Vec<Result<Vec<DiffChunk>, String>>) -> Result<Vec<DiffChunk>, String> {
+fn partial_edit_choose_correct_chunk(chunks: Vec<Result<Vec<DiffChunk>, String>>) -> Result<Vec<DiffChunk>, String> {
     let errors = chunks
         .iter()
         .filter(|res| res.is_err())
@@ -80,7 +79,7 @@ fn choose_correct_chunk(chunks: Vec<Result<Vec<DiffChunk>, String>>) -> Result<V
     )
 }
 
-async fn partial_edit_tickets_to_diffs(
+async fn partial_edit_tickets_to_chunks(
     ccx_subchat: Arc<AMutex<AtCommandsContext>>,
     tickets: Vec<TicketToApply>,
     params: &SubchatParameters,
@@ -104,7 +103,7 @@ async fn partial_edit_tickets_to_diffs(
         let diffs = postprocess_diff_chunks_from_message(gcx.clone(), chunks).await;
         chunks_for_answers.push(diffs);
     }
-    choose_correct_chunk(chunks_for_answers).map_err(|e|(e, None))
+    partial_edit_choose_correct_chunk(chunks_for_answers).map_err(|e|(e, None))
 }
 
 pub fn good_error_text(reason: &str, tickets: &Vec<String>, resolution: Option<String>) -> String {
@@ -115,7 +114,7 @@ pub fn good_error_text(reason: &str, tickets: &Vec<String>, resolution: Option<S
     text
 }
 
-pub async fn get_active_tickets(
+pub async fn get_and_correct_active_tickets(
     gcx: Arc<ARwLock<GlobalContext>>,
     ticket_ids: Vec<String>,
     all_tickets_from_above: HashMap<String, TicketToApply>,
@@ -149,24 +148,28 @@ pub async fn get_active_tickets(
     }
 
     for ticket in active_tickets.iter_mut() {
-        correct_and_validate_ticket(gcx.clone(), ticket).await.map_err(|e|good_error_text(&e, &ticket_ids, None))?;
+        correct_and_validate_active_ticket(gcx.clone(), ticket).await.map_err(|e|good_error_text(&e, &ticket_ids, None))?;
     }
+
+    retain_non_applied_tickets(gcx.clone(), &mut active_tickets).await;
 
     Ok(active_tickets)
 }
 
-
 pub async fn tickets_to_diff_chunks(
     ccx_subchat: Arc<AMutex<AtCommandsContext>>,
-    active_tickets: Vec<TicketToApply>,
+    active_tickets: &mut Vec<TicketToApply>,
     ticket_ids: Vec<String>,
     params: &SubchatParameters,
     tool_call_id: &String,
     usage: &mut ChatUsage,
 ) -> Result<Vec<DiffChunk>, String> {
+    if active_tickets.is_empty() {
+        return Ok(vec![]);
+    }
     let gcx = ccx_subchat.lock().await.global_context.clone();
     let action = active_tickets[0].action.clone();
-    match action {
+    let res = match action {
         PatchAction::AddToFile => {
             let mut chunks = add_to_file_diff(gcx.clone(), &active_tickets[0]).await?;
             postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
@@ -176,7 +179,7 @@ pub async fn tickets_to_diff_chunks(
             postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
         },
         PatchAction::PartialEdit => {
-            partial_edit_tickets_to_diffs(
+            partial_edit_tickets_to_chunks(
                 ccx_subchat.clone(), active_tickets.clone(), params, tool_call_id, usage
             ).await.map_err(|(e, r)| good_error_text(e.as_str(), &ticket_ids, r))
         },
@@ -189,7 +192,21 @@ pub async fn tickets_to_diff_chunks(
             postprocess_diff_chunks_from_message(gcx.clone(), &mut chunks).await
         },
         _ => Err(good_error_text(&format!("unknown action provided: '{:?}'.", action), &ticket_ids, None))
+    };
+    // todo: add multiple attempts for PartialEdit tickets (3)
+    match res {
+        Ok(_) => active_tickets.clear(),
+        Err(_) => {
+            // if AddToFile or RewriteSymbol failed => reassign them to PartialEdit
+            active_tickets.retain(|x|x.fallback_action.is_some() && x.fallback_action != Some(x.action.clone()));
+            active_tickets.iter_mut().for_each(|x|{
+                if let Some(fallback_action) = x.fallback_action.clone() {
+                    x.action = fallback_action;
+                }
+            });
+        }
     }
+    res
 }
 
 #[async_trait]
@@ -229,7 +246,7 @@ impl Tool for ToolPatch {
 
         let gcx = ccx_subchat.lock().await.global_context.clone();
         let all_tickets_from_above = get_tickets_from_messages(ccx.clone()).await;
-        let active_tickets = get_active_tickets(gcx, tickets.clone(), all_tickets_from_above.clone()).await?;
+        let mut active_tickets = get_and_correct_active_tickets(gcx, tickets.clone(), all_tickets_from_above.clone()).await?;
 
         if active_tickets[0].filename_before != path {
             return Err(good_error_text(
@@ -237,15 +254,23 @@ impl Tool for ToolPatch {
                 &tickets, Some("recreate the ticket with correct filename in 📍-notation or change path argument".to_string())
             ));
         }
-
-        let diff_chunks = tickets_to_diff_chunks(
-            ccx_subchat,
-            active_tickets,
-            tickets.clone(),
-            &params,
-            tool_call_id,
-            &mut usage,
-        ).await?;
+        
+        let mut res;
+        loop {
+            let diff_chunks = tickets_to_diff_chunks(
+                ccx_subchat.clone(),
+                &mut active_tickets,
+                tickets.clone(),
+                &params,
+                tool_call_id,
+                &mut usage,
+            ).await;
+            res = diff_chunks;
+            if active_tickets.is_empty() {
+                break;
+            }
+        }
+        let diff_chunks = res?;
 
         let mut results = vec![];
         results.push(ChatMessage {

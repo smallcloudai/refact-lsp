@@ -272,6 +272,95 @@ DT = 10.
     print(colored("test03_rewrite_symbol PASSED", "green"))
 
 
+def test01_already_applied_add_to_file():
+    test_file = TEST11_DATA / "already_applied_add_to_file_01.py"
+    ticket_text = \
+f"""📍ADD_TO_FILE 001 {test_file} BEFORE Toad
+```python
+def hello_toad():
+    print("Hello Toad!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test01_already_applied_add_to_file PASSED", "green"))
+
+
+def test02_already_applied_add_to_file():
+    test_file = TEST11_DATA / "already_applied_add_to_file_02.py"
+    ticket_text = \
+        f"""📍ADD_TO_FILE 001 {test_file} AFTER Toad
+```python
+def hello_toad():
+    print("Hello Toad!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test02_already_applied_add_to_file PASSED", "green"))
+
+
+def test01_already_applied_rewrite_symbol():
+    test_file = TEST11_DATA / "already_applied_rewrite_symbol_01.py"
+    ticket_text = \
+        f"""📍REWRITE_SYMBOL 001 {test_file} INFILL standalone_jumping_function
+```python
+def brand_new_function():
+    print("I am really a brand new function!")
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test01_already_applied_rewrite_symbol PASSED", "green"))
+
+
+def test02_already_applied_rewrite_symbol():
+    test_file = TEST11_DATA / "already_applied_rewrite_symbol_02.py"
+    ticket_text = \
+f"""📍REWRITE_SYMBOL 001 {test_file} INFILL Toad::bounce_off_banks
+```python
+    def bounce_off_banks(self, pond_width, pond_height):
+        pass
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test02_already_applied_rewrite_symbol PASSED", "green"))
+
+
+def test01_already_applied_rewrite_whole_file():
+    text_expected = TOAD_ORIG.read_text()
+    ticket_text = \
+        f"""📍REWRITE_WHOLE_FILE 001 {TOAD_ORIG}
+```python
+{text_expected}
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test02_already_applied_rewrite_symbol PASSED", "green"))
+
+
+def test01_already_applied_new_file():
+    text_expected = TOAD_ORIG.read_text()
+    ticket_text = \
+        f"""📍NEW_FILE 001 {TOAD_ORIG}
+```python
+{text_expected}
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+    assert resp["ticket_ids_already_applied"] == ["001"], resp
+    print(colored("test01_already_applied_new_file PASSED", "green"))
+
+
+
 if __name__ == "__main__":
     test01_rewrite_whole_file()
     test01_new_file()
@@ -285,6 +374,13 @@ if __name__ == "__main__":
     test01_rewrite_symbol()
     test02_rewrite_symbol()
     test03_rewrite_symbol()
+
+    test01_already_applied_add_to_file()
+    test02_already_applied_add_to_file()
+    test01_already_applied_rewrite_symbol()
+    test02_already_applied_rewrite_symbol()
+    test01_already_applied_rewrite_whole_file()
+    test01_already_applied_new_file()
 
     # NON DETERMINISTIC TESTS
 
