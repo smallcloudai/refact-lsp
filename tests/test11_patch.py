@@ -360,6 +360,22 @@ def test01_already_applied_new_file():
     print(colored("test01_already_applied_new_file PASSED", "green"))
 
 
+def test01_already_fallback_rewrite_symbol():
+    text_expected = (TEST11_DATA / "toad_partial_edit_01.py").read_text()
+    ticket_text = \
+        f"""📍REWRITE_SYMBOL 001 {TOAD_ORIG}
+```python
+DT = 0.1
+```
+"""
+    messages = make_messages(ticket_text)
+    resp = patch_request(messages, ["001"])
+
+    res0 = resp["results"][0]
+    assert res0["file_name_edit"] == str(TOAD_ORIG)
+    assert res0["file_text"] == text_expected
+    print(colored("test01_already_fallback_rewrite_symbol PASSED", "green"))
+
 
 if __name__ == "__main__":
     test01_rewrite_whole_file()
@@ -382,8 +398,8 @@ if __name__ == "__main__":
     test01_already_applied_rewrite_whole_file()
     test01_already_applied_new_file()
 
-    # NON DETERMINISTIC TESTS
-
+    # NON-DETERMINISTIC TESTS
     # test01_partial_edit()
     # test02_partial_edit()
+    # test01_already_fallback_rewrite_symbol()
 
