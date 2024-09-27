@@ -20,6 +20,7 @@ use crate::caps::CodeAssistantCaps;
 use crate::completion_cache::CompletionCache;
 use crate::custom_error::ScratchError;
 use crate::files_in_workspace::DocumentsState;
+use crate::integrations::integr_pdb::PdbSession;
 use crate::privacy::PrivacySettings;
 use crate::telemetry::telemetry_structs;
 use crate::vecdb::vdb_highlev::VecDb;
@@ -141,6 +142,7 @@ pub struct GlobalContext {
     pub documents_state: DocumentsState,
     pub at_commands_preview_cache: Arc<AMutex<AtCommandsPreviewCache>>,
     pub privacy_settings: Arc<PrivacySettings>,
+    pub pdb_sessions: Arc<AMutex<Vec<PdbSession>>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -318,6 +320,7 @@ pub async fn create_global_context(
         documents_state: DocumentsState::new(workspace_dirs).await,
         at_commands_preview_cache: Arc::new(AMutex::new(AtCommandsPreviewCache::new())),
         privacy_settings: Arc::new(PrivacySettings::default()),
+        pdb_sessions: Arc::new(AMutex::new(vec![])),
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {

@@ -1,4 +1,5 @@
 pub mod integr_github;
+pub mod integr_pdb;
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
 # If there is a syntax error in this file, no integrations will work.
