@@ -57,7 +57,7 @@ pub async fn handle_v1_patch_single_file_from_ticket(
     
     let all_tickets_from_above = get_tickets_from_messages(ccx.clone()).await;
     let active_tickets = get_active_tickets(global_context.clone(), post.ticket_ids.clone(), all_tickets_from_above.clone()).await.map_err(|e|{
-        ScratchError::new(StatusCode::BAD_REQUEST, e)
+        ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e)
     })?;
 
     let mut usage = ChatUsage { ..Default::default() };
