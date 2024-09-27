@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use glob::Pattern;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 use async_trait::async_trait;
@@ -48,8 +47,16 @@ impl Tool for ToolGithub {
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, Vec<ContextEnum>), String> {
-        let project_dir = parse_argument(args, "project_dir")?;
-        let command = parse_argument(args, "command")?;
+        let project_dir = match args.get("project_dir") {
+            Some(Value::String(s)) => s,
+            Some(v) => return Err(format!("argument `project_dir` is not a string: {:?}", v)),
+            None => return Err("Missing argument `project_dir`".to_string())
+        };
+        let command = match args.get("command") {
+            Some(Value::String(s)) => s,
+            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+            None => return Err("Missing argument `command`".to_string())
+        };
 
         let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
         if parsed_args.is_empty() {
@@ -104,59 +111,20 @@ impl Tool for ToolGithub {
         Ok((false, results))
     }
 
-    fn check_for_confirmation_needed(
+    fn get_command_if_applicable(
         &self,
         args: &HashMap<String, Value>,
-    ) -> Result<(bool, String), String> {
-        let command = parse_argument(args, "command")?;
-        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
-
-        if self.integration_github.skip_confirmation.iter().any(|glob| {
-            let pattern = if glob.starts_with("gh ") {
-                Pattern::new(&glob[3..]).unwrap()
-            } else {
-                Pattern::new(glob).unwrap()
-            };
-            pattern.matches(command_to_match)
-        }) {
-            return Ok((false, "".to_string()));
+    ) -> Result<Option<String>, String> {
+        let command = match args.get("command") {
+            Some(Value::String(s)) => s,
+            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+            None => return Err("Missing argument `command`".to_string())
+        };
+        
+        if !command.starts_with("gh ") {
+            Ok(Some("gh ".to_string() + &command))
+        } else {
+            Ok(Some(command.clone()))
         }
-       
-        Ok((true, format!("Command '{}' requires confirmation", command)))
-    }
-
-    fn check_if_denied(
-        &self,
-        args: &HashMap<String, Value>,
-        detailed: bool
-    ) -> Result<(bool, String), String> { 
-        let command = parse_argument(args, "command")?;
-        let command_to_match = if command.starts_with("gh ") { &command[3..] } else { &command };
-
-        if let Some(rule) = self.integration_github.deny.iter().find(|glob| {
-            let pattern = if glob.starts_with("gh ") {
-                Pattern::new(&glob[3..]).unwrap()
-            } else {
-                Pattern::new(glob).unwrap()
-            };
-            pattern.matches(command_to_match)
-        }) {
-            let message = if detailed {
-                format!("Command '{}' is denied by rule '{}'", command, rule)
-            } else {
-                format!("Command '{}' is denied", command)
-            };
-            return Ok((true, message));
-        }
-
-        Ok((false, "".to_string()))
-    }
-}
-
-fn parse_argument(args: &HashMap<String, Value>, arg_name: &str) -> Result<String, String> {
-    match args.get(arg_name) {
-        Some(Value::String(s)) => Ok(s.clone()),
-        Some(v) => Err(format!("argument `{}` is not a string: {:?}", arg_name, v)),
-        None => Err(format!("Missing argument `{}`", arg_name)),
     }
 }

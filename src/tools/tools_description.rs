@@ -1,3 +1,4 @@
+use glob::Pattern;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,6 +13,11 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolConfig {
+    pub commands_need_confirmation: Vec<String>,
+    pub commands_deny: Vec<String>,
+}
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -22,18 +28,48 @@ pub trait Tool: Send + Sync {
         args: &HashMap<String, Value>
     ) -> Result<(bool, Vec<ContextEnum>), String>;
 
-    fn check_for_confirmation_needed(
+    fn get_command_if_applicable(
         &self,
         _args: &HashMap<String, Value>,
+    ) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn check_for_confirmation_needed(
+        &self,
+        args: &HashMap<String, Value>,
     ) -> Result<(bool, String), String> { 
+        if let Some(command) = self.get_command_if_applicable(args)? {
+            if let Some(rule) = self.commands_need_confirmation.iter().find(|glob| {
+                let pattern = Pattern::new(glob).unwrap();
+                pattern.matches(&command)
+            }) {
+                return Ok((true, format!("Command {} needs confirmation due to rule {}", command, rule)));
+            }
+        }
+
         Ok((false, "".to_string()))
     }
 
     fn check_if_denied(
         &self,
-        _args: &HashMap<String, Value>,
-        _detailed: bool,
+        args: &HashMap<String, Value>,
+        detailed: bool,
     ) -> Result<(bool, String), String> { 
+        if let Some(command) = self.get_command_if_applicable(args)? {
+            if let Some(rule) = self.commands_deny.iter().find(|glob| {
+                let pattern = Pattern::new(glob).unwrap();
+                pattern.matches(&command)
+            }) {
+                let message = if detailed {
+                    format!("Command {} is denied due to rule {}", command, rule)
+                } else {
+                    format!("Command {} is denied", command)
+                };
+                return Ok((true, message));
+            }
+        }
+
         Ok((false, "".to_string()))
     }
 
