@@ -26,7 +26,7 @@ pub async fn read_file(
     let candidate = return_one_candidate_or_a_good_error(
         gcx.clone(), &file_path, &candidates, &get_project_dirs(gcx.clone()).await, false
     ).await?;
-    context_file_from_file_path(gcx.clone(), vec![candidate], file_path.clone()).await
+    context_file_from_file_path(gcx.clone(), candidate).await
 }
 
 async fn load_tokenizer(
@@ -131,7 +131,6 @@ pub async fn execute_chat_model(
         Some(max_new_tokens),
         N_CHOICES,
         Some(usage),
-        Some(format!("{log_prefix}-patch")),
         Some(tool_call_id.clone()),
         Some(format!("{log_prefix}-patch")),
     ).await.map_err(|e|(e, None))?;

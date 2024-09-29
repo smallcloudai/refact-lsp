@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak, Mutex as StdMutex};
@@ -36,7 +37,7 @@ pub async fn get_file_text_from_memory_or_disk(global_context: Arc<ARwLock<Globa
     }
     read_file_from_disk_without_privacy_check(&file_path)
         .await.map(|x|x.to_string())
-        .map_err(|e|format!("Failed to read file: not found in memory, not found on disk. Error:\n{}", e))
+        .map_err(|e|format!("Not found in memory, not found on disk: {}", e))
 }
 
 impl Document {
@@ -231,6 +232,29 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
     } else {
         None
     }
+}
+
+pub fn ls_files(path: &PathBuf, recursive: bool) -> Result<Vec<PathBuf>, String> {
+    if !path.is_dir() {
+        return Err(format!("path '{}' is not a directory", path.display()));
+    }
+
+    let mut paths = vec![];
+    let mut dirs_to_visit = vec![path.clone()];
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        for entry in fs::read_dir(&dir).map_err(|e| format!("failed to read directory '{}': {}", dir.display(), e))? {
+            let entry = entry
+                .map_err(|e| format!("failed to read entry in '{}': {}", dir.display(), e))?;
+            let path = entry.path();
+            if path.is_dir() && recursive {
+                dirs_to_visit.push(path);
+            } else if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+    Ok(paths)
 }
 
 #[allow(dead_code)]

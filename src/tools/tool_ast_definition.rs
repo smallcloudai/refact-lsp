@@ -55,7 +55,7 @@ impl Tool for ToolAstDefinition {
             let defs = crate::ast::ast_db::definitions(ast_index.clone(), &symbol).await;
 
             let file_paths = defs.iter().map(|x| x.cpath.clone()).collect::<Vec<_>>();
-            let short_file_paths = crate::files_correction::shortify_paths(gcx.clone(), file_paths.clone()).await;
+            let short_file_paths = crate::files_correction::shortify_paths(gcx.clone(), &file_paths).await;
 
             let (messages, tool_message) = if !defs.is_empty() {
                 const DEFS_LIMIT: usize = 20;
@@ -76,7 +76,6 @@ impl Tool for ToolAstDefinition {
                         symbols: vec![res.path_drop0()],
                         gradient_type: -1,
                         usefulness: 100.0,
-                        is_body_important: false,
                     })
                 }).collect::<Vec<ContextEnum>>();
                 if defs.len() > DEFS_LIMIT {
@@ -112,11 +111,8 @@ pub async fn there_are_definitions_with_similar_names_though(
     ast_index: Arc<AMutex<AstDB>>,
     symbol: &str,
 ) -> String {
-    let fuzzy_matches: Vec<String> = crate::ast::ast_db::definition_paths_fuzzy(ast_index.clone(), symbol)
-        .await
-        .into_iter()
-        .take(20)
-        .collect();
+    let fuzzy_matches: Vec<String> = crate::ast::ast_db::definition_paths_fuzzy(ast_index.clone(), symbol, 20, 5000)
+        .await;
 
     let tool_message = if fuzzy_matches.is_empty() {
         let counters = fetch_counters(ast_index).await;

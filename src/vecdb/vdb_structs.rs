@@ -29,7 +29,6 @@ pub struct VecdbConstants {
     pub vectorizer_n_ctx: usize,
     pub endpoint_embeddings_template: String,
     pub endpoint_embeddings_style: String,
-    pub cooldown_secs: u64,
     pub splitter_window_size: usize,
     pub vecdb_max_files: usize,
 }
@@ -51,8 +50,6 @@ pub struct VecDbStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct VecdbRecord {
     pub vector: Option<Vec<f32>>,
-    pub window_text: String,
-    pub window_text_hash: String,
     pub file_path: PathBuf,
     pub start_line: u64,
     pub end_line: u64,
@@ -60,7 +57,7 @@ pub struct VecdbRecord {
     pub usefulness: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SplitResult {
     pub file_path: PathBuf,
     pub window_text: String,
@@ -70,7 +67,6 @@ pub struct SplitResult {
     pub symbol_path: String,
 }
 
-// #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[derive(Clone)]
 pub struct SimpleTextHashVector {
     pub window_text: String,

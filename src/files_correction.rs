@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
-
 use crate::global_context::GlobalContext;
+use crate::fuzzy_search::fuzzy_search;
+
 
 pub async fn paths_from_anywhere(global_context: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> {
     let file_paths_from_memory = global_context.read().await.documents_state.memory_document_map.keys().map(|x|x.clone()).collect::<Vec<_>>();
@@ -73,16 +74,6 @@ fn make_cache(paths: &Vec<PathBuf>, workspace_folders: &Vec<PathBuf>) -> (
     (cache_correction, cache_shortened, cnt)
 }
 
-pub async fn get_files_in_dir(
-    global_context: Arc<ARwLock<GlobalContext>>,
-    dir: &PathBuf,
-) -> Vec<PathBuf> {
-    let paths = paths_from_anywhere(global_context.clone()).await;
-    paths.into_iter()
-        .filter(|path| path.parent() == Some(dir))
-        .collect()
-}
-
 pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalContext>>) -> (Arc<HashMap<String, HashSet<String>>>, Arc<HashSet<String>>) {
     let (cache_dirty_arc, mut cache_correction_arc, mut cache_shortened_arc) = {
         let cx = global_context.read().await;
@@ -116,84 +107,43 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_shortened_arc);
 }
 
-pub fn fuzzy_search<I>(
+async fn complete_path_with_project_dir(
+    gcx: Arc<ARwLock<GlobalContext>>,
     correction_candidate: &String,
-    candidates: I,
-    top_n: usize,
-) -> Vec<String>
-where I: IntoIterator<Item = String> {
-    const FILENAME_WEIGHT: i32 = 3;
-    const DISTANCE_THRESHOLD: f64 = 0.45;
-    const EXCESS_WEIGHT: f64 = 3.0;
-
-    let mut correction_bigram_count: HashMap<(char, char), i32> = HashMap::new();
-
-    // Count bigrams of correction candidate
-    let mut correction_candidate_length = 0;
-    let mut weight = FILENAME_WEIGHT;
-    for window in correction_candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
-        if window[0] == std::path::MAIN_SEPARATOR {
-            weight = 1;
-        }
-        correction_candidate_length += weight;
-        *correction_bigram_count
-            .entry((window[0], window[1]))
-            .or_insert(0) += weight;
-    }
-
-    let mut top_n_candidates = Vec::new();
-
-    for candidate in candidates {
-        let mut missing_count: i32 = 0;
-        let mut excess_count = 0;
-        let mut candidate_len = 0;
-        let mut bigram_count = correction_bigram_count.clone();
-
-        // Discount candidate's bigrams from correction candidate's ones
-        let mut weight = FILENAME_WEIGHT;
-        for window in candidate.to_lowercase().chars().collect::<Vec<_>>().windows(2).rev() {
-            if window[0] == std::path::MAIN_SEPARATOR {
-                weight = 1;
-            }
-            candidate_len += weight;
-            if let Some(entry) = bigram_count.get_mut(&(window[0], window[1])) {
-                *entry -= weight;
-            } else {
-                missing_count += weight;
-            }
-        }
-
-        for (&_, &count) in bigram_count.iter() {
-            if count > 0 {
-                excess_count += count;
-            } else {
-                missing_count += -count;
-            }
-        }
-
-        let distance = (missing_count as f64 + excess_count as f64 * EXCESS_WEIGHT) /
-            (correction_candidate_length as f64 + (candidate_len as f64) * EXCESS_WEIGHT);
-        if distance < DISTANCE_THRESHOLD {
-            top_n_candidates.push((candidate, distance));
-            top_n_candidates
-                .sort_by(|a, b| a.1.partial_cmp(&b.1)
-                .unwrap_or(std::cmp::Ordering::Equal));
-            if top_n_candidates.len() > top_n {
-                top_n_candidates.pop();
-            }
+    is_dir: bool,
+) -> Option<PathBuf> {
+    fn path_exists(path: &PathBuf, is_dir: bool) -> bool {
+        return if (is_dir && path.is_dir()) || (!is_dir && path.is_file()) {
+            true
+        } else {
+            false
         }
     }
-
-    top_n_candidates.into_iter().map(|x| x.0).collect()
+    let candidate_path = PathBuf::from(correction_candidate);
+    let project_dirs = get_project_dirs(gcx.clone()).await;
+    for p in project_dirs {
+        if path_exists(&candidate_path, is_dir) && candidate_path.starts_with(&p) {
+            return Some(candidate_path);
+        }
+        let j_path = p.join(&candidate_path);
+        if path_exists(&j_path, is_dir) {
+            return Some(j_path);
+        }
+    }
+    None
 }
 
 pub async fn correct_to_nearest_filename(
-    global_context: Arc<ARwLock<GlobalContext>>,
+    gcx: Arc<ARwLock<GlobalContext>>,
     correction_candidate: &String,
     fuzzy: bool,
     top_n: usize,
 ) -> Vec<String> {
-    let (cache_correction_arc, cache_fuzzy_arc) = files_cache_rebuild_as_needed(global_context.clone()).await;
+    if let Some(fixed) = complete_path_with_project_dir(gcx.clone(), correction_candidate, false).await {
+        return vec![fixed.to_string_lossy().to_string()];
+    }
+
+    let (cache_correction_arc, cache_fuzzy_arc) = files_cache_rebuild_as_needed(gcx.clone()).await;
     // it's dangerous to use cache_correction_arc without a mutex, but should be fine as long as it's read-only
     // (another thread never writes to the map itself, it can only replace the arc with a different map)
 
@@ -206,7 +156,7 @@ pub async fn correct_to_nearest_filename(
 
     if fuzzy {
         info!("fuzzy search {:?}, cache_fuzzy_arc.len={}", correction_candidate, cache_fuzzy_arc.len());
-        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n);
+        return fuzzy_search(correction_candidate, cache_fuzzy_arc.iter().cloned(), top_n, &['/', '\\']);
     }
 
     return vec![];
@@ -218,6 +168,10 @@ pub async fn correct_to_nearest_dir_path(
     fuzzy: bool,
     top_n: usize,
 ) -> Vec<String> {
+    if let Some(fixed) = complete_path_with_project_dir(gcx.clone(), correction_candidate, true).await {
+        return vec![fixed.to_string_lossy().to_string()];
+    }
+
     fn get_parent(p: &String) -> Option<String> {
         PathBuf::from(p).parent().map(PathBuf::from).map(|x|x.to_string_lossy().to_string())
     }
@@ -252,7 +206,7 @@ pub async fn correct_to_nearest_dir_path(
         }
 
         info!("fuzzy search {:?}, dirs.len={}", correction_candidate, dirs.len());
-        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n);
+        return fuzzy_search(correction_candidate, dirs.iter().cloned(), top_n, &['/', '\\']);
     }
     vec![]
 }
@@ -263,15 +217,16 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
     workspace_folders.iter().cloned().collect::<Vec<_>>()
 }
 
-pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: Vec<String>) -> Vec<String> {
+pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: &Vec<String>) -> Vec<String> {
     let (_, indexed_paths) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let workspace_folders = get_project_dirs(gcx.clone()).await
         .iter().map(|x| x.to_string_lossy().to_string()).collect::<Vec<_>>();
-    shortify_paths_from_indexed(paths, indexed_paths, workspace_folders)
+    _shortify_paths_from_indexed(paths, indexed_paths, workspace_folders)
 }
 
-fn shortify_paths_from_indexed(paths: Vec<String>, indexed_paths: Arc<HashSet<String>>, workspace_folders: Vec<String>) -> Vec<String> {
-    paths.into_iter().map(|mut path| {
+fn _shortify_paths_from_indexed(paths: &Vec<String>, indexed_paths: Arc<HashSet<String>>, workspace_folders: Vec<String>) -> Vec<String>
+{
+    paths.into_iter().map(|path| {
         // Get the length of the workspace part of the path
         let workspace_part_len = workspace_folders.iter()
             .filter_map(|workspace_dir| {
@@ -286,15 +241,15 @@ fn shortify_paths_from_indexed(paths: Vec<String>, indexed_paths: Arc<HashSet<St
 
         // Find the longest suffix of the path, that is in the indexed cache, make sure it is at
         // least as long as the part of the path relative to the workspace root
-        let full_path = path.clone();
-        while !path.is_empty() {
-            if indexed_paths.get(&path).is_some() &&
-                workspace_part_len + if std::path::MAIN_SEPARATOR == '/' { 1 } else { 2 } + path.len() >= full_path.len() {
-                return path;
+        let mut path_to_cut = path.clone();
+        while !path_to_cut.is_empty() {
+            if indexed_paths.get(&path_to_cut).is_some() &&
+                workspace_part_len + if std::path::MAIN_SEPARATOR == '/' { 1 } else { 2 } + path_to_cut.len() >= path.len() {
+                return path_to_cut.clone();
             }
-            path.drain(..1);
+            path_to_cut.drain(..1);
         }
-        full_path
+        path.clone()
     }).collect()
 }
 
@@ -349,94 +304,6 @@ pub fn canonical_path(s: &String) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files_in_workspace::retrieve_files_in_workspace_folders;
-
-    async fn get_candidates_from_workspace_files() -> Vec<String> {
-        let proj_folders = vec![PathBuf::from(".").canonicalize().unwrap()];
-        let proj_folder = &proj_folders[0];
-
-        let workspace_files = retrieve_files_in_workspace_folders(proj_folders.clone()).await;
-
-        workspace_files
-            .iter()
-            .filter_map(|path| {
-                let relative_path = path.strip_prefix(proj_folder)
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-
-                    Some(relative_path)
-            })
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn test_fuzzy_search_finds_frog_py() {
-        // Arrange
-        let correction_candidate = "frog.p".to_string();
-        let top_n = 1;
-
-        let candidates = get_candidates_from_workspace_files().await;
-
-        // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
-
-        // Assert
-        let expected_result = vec![
-            PathBuf::from("tests").join("emergency_frog_situation").join("frog.py").to_string_lossy().to_string(),
-        ];
-
-        assert_eq!(result, expected_result, "It should find the proper frog.py, found {:?} instead", result);
-    }
-
-    #[tokio::test]
-    async fn test_fuzzy_search_path_helps_finding_file() {
-        // Arrange
-        let correction_candidate = PathBuf::from("emergency_frog_situation").join("wo").to_string_lossy().to_string();
-        let top_n = 1;
-
-        let candidates = get_candidates_from_workspace_files().await;
-
-        // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
-
-        // Assert
-        let expected_result = vec![
-            PathBuf::from("tests").join("emergency_frog_situation").join("work_day.py").to_string_lossy().to_string(),
-        ];
-
-        assert_eq!(result, expected_result, "It should find the proper file (work_day.py), found {:?} instead", result);
-    }
-
-    #[tokio::test]
-    async fn test_fuzzy_search_filename_weights_more_than_path() {
-        // Arrange
-        let correction_candidate = "my_file.ext".to_string();
-        let top_n = 2;
-
-        let candidates = vec![
-            PathBuf::from("my_library").join("implementation").join("my_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("my_library").join("my_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("another_file.ext").to_string_lossy().to_string(),
-        ];
-
-        // Act
-        let result = fuzzy_search(&correction_candidate, candidates, top_n);
-
-        // Assert
-        let expected_result = vec![
-            PathBuf::from("my_library").join("my_file.ext").to_string_lossy().to_string(),
-            PathBuf::from("my_library").join("implementation").join("my_file.ext").to_string_lossy().to_string(),
-        ];
-
-        let mut sorted_result = result.clone();
-        let mut sorted_expected = expected_result.clone();
-
-        sorted_result.sort();
-        sorted_expected.sort();
-
-        assert_eq!(sorted_result, sorted_expected, "The result should contain the expected paths in any order, found {:?} instead", result);
-    }
 
     #[test]
     fn test_make_cache() {
@@ -493,12 +360,12 @@ mod tests {
         let paths = vec![
             PathBuf::from("home").join("user").join("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
             PathBuf::from("home").join("user").join("repo1").join("nested").join("repo2").join("dir").join("file.ext").to_string_lossy().to_string(),
-            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(), 
+            PathBuf::from("home").join("user").join("repo1").join(".hidden").join("custom_dir").join("file.ext").to_string_lossy().to_string(),
             // Hidden file; should not be shortened as it's not in the cache and may be confused with custom_dir/file.ext.
             PathBuf::from("home").join("user").join("repo3").join("dir2").join("another_file.ext").to_string_lossy().to_string(),
         ];
 
-        let result = shortify_paths_from_indexed(paths, indexed_paths, workspace_folders);
+        let result = _shortify_paths_from_indexed(&paths, indexed_paths, workspace_folders);
 
         let expected_result = vec![
             PathBuf::from("repo1").join("dir").join("file.ext").to_string_lossy().to_string(),
@@ -541,45 +408,5 @@ mod tests {
 
         assert_eq!(cnt, 100000, "The cache should contain 100000 paths");
         assert_eq!(cache_shortened_result.len(), cnt);
-    }
-
-    #[cfg(not(debug_assertions))]
-    #[test]
-    fn test_fuzzy_search_speed() {
-        // Arrange
-        let workspace_paths = vec![
-            PathBuf::from("home").join("user").join("repo1"),
-            PathBuf::from("home").join("user").join("repo2"),
-            PathBuf::from("home").join("user").join("repo3"),
-            PathBuf::from("home").join("user").join("repo4"),
-        ];
-
-        let mut paths = Vec::new();
-        for i in 0..100000 {
-            let path = workspace_paths[i % workspace_paths.len()]
-                .join(format!("dir{}", i % 1000))
-                .join(format!("dir{}", i / 1000))
-                .join(format!("file{}.ext", i));
-            paths.push(path);
-        }
-        let start_time = std::time::Instant::now();
-        let paths_str = paths.iter().map(|x| x.to_string_lossy().to_string()).collect::<Vec<_>>();
-
-        let correction_candidate = PathBuf::from("file100000")
-            .join("dir1000")
-            .join("file100000.ext")
-            .to_string_lossy()
-            .to_string();
-
-        // Act
-        let results = fuzzy_search(&correction_candidate, paths_str, 10);
-
-        // Assert
-        let time_spent = start_time.elapsed();
-        println!("fuzzy_search took {} ms", time_spent.as_millis());
-        assert!(time_spent.as_millis() < 750, "fuzzy_search took {} ms", time_spent.as_millis());
-
-        assert_eq!(results.len(), 10, "The result should contain 10 paths");
-        println!("{:?}", results);
     }
 }

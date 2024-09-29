@@ -15,7 +15,7 @@ build = "build.rs"
 shadow-rs = "0.25.0"
 
 [dependencies]
-sled = { version = "0.34", default-features = false, features = ["event_log"] }
+sled = { version = "0.34", default-features = false, features = [] }
 # all features = ["compression", "docs", "event_log", "failpoints", "io_uring", "lock_free_delays", "measure_allocs", "miri_optimizations", "mutex", "no_inline", "no_logs", "pretty_backtrace", "testing"]
 shadow-rs = { version = "0.25.0", features = [], default-features = false }
 hyper = { version = "0.14", features = ["server", "stream"] }
@@ -34,7 +34,7 @@ tower-layer = "0.3.2"
 tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tokenizers = "0.13"
+tokenizers = "0.20"
 ropey = "1.6"
 home = "0.5"
 structopt = "0.3"

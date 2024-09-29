@@ -15,8 +15,7 @@ tools = None
 async def ask_chat(messages):
     global tools
     if tools is None:
-        tools_turn_on = {"definition"}
-        tools = await chat_client.tools_fetch_and_filter(base_url="http://127.0.0.1:8001/v1", tools_turn_on=tools_turn_on)
+        tools = await chat_client.tools_fetch_and_filter(base_url="http://127.0.0.1:8001/v1", tools_turn_on=None)
     assistant_choices = await chat_client.ask_using_http(
         "http://127.0.0.1:8001/v1",
         messages,
@@ -43,84 +42,6 @@ def sort_out_messages(response_messages):
         print(termcolor.colored(tool_call_message.content, "blue"))
     return tool_call_message
 
-
-
-# {
-#   "Message": [
-#     {
-#       "role": "user",
-#       "content": "find Goat in this project and replace it with Iguana",
-#       "tool_calls": null,
-#       "finish_reason": "",
-#       "tool_call_id": "",
-#       "usage": null,
-#       "subchats": null
-#     },
-#     {
-#       "role": "assistant",
-#       "content": "Alright, here we go:",
-#       "tool_calls": [
-#         {
-#           "id": "call_d25e46b92b004619ab459d0a253d44d3",
-#           "function": {
-#             "arguments": "{\"problem_statement\": \"find Goat in this project and replace it with Iguana\"}",
-#             "name": "locate"
-#           },
-#           "type": "function"
-#         }
-#       ],
-#       "finish_reason": "",
-#       "tool_call_id": "",
-#       "usage": null,
-#       "subchats": null
-#     },
-#     {
-#       "role": "tool",
-#       "content": "{...}",  // Output from the locate function
-#       "tool_calls": null,
-#       "finish_reason": "",
-#       "tool_call_id": "call_d25e46b92b004619ab459d0a253d44d3",
-#       "usage": {
-#         "prompt_tokens": 9910,
-#         "completion_tokens": 1339
-#       },
-#       "subchats": {
-#         "20240924-084700-rf-step1-gotodef": [
-#           {
-#             "role": "assistant",
-#             "content": "",
-#             "tool_calls": [
-#               {
-#                 "id": "call_PwE4sxYSkE7fuByVxdArkAl2",
-#                 "function": {
-#                   "arguments": "{\"symbol\":\"Goat\",\"skeleton\":true}",
-#                   "name": "references"
-#                 },
-#                 "type": "function"
-#               }
-#             ],
-#             "finish_reason": "",
-#             "tool_call_id": "",
-#             "usage": {
-#               "prompt_tokens": 522,
-#               "completion_tokens": 19
-#             },
-#             "subchats": null
-#           },
-#         ]
-#       }
-#     }
-#   ]
-# }
-
-
-tool_example = """
-💿 Used 2 experts, inspected 2 files, project has 218 files
-
-Inspected context files:
-src/ast/alt_testsuite/cpp_goat_library.h
-src/ast/alt_testsuite/cpp_goat_main.cpp
-"""
 
 async def test_if_located_right(
     question: str,
@@ -160,10 +81,19 @@ async def test_if_located_right(
 
 
 if __name__ == '__main__':
+    # asyncio.run(test_if_located_right(
+    #     question="find Goat in this project and replace it with Iguana",
+    #     expected_roles={
+    #         "src/ast/alt_testsuite/cpp_goat_library.h": "TOCHANGE",
+    #         "src/ast/alt_testsuite/cpp_goat_main.cpp": "TOCHANGE",
+    #     },
+    # ))
     asyncio.run(test_if_located_right(
-        question="find Goat in this project and replace it with Iguana",
+        question="check out Goat in this project, can you write a similar test in typescript?",
         expected_roles={
-            "src/ast/alt_testsuite/cpp_goat_library.h": "TOCHANGE",
-            "src/ast/alt_testsuite/cpp_goat_main.cpp": "TOCHANGE",
+            # "src/ast/alt_testsuite/cpp_goat_library.h": "TOCHANGE",
+            # "src/ast/alt_testsuite/cpp_goat_main.cpp": "TOCHANGE",
         },
     ))
+    # check out Goat in this project
+    # check out Goat in this project, can you write a similar test in typescript?

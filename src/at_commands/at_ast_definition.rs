@@ -78,15 +78,7 @@ impl AtParam for AtParamSymbolPathQuery {
         }
         let ast_index = ast_service_opt.unwrap().lock().await.ast_index.clone();
 
-        let names = crate::ast::ast_db::definition_paths_fuzzy(ast_index, value).await;
-
-        let filtered_paths = names
-            .iter()
-            .take(top_n)
-            .cloned()
-            .collect::<Vec<String>>();
-
-        filtered_paths
+        crate::ast::ast_db::definition_paths_fuzzy(ast_index, value, top_n, 1000).await
     }
 
     fn param_completion_valid(&self) -> bool {
@@ -126,7 +118,7 @@ impl AtCommand for AtAstDefinition {
             let ast_index = ast_service.lock().await.ast_index.clone();
             let defs: Vec<Arc<crate::ast::ast_structs::AstDefinition>> = crate::ast::ast_db::definitions(ast_index, arg_symbol.text.as_str()).await;
             let file_paths = defs.iter().map(|x| x.cpath.clone()).collect::<Vec<_>>();
-            let short_file_paths = crate::files_correction::shortify_paths(gcx.clone(), file_paths.clone()).await;
+            let short_file_paths = crate::files_correction::shortify_paths(gcx.clone(), &file_paths).await;
 
             let text = if let Some(path0) = short_file_paths.get(0) {
                 if short_file_paths.len() > 1 {
@@ -148,7 +140,6 @@ impl AtCommand for AtAstDefinition {
                     symbols: vec![res.path()],
                     gradient_type: -1,
                     usefulness: 100.0,
-                    is_body_important: false
                 });
             }
             Ok((result.into_iter().map(|x| ContextEnum::ContextFile(x)).collect::<Vec<ContextEnum>>(), text))
