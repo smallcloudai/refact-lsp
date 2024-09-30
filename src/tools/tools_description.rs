@@ -1,6 +1,6 @@
-use glob::Pattern;
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use serde_json::{Value, json};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ToolConfig {
+pub struct GenericToolConfig {
     pub commands_need_confirmation: Vec<String>,
     pub commands_deny: Vec<String>,
 }
@@ -28,49 +28,11 @@ pub trait Tool: Send + Sync {
         args: &HashMap<String, Value>
     ) -> Result<(bool, Vec<ContextEnum>), String>;
 
-    fn get_command_if_applicable(
+    fn command_to_match_against_confirm_deny(
         &self,
         _args: &HashMap<String, Value>,
-    ) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    fn check_for_confirmation_needed(
-        &self,
-        args: &HashMap<String, Value>,
-    ) -> Result<(bool, String), String> { 
-        if let Some(command) = self.get_command_if_applicable(args)? {
-            if let Some(rule) = self.commands_need_confirmation.iter().find(|glob| {
-                let pattern = Pattern::new(glob).unwrap();
-                pattern.matches(&command)
-            }) {
-                return Ok((true, format!("Command {} needs confirmation due to rule {}", command, rule)));
-            }
-        }
-
-        Ok((false, "".to_string()))
-    }
-
-    fn check_if_denied(
-        &self,
-        args: &HashMap<String, Value>,
-        detailed: bool,
-    ) -> Result<(bool, String), String> { 
-        if let Some(command) = self.get_command_if_applicable(args)? {
-            if let Some(rule) = self.commands_deny.iter().find(|glob| {
-                let pattern = Pattern::new(glob).unwrap();
-                pattern.matches(&command)
-            }) {
-                let message = if detailed {
-                    format!("Command {} is denied due to rule {}", command, rule)
-                } else {
-                    format!("Command {} is denied", command)
-                };
-                return Ok((true, message));
-            }
-        }
-
-        Ok((false, "".to_string()))
+    ) -> Result<String, String> {
+        Ok("".to_string())
     }
 
     fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
@@ -82,6 +44,18 @@ pub trait Tool: Send + Sync {
     }
 }
 
+async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
+    let yaml_path = cache_dir.join("integrations.yaml");
+
+    let integrations_yaml = tokio::fs::read_to_string(&yaml_path).await.map_err(
+        |e| format!("Failed to read integrations.yaml: {}", e)
+    )?;
+
+    serde_yaml::from_str::<serde_yaml::Value>(&integrations_yaml).map_err(
+        |e| format!("Failed to parse integrations.yaml: {}", e)
+    )
+}
+
 pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>
 {
     let (ast_on, vecdb_on, allow_experimental) = {
@@ -91,20 +65,12 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
     };
 
     let cache_dir = gcx.read().await.cache_dir.clone();
-    let customization_yaml_path = cache_dir.join("integrations.yaml");
-
-    let integrations_yaml = tokio::fs::read_to_string(&customization_yaml_path).await.unwrap_or_else(|e| {
-        warn!("Failed to read integrations.yaml: {}", e);
-        String::new()
-    });
-
-    let integrations_value = if integrations_yaml.is_empty() {
-        serde_yaml::Value::default()
-    } else {
-        serde_yaml::from_str(integrations_yaml.as_str()).unwrap_or_else(|e| {
-            warn!("Failed to parse integrations.yaml: {}", e);
+    let integrations_value = match read_integrations_value(&cache_dir).await {
+        Ok(value) => value,
+        Err(e) => {
+            warn!(e);
             serde_yaml::Value::default()
-        })
+        }
     };
 
     let mut tools_all = IndexMap::from([
@@ -143,6 +109,15 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
     }
 
     filtered_tools
+}
+
+pub async fn load_generic_tool_config(gcx: Arc<ARwLock<GlobalContext>>) -> Result<GenericToolConfig, String>
+{
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let integrations_value = read_integrations_value(&cache_dir).await?;
+
+    serde_yaml::from_value(integrations_value)
+        .map_err(|e| format!("Failed to parse GenericToolConfig: {}", e))
 }
 
 const BUILT_IN_TOOLS: &str = r####"

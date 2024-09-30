@@ -8,9 +8,10 @@ use serde_json::Value;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::call_validation::ChatToolCall;
-use crate::tools::tools_description::{tool_description_list_from_yaml, tools_merged_and_filtered};
+use crate::tools::tools_description::{load_generic_tool_config, tool_description_list_from_yaml, tools_merged_and_filtered};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
+use crate::tools::tools_execute::{check_for_confirmation_needed, check_if_denied};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ToolsPermissionCheckPost {
@@ -51,6 +52,7 @@ pub async fn handle_v1_tools_validate(
     let all_tools = tools_merged_and_filtered(gcx.clone()).await;
 
     let mut result_messages = vec![];
+    let mut generic_tool_config = None;
     for tool_call in &post.tool_calls {
         let tool = match all_tools.get(&tool_call.function.name) {
             Some(x) => x,
@@ -66,26 +68,29 @@ pub async fn handle_v1_tools_validate(
             }
         };
 
-        let tool_locked = tool.lock().await;
-        match tool_locked.check_if_denied(&args, true) {
-            Ok((is_denied, message)) => {
-                if is_denied {
-                    result_messages.push(message);
-                }
-            }
-            Err(e) => {
-                return Err(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Error checking if tool {} is allowed: {}", tool_call.function.name, e)));
-            }
-        }
+        let command_to_match = {
+            let tool_locked = tool.lock().await;
+            tool_locked.command_to_match_against_confirm_deny(&args)
+        }.map_err(|e| {
+            ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Error getting tool command to match: {}", e))
+        })?;
 
-        match tool_locked.check_for_confirmation_needed(&args) {
-            Ok((is_confirmation_needed, message)) => {
-                if is_confirmation_needed {
-                    result_messages.push(message);
-                }
+        if !command_to_match.is_empty() {
+            if generic_tool_config.is_none() {
+                generic_tool_config = Some(load_generic_tool_config(gcx.clone()).await.map_err(|e| {
+                    ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Error loading generic tool config: {}", e))
+                })?);
             }
-            Err(e) => {
-                return Err(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Error checking if tool {} needs confirmation: {}", tool_call.function.name, e)));
+
+            if let Some(generic_tool_cfg) = &generic_tool_config {
+                let (is_denied, deny_reason) = check_if_denied(&command_to_match, &generic_tool_cfg.commands_deny, true);
+                if is_denied {
+                    result_messages.push(deny_reason);
+                }
+                let (needs_confirmation, confirmation_reason) = check_for_confirmation_needed(&command_to_match, &generic_tool_cfg.commands_need_confirmation);
+                if needs_confirmation {
+                    result_messages.push(confirmation_reason);
+                }
             }
         }
     }
