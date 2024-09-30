@@ -18,8 +18,6 @@ use serde_json::Value;
 pub struct IntegrationGitHub {
     pub gh_binary_path: Option<String>,
     pub GH_TOKEN: String,
-    pub skip_confirmation: Vec<String>,
-    pub deny: Vec<String>,
 }
 
 pub struct ToolGithub {
@@ -52,26 +50,11 @@ impl Tool for ToolGithub {
             Some(v) => return Err(format!("argument `project_dir` is not a string: {:?}", v)),
             None => return Err("Missing argument `project_dir`".to_string())
         };
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
-
-        let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
-        if parsed_args.is_empty() {
-            return Err("Parsed command is empty".to_string());
-        }
-        for (i, arg) in parsed_args.iter().enumerate() {
-            info!("argument[{}]: {}", i, arg);
-        }
-        if parsed_args[0] == "gh" {
-            parsed_args.remove(0);
-        }
+        let command_args = parse_command_args(args)?;
 
         let gh_command = self.integration_github.gh_binary_path.as_deref().unwrap_or("gh");
         let output = Command::new(gh_command)
-            .args(&parsed_args)
+            .args(&command_args)
             .current_dir(&project_dir)
             .env("GH_TOKEN", &self.integration_github.GH_TOKEN)
             .output()
@@ -111,20 +94,33 @@ impl Tool for ToolGithub {
         Ok((false, results))
     }
 
-    fn get_command_if_applicable(
+    fn command_to_match_against_confirm_deny(
         &self,
         args: &HashMap<String, Value>,
-    ) -> Result<Option<String>, String> {
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
-        
-        if !command.starts_with("gh ") {
-            Ok(Some("gh ".to_string() + &command))
-        } else {
-            Ok(Some(command.clone()))
-        }
+    ) -> Result<String, String> {
+        let mut command_args = parse_command_args(args)?;
+        command_args.insert(0, "gh".to_string());
+        Ok(command_args.join(" "))
     }
+}
+
+fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, String> {
+    let command = match args.get("command") {
+        Some(Value::String(s)) => s,
+        Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+        None => return Err("Missing argument `command`".to_string())
+    };
+
+    let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
+    if parsed_args.is_empty() {
+        return Err("Parsed command is empty".to_string());
+    }
+    for (i, arg) in parsed_args.iter().enumerate() {
+        info!("argument[{}]: {}", i, arg);
+    }
+    if parsed_args[0] == "gh" {
+        parsed_args.remove(0);
+    }
+
+    Ok(parsed_args)
 }
