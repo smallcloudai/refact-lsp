@@ -116,7 +116,7 @@ pub async fn load_generic_tool_config(gcx: Arc<ARwLock<GlobalContext>>) -> Resul
     let cache_dir = gcx.read().await.cache_dir.clone();
     let integrations_value = read_integrations_value(&cache_dir).await?;
 
-    serde_yaml::from_value(integrations_value)
+    serde_yaml::from_value::<GenericToolConfig>(integrations_value)
         .map_err(|e| format!("Failed to parse GenericToolConfig: {}", e))
 }
 

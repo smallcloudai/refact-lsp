@@ -11,7 +11,7 @@ use crate::call_validation::ChatToolCall;
 use crate::tools::tools_description::{load_generic_tool_config, tool_description_list_from_yaml, tools_merged_and_filtered};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::tools::tools_execute::{check_for_confirmation_needed, check_if_denied};
+use crate::tools::tools_execute::{command_should_be_confirmed_by_user, command_should_be_denied};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ToolsPermissionCheckPost {
@@ -83,11 +83,11 @@ pub async fn handle_v1_tools_authorize_calls(
             }
 
             if let Some(generic_tool_cfg) = &generic_tool_config {
-                let (is_denied, deny_reason) = check_if_denied(&command_to_match, &generic_tool_cfg.commands_deny, true);
+                let (is_denied, deny_reason) = command_should_be_denied(&command_to_match, &generic_tool_cfg.commands_deny, true);
                 if is_denied {
                     result_messages.push(deny_reason);
                 }
-                let (needs_confirmation, confirmation_reason) = check_for_confirmation_needed(&command_to_match, &generic_tool_cfg.commands_need_confirmation);
+                let (needs_confirmation, confirmation_reason) = command_should_be_confirmed_by_user(&command_to_match, &generic_tool_cfg.commands_need_confirmation);
                 if needs_confirmation {
                     result_messages.push(confirmation_reason);
                 }
@@ -99,7 +99,7 @@ pub async fn handle_v1_tools_authorize_calls(
         "pause": !result_messages.is_empty(),
         "pause_reasons": result_messages,
     }).to_string();
-    
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")

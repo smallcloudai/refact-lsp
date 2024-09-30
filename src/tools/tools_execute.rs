@@ -124,7 +124,7 @@ pub async fn run_tools(
             }
 
             if let Some(generic_tool_cfg) = &generic_tool_config {
-                let (is_denied, reason) = check_if_denied(&command_to_match, &generic_tool_cfg.commands_deny, false);
+                let (is_denied, reason) = command_should_be_denied(&command_to_match, &generic_tool_cfg.commands_deny, false);
                 if is_denied {
                     let tool_failed_message = tool_answer(
                         format!("tool use: {}", reason), t_call.id.to_string()
@@ -320,10 +320,10 @@ fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
     }
 }
 
-pub fn check_for_confirmation_needed(
+pub fn command_should_be_confirmed_by_user(
     command: &String,
     commands_need_confirmation_rules: &Vec<String>,
-) -> (bool, String) { 
+) -> (bool, String) {
     if let Some(rule) = commands_need_confirmation_rules.iter().find(|glob| {
         let pattern = Pattern::new(glob).unwrap();
         pattern.matches(&command)
@@ -333,11 +333,11 @@ pub fn check_for_confirmation_needed(
     (false, "".to_string())
 }
 
-pub fn check_if_denied(
+pub fn command_should_be_denied(
     command: &String,
     commands_deny_rules: &Vec<String>,
     detailed: bool,
-) -> (bool, String) { 
+) -> (bool, String) {
     if let Some(rule) = commands_deny_rules.iter().find(|glob| {
         let pattern = Pattern::new(glob).unwrap();
         pattern.matches(&command)
