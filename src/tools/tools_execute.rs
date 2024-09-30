@@ -135,26 +135,6 @@ pub async fn run_tools(
             }
         }
 
-        match {
-            let cmd_lock = cmd.lock().await;
-            cmd_lock.check_if_denied(&args, false)
-        } {
-            Ok(msg_and_maybe_more) => msg_and_maybe_more,
-            Err(e) => {
-                let mut tool_failed_message = tool_answer(e, t_call.id.to_string());
-                {
-                    let mut cmd_lock = cmd.lock().await;
-                    if let Some(usage) = cmd_lock.usage() {
-                        tool_failed_message.usage = Some(usage.clone());
-                    }
-                    *cmd_lock.usage() = None;
-
-                    generated_tool.push(tool_failed_message.clone());
-                    continue;
-                }
-            }
-        }
-
         let (corrections, tool_execute_results) = {
             let mut cmd_lock = cmd.lock().await;
             match cmd_lock.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
