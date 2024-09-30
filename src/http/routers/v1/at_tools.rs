@@ -42,7 +42,7 @@ pub async fn handle_v1_tools(
     )
 }
 
-pub async fn handle_v1_tools_validate(
+pub async fn handle_v1_tools_authorize_calls(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
