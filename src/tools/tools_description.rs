@@ -134,14 +134,14 @@ tools:
       - "symbol"
 
   - name: "tree"
-    description: "Get a files tree with symbols for the project. Use it to get familiar with the project, file names and symbols"
+    description: "Get a files tree with symbols for the project. Use it to get familiar with the project, correct file names and symbols"
     parameters:
       - name: "path"
         type: "string"
-        description: "An optional absolute path to get files tree for a particular folder or file. Do not pass it if you need full project tree."
+        description: "An absolute path to get files tree for. Do not pass it if you need a full project tree."
       - name: "use_ast"
         type: "boolean"
-        description: "if true, for each file an array of AST symbols will appear as well as its filename"
+        description: "If true, for each file an array of AST symbols will appear as well as its filename"
     parameters_required: []
 
   - name: "web"
