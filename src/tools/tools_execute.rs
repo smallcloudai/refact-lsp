@@ -103,7 +103,7 @@ pub async fn run_tools(
             Ok(command_to_match) => command_to_match,
             Err(e) => {
                 let tool_failed_message = tool_answer(
-                    format!("tool use: couldn't parse command_to_match_against_confirm_deny: {}", e), t_call.id.to_string()
+                    format!("tool use: {}", e), t_call.id.to_string()
                 );
                 generated_tool.push(tool_failed_message);
                 continue;
