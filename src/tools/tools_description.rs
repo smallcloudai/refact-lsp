@@ -134,7 +134,7 @@ tools:
       - "symbol"
 
   - name: "tree"
-    description: "Get a files tree with symbols for the project. Use it to get familiar with the project, correct file names and symbols"
+    description: "Get a files tree with symbols for the project. Use it to get familiar with the project, file names and symbols"
     parameters:
       - name: "path"
         type: "string"
