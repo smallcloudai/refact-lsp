@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::collections::HashMap;
+use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
+use tokio::sync::Mutex as AMutex;
 use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use tokio::time::{timeout, Duration};
 use async_trait::async_trait;
@@ -10,10 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
-
-use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
-use serde_json::Value;
+
+const END_OF_LINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IntegrationPdb {
@@ -71,26 +71,6 @@ impl Tool for ToolPdb {
             gcx_locked.tools_data.pdb_data.clone()
         };
 
-        let is_process_active = {
-            let mut pdb_data_locked = pdb_data.lock().await;
-            pdb_data_locked.sessions.get_mut(&chat_id)
-                .map_or(false, |session| session.process.try_wait().is_ok())
-        };
-
-        if is_process_active {
-            let output = interact_with_pdb(command, &chat_id, pdb_data.clone()).await?;
-            let mut results = vec![];
-            results.push(ContextEnum::ChatMessage(ChatMessage {
-                role: "tool".to_string(),
-                content: output,
-                tool_calls: None,
-                tool_call_id: tool_call_id.clone(),
-                ..Default::default()
-            }));
-
-            return Ok((false, results));
-        }
-
         let mut parsed_args = shell_words::split(command).map_err(|e| e.to_string())?;
         if parsed_args.is_empty() {
             return Err("Parsed command is empty".to_string());
@@ -101,18 +81,28 @@ impl Tool for ToolPdb {
         }
 
         let python_command = self.integration_pdb.python_path.as_ref().unwrap_or(&"python3".to_string()).clone();
-        let output = start_pdb_session(&python_command, &parsed_args, &chat_id, pdb_data.clone()).await?;
 
-        let mut results = vec![];
-        results.push(ContextEnum::ChatMessage(ChatMessage {
-            role: "tool".to_string(),
-            content: output,
-            tool_calls: None,
-            tool_call_id: tool_call_id.clone(),
-            ..Default::default()
-        }));
+        let is_process_active = {
+            let mut pdb_data_locked = pdb_data.lock().await;
+            pdb_data_locked.sessions.get_mut(&chat_id)
+                .map_or(false, |session| matches!(session.process.try_wait(), Ok(None)))
+        };
 
-        Ok((false, results))
+        let output = if is_process_active {
+            interact_with_pdb(&parsed_args.join(" "), &chat_id, pdb_data.clone()).await?
+        } else {
+            start_pdb_session(&python_command, &parsed_args, &chat_id, pdb_data.clone()).await?
+        };
+
+        Ok((false, vec![
+            ContextEnum::ChatMessage(ChatMessage {
+                role: "tool".to_string(),
+                content: output,
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                ..Default::default()
+            })    
+        ]))
     }
 }
 
@@ -145,13 +135,17 @@ async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, c
         }
     }
 
-    let output = read_until_pdb_or_timeout(&mut stdout, 0).await?; // no timeout, read until pdb
+    let output = read_until_pdb_or_timeout(&mut stdout, 0).await?;
     let error = read_until_pdb_or_timeout(&mut stderr, 500).await?;
 
-    pdb_data_locked.sessions.insert(
-        chat_id.to_string(), PdbSession { process, stdin, stdout, stderr }
-    );
-    Ok(format!("{}\n{}", output, error))
+    let status = process.try_wait().map_err(|e| e.to_string())?;
+    if status.is_none() {
+        pdb_data_locked.sessions.insert(
+            chat_id.to_string(), PdbSession { process, stdin, stdout, stderr }
+        );
+    }
+    
+    Ok(format!("{}{}{}", output, END_OF_LINE, error))
 }
 
 async fn interact_with_pdb(input_command: &String, chat_id: &String, pdb_data: Arc<AMutex<PdbData>>) -> Result<String, String> 
@@ -160,7 +154,6 @@ async fn interact_with_pdb(input_command: &String, chat_id: &String, pdb_data: A
     let pdb_session = pdb_data_locked.sessions.get_mut(chat_id)
         .ok_or(format!("Error getting pdb session for chat_id: {}", chat_id))?;
 
-    info!("Writing command to pdb stdin: {}", input_command);
     pdb_session.stdin.write_all(format!("{}\n", input_command).as_bytes()).await.map_err(|e| {
         error!("Failed to write to pdb stdin: {}", e);
         e.to_string()
@@ -170,10 +163,7 @@ async fn interact_with_pdb(input_command: &String, chat_id: &String, pdb_data: A
         e.to_string()
     })?;
 
-    let output = read_until_pdb_or_timeout(&mut pdb_session.stdout, 0).await?; // no timeout, read until pdb
-    let error = read_until_pdb_or_timeout(&mut pdb_session.stderr, 500).await?;
-
-    Ok(format!("{}\n{}", output, error))
+    Ok(read_until_pdb_or_timeout(&mut pdb_session.stdout, 0).await?)
 }
 
 pub async fn read_until_pdb_or_timeout<R>(buffer: &mut R, timeout_ms: u64) -> Result<String, String>
