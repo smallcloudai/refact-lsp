@@ -510,6 +510,8 @@ mod tests {
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
     }
 
+    // cicd works with virtual machine, this test is slow
+    #[cfg(not(all(target_arch = "aarch64", target_os = "linux")))]
     #[cfg(not(debug_assertions))]
     #[test]
     fn test_make_cache_speed() {
@@ -542,7 +544,9 @@ mod tests {
         assert_eq!(cnt, 100000, "The cache should contain 100000 paths");
         assert_eq!(cache_shortened_result.len(), cnt);
     }
-
+    
+    // cicd works with virtual machine, this test is slow 
+    #[cfg(not(all(target_arch = "aarch64", target_os = "linux")))]
     #[cfg(not(debug_assertions))]
     #[test]
     fn test_fuzzy_search_speed() {
