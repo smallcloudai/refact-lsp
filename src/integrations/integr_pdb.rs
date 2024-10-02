@@ -1,8 +1,9 @@
+use std::any::Any;
 use std::sync::Arc;
 use std::collections::HashMap;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex as AMutex;
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use tokio::time::{timeout, Duration};
 use async_trait::async_trait;
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
+use crate::command_sessions::CommandSession;
+use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
-
-const END_OF_LINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IntegrationPdb {
@@ -33,6 +34,22 @@ pub struct PdbSession {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     stderr: BufReader<ChildStderr>,
+}
+
+#[async_trait]
+impl CommandSession for PdbSession 
+{
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    async fn kill_process(&mut self) -> Result<(), String> {
+        self.process.kill().await.map_err(|e| {
+            error!("Failed to kill pdb process: {}", e);
+            e.to_string()
+        })?;
+        Ok(())
+    }
 }
 
 impl ToolPdb {
@@ -66,10 +83,6 @@ impl Tool for ToolPdb {
             let ccx_lock = ccx.lock().await;
             (ccx_lock.global_context.clone(), ccx_lock.chat_id.clone())
         };
-        let pdb_data = {
-            let gcx_locked = gcx.read().await;
-            gcx_locked.tools_data.pdb_data.clone()
-        };
 
         let mut parsed_args = shell_words::split(command).map_err(|e| e.to_string())?;
         if parsed_args.is_empty() {
@@ -83,15 +96,24 @@ impl Tool for ToolPdb {
         let python_command = self.integration_pdb.python_path.as_ref().unwrap_or(&"python3".to_string()).clone();
 
         let is_process_active = {
-            let mut pdb_data_locked = pdb_data.lock().await;
-            pdb_data_locked.sessions.get_mut(&chat_id)
-                .map_or(false, |session| matches!(session.process.try_wait(), Ok(None)))
+            let session = {
+                let gcx_locked = gcx.read().await;
+                gcx_locked.command_sessions.get(&chat_id).cloned()
+            };
+        
+            if let Some(session) = session {
+                let mut session_locked = session.lock().await;
+                session_locked.as_any_mut().downcast_mut::<PdbSession>()
+                    .map_or(false, |pdb_session| pdb_session.process.try_wait().ok().flatten().is_none())
+            } else {
+                false
+            }
         };
 
         let output = if is_process_active {
-            interact_with_pdb(&parsed_args.join(" "), &chat_id, pdb_data.clone()).await?
+            interact_with_pdb(&parsed_args.join(" "), &chat_id, gcx.clone()).await?
         } else {
-            start_pdb_session(&python_command, &parsed_args, &chat_id, pdb_data.clone()).await?
+            start_pdb_session(&python_command, &parsed_args, &chat_id, gcx.clone()).await?
         };
 
         Ok((false, vec![
@@ -106,7 +128,7 @@ impl Tool for ToolPdb {
     }
 }
 
-async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, chat_id: &String, pdb_data: Arc<AMutex<PdbData>>) -> Result<String, String> 
+async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, chat_id: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
     info!("Starting pdb session with command: {} -m pdb {:?}", python_command, parsed_args);
     let mut process = Command::new(python_command)
@@ -126,44 +148,50 @@ async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, c
     let mut stdout = BufReader::new(process.stdout.take().ok_or("Failed to open stdout for pdb process")?);
     let mut stderr = BufReader::new(process.stderr.take().ok_or("Failed to open stderr for pdb process")?);
 
-    let mut pdb_data_locked = pdb_data.lock().await;
-    
-    if let Some(mut old_session) = pdb_data_locked.sessions.remove(chat_id) {
-        info!("Terminating old pdb session for chat_id: {}", chat_id);
-        if let Err(e) = old_session.process.kill().await {
-            error!("Failed to kill old pdb process: {}", e);
-        }
-    }
-
     let output = read_until_pdb_or_timeout(&mut stdout, 0).await?;
     let error = read_until_pdb_or_timeout(&mut stderr, 500).await?;
+    
+    if let Some(old_session) = {
+        let mut gcx_locked = gcx.write().await;
+        gcx_locked.command_sessions.remove(&command_session_key(chat_id))
+    } {
+        old_session.lock().await.kill_process().await?;
+    }
 
     let status = process.try_wait().map_err(|e| e.to_string())?;
     if status.is_none() {
-        pdb_data_locked.sessions.insert(
-            chat_id.to_string(), PdbSession { process, stdin, stdout, stderr }
+        let command_session: Box<dyn CommandSession> = Box::new(PdbSession { process, stdin, stdout, stderr });
+        let mut gcx_locked = gcx.write().await;
+        gcx_locked.command_sessions.insert(
+            command_session_key(chat_id), Arc::new(AMutex::new(command_session)) 
         );
     }
     
-    Ok(format!("{}{}{}", output, END_OF_LINE, error))
+    Ok(format!("{}{}{}", output, "\n", error))
 }
 
-async fn interact_with_pdb(input_command: &String, chat_id: &String, pdb_data: Arc<AMutex<PdbData>>) -> Result<String, String> 
+async fn interact_with_pdb(input_command: &String, chat_id: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
-    let mut pdb_data_locked = pdb_data.lock().await;
-    let pdb_session = pdb_data_locked.sessions.get_mut(chat_id)
-        .ok_or(format!("Error getting pdb session for chat_id: {}", chat_id))?;
+    let command_session = {
+        let gcx_locked = gcx.read().await;
+        gcx_locked.command_sessions.get(&command_session_key(chat_id))
+            .ok_or(format!("Error getting pdb session for chat_id: {}", chat_id))?
+            .clone()
+    };
+    
+    let mut command_session_locked = command_session.lock().await;
+    let pdb_command_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>().ok_or("Failed to downcast to PdbSession")?;
 
-    pdb_session.stdin.write_all(format!("{}\n", input_command).as_bytes()).await.map_err(|e| {
+    pdb_command_session.stdin.write_all(format!("{}\n", input_command).as_bytes()).await.map_err(|e| {
         error!("Failed to write to pdb stdin: {}", e);
         e.to_string()
     })?;
-    pdb_session.stdin.flush().await.map_err(|e| {
+    pdb_command_session.stdin.flush().await.map_err(|e| {
         error!("Failed to flush pdb stdin: {}", e);
         e.to_string()
     })?;
 
-    Ok(read_until_pdb_or_timeout(&mut pdb_session.stdout, 0).await?)
+    Ok(read_until_pdb_or_timeout(&mut pdb_command_session.stdout, 0).await?)
 }
 
 pub async fn read_until_pdb_or_timeout<R>(buffer: &mut R, timeout_ms: u64) -> Result<String, String>
@@ -192,4 +220,8 @@ where
     }
 
     Ok(output)
+}
+
+fn command_session_key(chat_id: &String) -> String {
+    "pdb ⚡ ".to_string() + chat_id
 }

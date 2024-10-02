@@ -55,6 +55,7 @@ mod lsp;
 mod http;
 
 mod integrations;
+mod command_sessions;
 mod privacy;
 mod privacy_compiled_in;
 
