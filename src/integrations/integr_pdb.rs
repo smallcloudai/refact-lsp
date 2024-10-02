@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::time::SystemTime;
+use std::fmt::Debug;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
@@ -12,9 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
-use crate::command_sessions::CommandSession;
+use crate::command_sessions::{CommandSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
+
+const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IntegrationPdb {
@@ -24,31 +28,40 @@ pub struct ToolPdb {
     integration_pdb: IntegrationPdb,
 }
 
-#[derive(Default)]
-pub struct PdbData {
-    sessions: HashMap<String, PdbSession>,
-}
-
 pub struct PdbSession {
     process: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     stderr: BufReader<ChildStderr>,
+    last_usage_ts: u64,
 }
 
-#[async_trait]
+impl PdbSession {
+    pub fn new(
+        process: Child,
+        stdin: ChildStdin,
+        stdout: BufReader<ChildStdout>,
+        stderr: BufReader<ChildStderr>,
+    ) -> Self {
+        PdbSession {
+            process,
+            stdin,
+            stdout,
+            stderr,
+            last_usage_ts: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+        }
+    }
+}
+
 impl CommandSession for PdbSession 
 {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
-    async fn kill_process(&mut self) -> Result<(), String> {
-        self.process.kill().await.map_err(|e| {
-            error!("Failed to kill pdb process: {}", e);
-            e.to_string()
-        })?;
-        Ok(())
+    fn is_expired(&self) -> bool {
+        let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        self.last_usage_ts + SESSION_TIMEOUT_AFTER_INACTIVITY.as_secs() < current_time
     }
 }
 
@@ -98,7 +111,7 @@ impl Tool for ToolPdb {
         let is_process_active = {
             let session = {
                 let gcx_locked = gcx.read().await;
-                gcx_locked.command_sessions.get(&chat_id).cloned()
+                gcx_locked.command_sessions.get(&get_session_hashmap_key("pdb", &chat_id)).cloned()
             };
         
             if let Some(session) = session {
@@ -151,47 +164,48 @@ async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, c
     let output = read_until_pdb_or_timeout(&mut stdout, 0).await?;
     let error = read_until_pdb_or_timeout(&mut stderr, 500).await?;
     
-    if let Some(old_session) = {
+    {
         let mut gcx_locked = gcx.write().await;
-        gcx_locked.command_sessions.remove(&command_session_key(chat_id))
-    } {
-        old_session.lock().await.kill_process().await?;
+        gcx_locked.command_sessions.remove(&get_session_hashmap_key("pdb", chat_id));
     }
 
     let status = process.try_wait().map_err(|e| e.to_string())?;
     if status.is_none() {
-        let command_session: Box<dyn CommandSession> = Box::new(PdbSession { process, stdin, stdout, stderr });
+        let command_session: Box<dyn CommandSession> = Box::new(PdbSession::new(process, stdin, stdout, stderr));
         let mut gcx_locked = gcx.write().await;
         gcx_locked.command_sessions.insert(
-            command_session_key(chat_id), Arc::new(AMutex::new(command_session)) 
+            get_session_hashmap_key("pdb", chat_id), Arc::new(AMutex::new(command_session)) 
         );
     }
     
-    Ok(format!("{}{}{}", output, "\n", error))
+    Ok(format!("{}\n{}", output, error))
 }
 
 async fn interact_with_pdb(input_command: &String, chat_id: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
     let command_session = {
         let gcx_locked = gcx.read().await;
-        gcx_locked.command_sessions.get(&command_session_key(chat_id))
+        gcx_locked.command_sessions.get(&get_session_hashmap_key("pdb", chat_id))
             .ok_or(format!("Error getting pdb session for chat_id: {}", chat_id))?
             .clone()
     };
     
     let mut command_session_locked = command_session.lock().await;
-    let pdb_command_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>().ok_or("Failed to downcast to PdbSession")?;
+    let pdb_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>().ok_or("Failed to downcast to PdbSession")?;
 
-    pdb_command_session.stdin.write_all(format!("{}\n", input_command).as_bytes()).await.map_err(|e| {
+    pdb_session.stdin.write_all(format!("{}\n", input_command).as_bytes()).await.map_err(|e| {
         error!("Failed to write to pdb stdin: {}", e);
         e.to_string()
     })?;
-    pdb_command_session.stdin.flush().await.map_err(|e| {
+    pdb_session.stdin.flush().await.map_err(|e| {
         error!("Failed to flush pdb stdin: {}", e);
         e.to_string()
     })?;
 
-    Ok(read_until_pdb_or_timeout(&mut pdb_command_session.stdout, 0).await?)
+    let output = read_until_pdb_or_timeout(&mut pdb_session.stdout, 0).await?;
+    let error = read_until_pdb_or_timeout(&mut pdb_session.stderr, 50).await?;
+
+    Ok(format!("{}\n{}", output, error))
 }
 
 pub async fn read_until_pdb_or_timeout<R>(buffer: &mut R, timeout_ms: u64) -> Result<String, String>
@@ -220,8 +234,4 @@ where
     }
 
     Ok(output)
-}
-
-fn command_session_key(chat_id: &String) -> String {
-    "pdb ⚡ ".to_string() + chat_id
 }
