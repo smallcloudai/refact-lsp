@@ -22,22 +22,22 @@ async fn remove_expired_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
             .map(|(key, session)| (key.to_string(), session.clone()))
             .collect::<Vec<_>>()
     };
-    
-    let expired_keys = join_all(
-        sessions.into_iter().map(|(key, session)| async move {
-            let session_locked = session.lock().await;
-            if session_locked.is_expired() {
-                Some(key)
-            } else {
-                None
-            }
-        })
-    ).await.into_iter().filter_map(|key| key).collect::<Vec<_>>();
 
-    let mut gcx_locked = gcx.write().await;
-    for key in expired_keys {
-        gcx_locked.integration_sessions.remove(&key);
+    let mut expired_keys = Vec::new();
+    for (key, session) in sessions {
+        let session_locked = session.lock().await;
+        if session_locked.is_expired() {
+            expired_keys.push(key);
+        }
     }
+
+    {
+        let mut gcx_locked = gcx.write().await;
+        for key in expired_keys {
+            gcx_locked.integration_sessions.remove(&key);
+        }
+    }
+    // sessions still keeps a reference on all sessions, just in case a destructor is called in the block above
 }
 
 pub async fn remove_expired_sessions_background_task(
