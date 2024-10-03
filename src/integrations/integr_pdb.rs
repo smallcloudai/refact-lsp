@@ -69,7 +69,7 @@ impl Tool for ToolPdb {
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, Vec<ContextEnum>), String> {
-        let command_args = parse_command_args(args, false)?;
+        let mut command_args = parse_command_args(args)?;
         
         let (gcx, chat_id) = {
             let ccx_lock = ccx.lock().await;
@@ -79,10 +79,15 @@ impl Tool for ToolPdb {
         let session_hashmap_key = get_session_hashmap_key("pdb", &chat_id);
         let python_command = self.integration_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
 
-        let output = if is_pdb_process_active(&session_hashmap_key, gcx.clone()).await {
-            interact_with_pdb(&command_args.join(" "), &session_hashmap_key, gcx.clone()).await?
+        let is_trying_to_open_pdb_session = command_args.len() >= 3 && 
+            matches!(command_args[0].as_str(), "python" | "python2" | "python3") && 
+            command_args[1] == "-m" && 
+            command_args[2] == "pdb";
+
+        let output = if is_trying_to_open_pdb_session {
+            start_pdb_session(&python_command, &mut command_args, &session_hashmap_key, gcx.clone()).await?
         } else {
-            start_pdb_session(&python_command, &command_args, &session_hashmap_key, gcx.clone()).await?
+            interact_with_pdb(&command_args.join(" "), &session_hashmap_key, gcx.clone()).await?
         };
 
         Ok((false, vec![
@@ -100,31 +105,29 @@ impl Tool for ToolPdb {
         &self,
         args: &HashMap<String, Value>,
     ) -> Result<String, String> {
-        let command_args = parse_command_args(args, true)?;
+        let command_args = parse_command_args(args)?;
         Ok(command_args.join(" "))
     }
 }
 
-fn parse_command_args(args: &HashMap<String, Value>, keep_prefix: bool) -> Result<Vec<String>, String> {
+fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, String> {
     let command = match args.get("command") {
         Some(Value::String(s)) => s,
         Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
         None => return Err("Missing argument `command`".to_string())
     };
 
-    let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
+    let parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
     if parsed_args.is_empty() {
         return Err("Parsed command is empty".to_string());
-    }
-    if !keep_prefix && parsed_args.len() >= 3 && matches!(parsed_args[0].as_str(), "python" | "python2" | "python3") && parsed_args[1] == "-m" && parsed_args[2] == "pdb" {
-        parsed_args.drain(0..3);
     }
 
     Ok(parsed_args)
 }
 
-async fn start_pdb_session(python_command: &String, command_args: &Vec<String>, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
+async fn start_pdb_session(python_command: &String, command_args: &mut Vec<String>, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
+    command_args.drain(0..3);
     info!("Starting pdb session with command: {} -m pdb {:?}", python_command, command_args);
     let mut process = Command::new(python_command)
         .arg("-m")
@@ -165,7 +168,7 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
     let command_session = {
         let gcx_locked = gcx.read().await;
         gcx_locked.integration_sessions.get(session_hashmap_key)
-            .ok_or(format!("Error getting pdb session for chat: {}", session_hashmap_key))?
+            .ok_or("There is no active pdb session in this chat, perhaps a new one should be opened.")?
             .clone()
     };
     
@@ -186,24 +189,6 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
     pdb_session.last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
     Ok(format!("{}\n{}", output, error))
-}
-
-async fn is_pdb_process_active(
-    key: &String,
-    gcx: Arc<ARwLock<GlobalContext>>,
-) -> bool {
-    let session = {
-        let gcx_locked = gcx.read().await;
-        gcx_locked.integration_sessions.get(key).cloned()
-    };
-
-    if let Some(session) = session {
-        let mut session = session.lock().await;
-        if let Some(pdb_session) = session.as_any_mut().downcast_mut::<PdbSession>() {
-            return pdb_session.process.try_wait().ok().flatten().is_none();
-        }
-    }
-    false
 }
 
 async fn write_to_stdin_and_flush(stdin: &mut ChildStdin, text_to_write: &String) -> Result<(), String>
