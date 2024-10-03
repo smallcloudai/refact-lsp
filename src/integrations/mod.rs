@@ -22,7 +22,7 @@ commands_deny:
 
 
 # --- Pdb integration ---
-pdb:
+#pdb:
 #  python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
 
 "#;
