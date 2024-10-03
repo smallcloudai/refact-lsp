@@ -146,19 +146,15 @@ async fn start_pdb_session(python_command: &String, command_args: &Vec<String>, 
     let output = read_until_token_or_timeout(&mut stdout, 0, "(Pdb)").await?;
     let error = read_until_token_or_timeout(&mut stderr, 500, "").await?;
     
-    {
-        let mut gcx_locked = gcx.write().await;
-        gcx_locked.integration_sessions.remove(session_hashmap_key);
-    }
-
     let exit_status = process.try_wait().map_err(|e| e.to_string())?;
     if exit_status.is_none() {
         let last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let command_session: Box<dyn IntegrationSession> = Box::new(PdbSession {process, stdin, stdout, stderr, last_usage_ts});
-        let mut gcx_locked = gcx.write().await;
-        gcx_locked.integration_sessions.insert(
+        gcx.write().await.integration_sessions.insert(
             session_hashmap_key.clone(), Arc::new(AMutex::new(command_session)) 
         );
+    } else {
+        gcx.write().await.integration_sessions.remove(session_hashmap_key);
     }
     
     Ok(format!("{}\n{}", output, error))
@@ -183,10 +179,7 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
 
     let exit_status = pdb_session.process.try_wait().map_err(|e| e.to_string())?;
     if let Some(exit_status) = exit_status {
-        {
-            let mut gcx_locked = gcx.write().await;
-            gcx_locked.integration_sessions.remove(session_hashmap_key);
-        }
+        gcx.write().await.integration_sessions.remove(session_hashmap_key);
         return Err(format!("Pdb process exited with status: {:?}", exit_status));
     }
 
@@ -195,20 +188,22 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
     Ok(format!("{}\n{}", output, error))
 }
 
-async fn is_pdb_process_active(session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> bool
-{
+async fn is_pdb_process_active(
+    key: &String,
+    gcx: Arc<ARwLock<GlobalContext>>,
+) -> bool {
     let session = {
         let gcx_locked = gcx.read().await;
-        gcx_locked.integration_sessions.get(session_hashmap_key).cloned()
+        gcx_locked.integration_sessions.get(key).cloned()
     };
 
     if let Some(session) = session {
-        let mut session_locked = session.lock().await;
-        session_locked.as_any_mut().downcast_mut::<PdbSession>()
-            .map_or(false, |pdb_session| pdb_session.process.try_wait().ok().flatten().is_none())
-    } else {
-        false
+        let mut session = session.lock().await;
+        if let Some(pdb_session) = session.as_any_mut().downcast_mut::<PdbSession>() {
+            return pdb_session.process.try_wait().ok().flatten().is_none();
+        }
     }
+    false
 }
 
 async fn write_to_stdin_and_flush(stdin: &mut ChildStdin, text_to_write: &String) -> Result<(), String>
