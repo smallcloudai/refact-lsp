@@ -69,32 +69,20 @@ impl Tool for ToolPdb {
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, Vec<ContextEnum>), String> {
-        let command = match args.get("command") {
-            Some(Value::String(s)) => s,
-            Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
-            None => return Err("Missing argument `command`".to_string())
-        };
-
+        let command_args = parse_command_args(args, false)?;
+        
         let (gcx, chat_id) = {
             let ccx_lock = ccx.lock().await;
             (ccx_lock.global_context.clone(), ccx_lock.chat_id.clone())
         };
 
-        let mut parsed_args = shell_words::split(command).map_err(|e| e.to_string())?;
-        if parsed_args.is_empty() {
-            return Err("Parsed command is empty".to_string());
-        }
-        if parsed_args.len() >= 3 && matches!(parsed_args[0].as_str(), "python" | "python2" | "python3") && parsed_args[1] == "-m" && parsed_args[2] == "pdb" {
-            parsed_args.drain(0..3);
-        }
-
-        let python_command = self.integration_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
         let session_hashmap_key = get_session_hashmap_key("pdb", &chat_id);
+        let python_command = self.integration_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
 
         let output = if is_pdb_process_active(&session_hashmap_key, gcx.clone()).await {
-            interact_with_pdb(&parsed_args.join(" "), &session_hashmap_key, gcx.clone()).await?
+            interact_with_pdb(&command_args.join(" "), &session_hashmap_key, gcx.clone()).await?
         } else {
-            start_pdb_session(&python_command, &parsed_args, &session_hashmap_key, gcx.clone()).await?
+            start_pdb_session(&python_command, &command_args, &session_hashmap_key, gcx.clone()).await?
         };
 
         Ok((false, vec![
@@ -107,15 +95,41 @@ impl Tool for ToolPdb {
             })    
         ]))
     }
+
+    fn command_to_match_against_confirm_deny(
+        &self,
+        args: &HashMap<String, Value>,
+    ) -> Result<String, String> {
+        let command_args = parse_command_args(args, true)?;
+        Ok(command_args.join(" "))
+    }
 }
 
-async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
+fn parse_command_args(args: &HashMap<String, Value>, keep_prefix: bool) -> Result<Vec<String>, String> {
+    let command = match args.get("command") {
+        Some(Value::String(s)) => s,
+        Some(v) => return Err(format!("argument `command` is not a string: {:?}", v)),
+        None => return Err("Missing argument `command`".to_string())
+    };
+
+    let mut parsed_args = shell_words::split(&command).map_err(|e| e.to_string())?;
+    if parsed_args.is_empty() {
+        return Err("Parsed command is empty".to_string());
+    }
+    if !keep_prefix && parsed_args.len() >= 3 && matches!(parsed_args[0].as_str(), "python" | "python2" | "python3") && parsed_args[1] == "-m" && parsed_args[2] == "pdb" {
+        parsed_args.drain(0..3);
+    }
+
+    Ok(parsed_args)
+}
+
+async fn start_pdb_session(python_command: &String, command_args: &Vec<String>, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
-    info!("Starting pdb session with command: {} -m pdb {:?}", python_command, parsed_args);
+    info!("Starting pdb session with command: {} -m pdb {:?}", python_command, command_args);
     let mut process = Command::new(python_command)
         .arg("-m")
         .arg("pdb")
-        .args(parsed_args)
+        .args(command_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -137,8 +151,8 @@ async fn start_pdb_session(python_command: &String, parsed_args: &Vec<String>, s
         gcx_locked.integration_sessions.remove(session_hashmap_key);
     }
 
-    let status = process.try_wait().map_err(|e| e.to_string())?;
-    if status.is_none() {
+    let exit_status = process.try_wait().map_err(|e| e.to_string())?;
+    if exit_status.is_none() {
         let last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let command_session: Box<dyn IntegrationSession> = Box::new(PdbSession {process, stdin, stdout, stderr, last_usage_ts});
         let mut gcx_locked = gcx.write().await;
@@ -167,13 +181,13 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
     let output = read_until_token_or_timeout(&mut pdb_session.stdout, 0, "(Pdb)").await?;
     let error = read_until_token_or_timeout(&mut pdb_session.stderr, 50, "").await?;
 
-    let status = pdb_session.process.try_wait().map_err(|e| e.to_string())?;
-    if let Some(status) = status {
+    let exit_status = pdb_session.process.try_wait().map_err(|e| e.to_string())?;
+    if let Some(exit_status) = exit_status {
         {
             let mut gcx_locked = gcx.write().await;
             gcx_locked.integration_sessions.remove(session_hashmap_key);
         }
-        return Err(format!("Pdb process exited with status: {:?}", status));
+        return Err(format!("Pdb process exited with status: {:?}", exit_status));
     }
 
     pdb_session.last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
