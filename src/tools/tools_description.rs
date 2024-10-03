@@ -261,11 +261,11 @@ tools:
   - name: "pdb"
     agentic: true
     experimental: true
-    description: "Python debugger for exploring code and inspecting variables. It can open debugging sessions, interact with them in the chat, and close sessions when requested"
+    description: "Python debugger for exploring code and inspecting variables. It can open debugging sessions and interact with them in the chat."
     parameters:
       - name: "command"
         type: "string"
-        description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist"
+        description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
       - "command"
 "####;
