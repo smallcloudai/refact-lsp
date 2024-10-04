@@ -8,9 +8,11 @@ use async_trait::async_trait;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 use tracing::warn;
+
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
+use crate::integrations::integr_git::ToolGit;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
 
@@ -90,6 +92,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
     if allow_experimental {
         // ("save_knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::att_knowledge::ToolSaveKnowledge{}) as Box<dyn Tool + Send>))),
         // ("memorize_if_user_asks".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::att_note_to_self::AtNoteToSelf{}) as Box<dyn AtTool + Send>))),
+        if let Some(git_tool) = ToolGit::new_if_configured(&integrations_value) {
+            tools_all.insert("git".to_string(), Arc::new(AMutex::new(Box::new(git_tool) as Box<dyn Tool + Send>)));
+        }
         if let Some(github_tool) = ToolGithub::new_if_configured(&integrations_value) {
             tools_all.insert("github".to_string(), Arc::new(AMutex::new(Box::new(github_tool) as Box<dyn Tool + Send>)));
         }
@@ -267,6 +272,21 @@ tools:
         type: "string"
         description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
+      - "command"
+
+  - name: "git"
+    agentic: true
+    experimental: true
+    description: "Access to git command line operations for version control tasks such as committing, pushing, pulling, branching, and merging. Don't resolve conflicts without asking the user."
+    parameters:
+      - name: "project_dir"
+        type: "string"
+        description: "Path to the Git repository. Use the location of the.git folder associated with the active file."
+      - name: "command"
+        type: "string"
+        description: "Examples:\ngit status\ngit commit -m \"Your commit message\"\ngit push origin main\ngit pull origin main\ngit checkout -b new-branch\ngit merge feature-branch"
+    parameters_required:
+      - "project_dir"
       - "command"
 "####;
 

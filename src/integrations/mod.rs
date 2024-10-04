@@ -1,5 +1,6 @@
 pub mod integr_github;
 pub mod integr_pdb;
+pub mod integr_git;
 pub mod sessions;
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
@@ -24,5 +25,10 @@ commands_deny:
 # --- Pdb integration ---
 #pdb:
 #  python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
+
+
+# --- Git integration ---
+#git:
+#  git_binary_path: "/usr/bin/git"           # Uncomment to set a custom path for the git binary, defaults to "git"
 
 "#;
