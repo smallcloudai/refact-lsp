@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 use std::fmt::Debug;
 use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use async_trait::async_trait;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,7 @@ use crate::call_validation::{ContextEnum, ChatMessage};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
+use crate::integrations::io_helper::{first_n_chars, last_n_lines, write_to_stdin_and_flush, read_until_token_or_timeout};
 
 const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 
@@ -163,8 +164,11 @@ async fn start_pdb_session(python_command: &String, command_args: &mut Vec<Strin
     Ok(format!("{}\n{}", output, error))
 }
 
-async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
-{
+async fn interact_with_pdb(
+    input_command: &String, 
+    session_hashmap_key: &String, 
+    gcx: Arc<ARwLock<GlobalContext>>
+) -> Result<String, String> {
     let command_session = {
         let gcx_locked = gcx.read().await;
         gcx_locked.integration_sessions.get(session_hashmap_key)
@@ -173,10 +177,35 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
     };
     
     let mut command_session_locked = command_session.lock().await;
-    let pdb_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>().ok_or("Failed to downcast to PdbSession")?;
+    let mut pdb_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>()
+        .ok_or("Failed to downcast to PdbSession")?;
 
+    let (output_main_command, error_main_command) = send_command_and_get_output_and_error(&mut pdb_session, input_command, session_hashmap_key, gcx.clone()).await?;
+    let (output_list, error_list) = send_command_and_get_output_and_error(&mut pdb_session, "list", session_hashmap_key, gcx.clone()).await?;
+    let (output_where, error_where) = send_command_and_get_output_and_error(&mut pdb_session, "where", session_hashmap_key, gcx.clone()).await?;
+    let (output_locals, error_locals) = send_command_and_get_output_and_error(&mut pdb_session, "p {k: v for k, v in locals().items() if not k.startswith('__')}", session_hashmap_key, gcx.clone()).await?;
+
+    pdb_session.last_usage_ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
+    Ok(format!(
+        "Command output:\n{}\n{}Extra context:\nlist output:\n{}{}\nwhere output:\n{}{}locals output:\n{}{}",
+        output_main_command,
+        format_error("Command error", &error_main_command),
+        output_list,
+        format_error("list error", &error_list),
+        last_n_lines(&output_where, 5),
+        format_error("where error", &error_where),
+        first_n_chars(&output_locals, 1000),
+        format_error("locals error", &error_locals),
+    ))
+}
+
+async fn send_command_and_get_output_and_error(pdb_session: &mut PdbSession, input_command: &str, session_hashmap_key: &str, gcx: Arc<ARwLock<GlobalContext>>) -> Result<(String, String), String>
+{
     write_to_stdin_and_flush(&mut pdb_session.stdin, input_command).await?;
-
     let output = read_until_token_or_timeout(&mut pdb_session.stdout, 0, "(Pdb)").await?;
     let error = read_until_token_or_timeout(&mut pdb_session.stderr, 50, "").await?;
 
@@ -186,51 +215,14 @@ async fn interact_with_pdb(input_command: &String, session_hashmap_key: &String,
         return Err(format!("Pdb process exited with status: {:?}", exit_status));
     }
 
-    pdb_session.last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-
-    Ok(format!("{}\n{}", output, error))
+    Ok((output, error))
 }
 
-async fn write_to_stdin_and_flush(stdin: &mut ChildStdin, text_to_write: &String) -> Result<(), String>
+fn format_error(error_title: &str, error: &str) -> String 
 {
-    stdin.write_all(format!("{}\n", text_to_write).as_bytes()).await.map_err(|e| {
-        error!("Failed to write to pdb stdin: {}", e);
-        e.to_string()
-    })?;
-    stdin.flush().await.map_err(|e| {
-        error!("Failed to flush pdb stdin: {}", e);
-        e.to_string()
-    })?;
-
-    Ok(())
-}
-
-async fn read_until_token_or_timeout<R>(buffer: &mut R, timeout_ms: u64, token: &str) -> Result<String, String>
-where
-    R: AsyncReadExt + Unpin,
-{
-    let mut output = String::new();
-    let mut buf = [0u8; 1024];
-
-    loop {
-        let read_result = if timeout_ms > 0 {
-            timeout(Duration::from_millis(timeout_ms), buffer.read(&mut buf)).await
-        } else {
-            Ok(buffer.read(&mut buf).await)
-        };
-
-        let bytes_read = match read_result {
-            Ok(Ok(bytes)) => bytes,                      // Successfully read
-            Ok(Err(e)) => return Err(e.to_string()),     // Read error
-            Err(_) => return Ok(output),                 // Timeout, return current output
-        };
-
-        if bytes_read == 0 { break; }
-        
-        output.push_str(&String::from_utf8_lossy(&buf[..bytes_read]));
-
-        if !token.is_empty() && output.trim_end().ends_with(token) { break; }
+    if !error.is_empty() {
+        format!("{}:\n{}\n", error_title, error)
+    } else {
+        "".to_string()
     }
-
-    Ok(output)
 }
