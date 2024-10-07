@@ -261,7 +261,7 @@ tools:
   - name: "pdb"
     agentic: true
     experimental: true
-    description: "Python debugger for exploring code and inspecting variables. It can open debugging sessions and interact with them in the chat."
+    description: "Python debugger for exploring code and inspecting variables. It can open debugging sessions on python files and interact with them in the chat."
     parameters:
       - name: "command"
         type: "string"
