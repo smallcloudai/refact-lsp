@@ -82,10 +82,7 @@ impl Tool for ToolPdb {
         let session_hashmap_key = get_session_hashmap_key("pdb", &chat_id);
         let python_command = self.integration_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
 
-        let is_trying_to_open_pdb_session = command_args.len() >= 3 &&
-            command_args[1] == "-m" && 
-            command_args[2] == "pdb";
-
+        let is_trying_to_open_pdb_session = command_args.windows(2).any(|w| w == ["-m", "pdb"]);
         let output = if is_trying_to_open_pdb_session {
             start_pdb_session(&python_command, &mut command_args, &session_hashmap_key, gcx.clone()).await?
         } else {
@@ -132,11 +129,13 @@ fn split_command(command: &str) -> Result<Vec<String>, String> {
 
 async fn start_pdb_session(python_command: &String, command_args: &mut Vec<String>, session_hashmap_key: &String, gcx: Arc<ARwLock<GlobalContext>>) -> Result<String, String> 
 {
-    command_args.drain(0..3); // remove some_python -m pdb
-    info!("Starting pdb session with command: {} -m pdb {:?}", python_command, command_args);
+    if !(command_args.len() >= 3 && command_args[0] == "python" && command_args[1] == "-m" && command_args[2] == "pdb") {
+        return Err("Usage: python -m pdb ... To use a different Python environment, set `python_path` in `integrations.yaml`.".to_string());
+    }
+    command_args.remove(0);
+    
+    info!("Starting pdb session with command: {} {:?}", python_command, command_args);
     let mut process = Command::new(python_command)
-        .arg("-m")
-        .arg("pdb")
         .args(command_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
