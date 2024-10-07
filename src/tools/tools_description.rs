@@ -265,7 +265,7 @@ tools:
     parameters:
       - name: "command"
         type: "string"
-        description: "Examples:\npython -m pdb script.py\nbreak 10\nbreak module_name.function_name\ncontinue\nprint(variable_name)\nlist\nquit"
+        description: "Examples:\npython -m pdb script.py\nbreak module_name.function_name\break 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
       - "command"
 "####;
