@@ -51,9 +51,10 @@ jobs:
             code-target: linux-arm64
             whl-tag: manylinux2014_aarch64
             cross: true
-#          - os: ubuntu-22.04
-#            target: arm-unknown-linux-gnueabihf
-#            code-target: linux-armhf
+          - os: ubuntu-20.04
+            target: armv7-unknown-linux-gnueabihf
+            code-target: linux-armhf
+            cross: true
           - os: macos-13
             target: x86_64-apple-darwin
             code-target: darwin-x64

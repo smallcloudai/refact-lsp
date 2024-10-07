@@ -24,3 +24,17 @@ passthrough = [
     "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu",
     "OPENSSL_INCLUDE_DIR=/usr/include/openssl"
 ]
+
+[target.armv7-unknown-linux-gnueabihf]
+pre-build = [
+    "dpkg --add-architecture armhf",
+    "apt-get update && apt-get install --assume-yes libssl-dev:armhf curl unzip",
+    "curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip",
+    "unzip protoc-25.1-linux-x86_64.zip -d /usr"
+]
+[target.armv7-unknown-linux-gnueabihf.env]
+passthrough = [
+    "OPENSSL_STATIC=1",
+    "OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf",
+    "OPENSSL_INCLUDE_DIR=/usr/include/openssl"
+]
