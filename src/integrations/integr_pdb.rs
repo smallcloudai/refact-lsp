@@ -154,26 +154,29 @@ async fn start_pdb_session(python_command: &String, command_args: &mut Vec<Strin
     let output = read_until_token_or_timeout(&mut stdout, 0, PDB_TOKEN).await?;
     let error = read_until_token_or_timeout(&mut stderr, 500, "").await?;
 
+    let exit_status = process.try_wait().map_err(|e| e.to_string())?;
+    if exit_status.is_some() {
+        return Err(format!("Pdb process exited with status: {:?}, \n{}\n{}", exit_status.unwrap().code().unwrap(), output, error));
+    }
+
     let mut pdb_session = PdbSession {process, stdin, stdout, stderr, last_usage_ts: 0};
 
-    let (output_list, error_list) = send_command_and_get_output_and_error(&mut pdb_session, "list", session_hashmap_key, gcx.clone()).await?;
-    let (output_where, error_where) = send_command_and_get_output_and_error(&mut pdb_session, "where", session_hashmap_key, gcx.clone()).await?;
-    let (output_locals, error_locals) = send_command_and_get_output_and_error(&mut pdb_session, "p {k: v for k, v in locals().items() if not k.startswith('__')}", session_hashmap_key, gcx.clone()).await?;
+    let (output_list, error_list) = send_command_and_get_output_and_error(
+        &mut pdb_session, "list", session_hashmap_key, gcx.clone()).await?;
+    let (output_where, error_where) = send_command_and_get_output_and_error(
+        &mut pdb_session, "where", session_hashmap_key, gcx.clone()).await?;
+    let (output_locals, error_locals) = send_command_and_get_output_and_error(
+        &mut pdb_session, "p {k: v for k, v in locals().items() if not k.startswith('__')}", session_hashmap_key, gcx.clone()).await?;
     
-    let exit_status = pdb_session.process.try_wait().map_err(|e| e.to_string())?;
-    if exit_status.is_none() {
-        pdb_session.last_usage_ts = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let command_session: Box<dyn IntegrationSession> = Box::new(pdb_session);
-        gcx.write().await.integration_sessions.insert(
+    pdb_session.last_usage_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let command_session: Box<dyn IntegrationSession> = Box::new(pdb_session);
+    {
+        let mut gcx_locked = gcx.write().await;
+        gcx_locked.integration_sessions.insert(
             session_hashmap_key.clone(), Arc::new(AMutex::new(command_session)) 
         );
-    } else {
-        gcx.write().await.integration_sessions.remove(session_hashmap_key);
     }
-    
+
     Ok(format_all_output(&output, &error, &output_list, &error_list, 
         &output_where, &error_where, &output_locals, &error_locals))
 }
@@ -194,10 +197,14 @@ async fn interact_with_pdb(
     let mut pdb_session = command_session_locked.as_any_mut().downcast_mut::<PdbSession>()
         .ok_or("Failed to downcast to PdbSession")?;
 
-    let (output_main_command, error_main_command) = send_command_and_get_output_and_error(&mut pdb_session, input_command, session_hashmap_key, gcx.clone()).await?;
-    let (output_list, error_list) = send_command_and_get_output_and_error(&mut pdb_session, "list", session_hashmap_key, gcx.clone()).await?;
-    let (output_where, error_where) = send_command_and_get_output_and_error(&mut pdb_session, "where", session_hashmap_key, gcx.clone()).await?;
-    let (output_locals, error_locals) = send_command_and_get_output_and_error(&mut pdb_session, "p {k: v for k, v in locals().items() if not k.startswith('__')}", session_hashmap_key, gcx.clone()).await?;
+    let (output_main_command, error_main_command) = send_command_and_get_output_and_error(
+        &mut pdb_session, input_command, session_hashmap_key, gcx.clone()).await?;
+    let (output_list, error_list) = send_command_and_get_output_and_error(
+        &mut pdb_session, "list", session_hashmap_key, gcx.clone()).await?;
+    let (output_where, error_where) = send_command_and_get_output_and_error(
+        &mut pdb_session, "where", session_hashmap_key, gcx.clone()).await?;
+    let (output_locals, error_locals) = send_command_and_get_output_and_error(
+        &mut pdb_session, "p {k: v for k, v in locals().items() if not k.startswith('__')}", session_hashmap_key, gcx.clone()).await?;
 
     pdb_session.last_usage_ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
