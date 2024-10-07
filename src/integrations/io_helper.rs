@@ -47,7 +47,7 @@ where
     Ok(output)
 }
 
-pub fn first_n_chars(msg: &String, n: usize) -> String {
+pub fn first_n_chars(msg: &str, n: usize) -> String {
     let mut last_n_chars: String = msg.chars().take(n).collect();
     if last_n_chars.len() == n {
         last_n_chars.push_str("...");
@@ -55,14 +55,21 @@ pub fn first_n_chars(msg: &String, n: usize) -> String {
     return last_n_chars;
 }
 
-pub fn last_n_lines(msg: &String, n: usize) -> String 
-{
-    let lines = msg.lines();
-    let mut lines_iter = lines.rev().take(n);
-    let mut output = String::new();
-    while let Some(line) = lines_iter.next() {
-        output.push_str(line);
-        output.push('\n');
+pub fn last_n_chars(msg: &str, n: usize) -> String {
+    let mut last_n_chars: String = msg.chars().rev().take(n).collect::<String>().chars().rev().collect();
+    if last_n_chars.len() == n {
+        last_n_chars.insert_str(0, "...");
     }
+    return last_n_chars;
+}
+
+pub fn last_n_lines(msg: &str, n: usize) -> String {
+    let lines: Vec<&str> = msg.lines().filter(|line| !line.trim().is_empty()).collect();
+    let start = if lines.len() > n { lines.len() - n } else { 0 };
+
+    let mut output = if start > 0 { "...\n" } else { "" }.to_string();
+    output.push_str(&lines[start..].join("\n"));
+    output.push('\n');
+
     output
 }
