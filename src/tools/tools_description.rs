@@ -277,7 +277,7 @@ tools:
   - name: "git"
     agentic: true
     experimental: true
-    description: "Access to git command line operations for version control tasks such as committing, pushing, pulling, branching, and merging. Don't resolve conflicts without asking the user."
+    description: "Access to git command line operations for version control tasks such as committing, pushing, pulling, branching, and merging. Before any merge cat all the files with changes, ASK THE USER WHAT THEY WANT, and then update the files or wait for the user to resolve conflicts."
     parameters:
       - name: "project_dir"
         type: "string"
