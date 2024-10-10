@@ -4,6 +4,7 @@ use std::hash::Hash;
 use axum::http::StatusCode;
 use indexmap::IndexMap;
 use ropey::Rope;
+use serde_json::Value;
 use crate::custom_error::ScratchError;
 
 
@@ -247,7 +248,7 @@ pub struct ChatUsage {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
-    #[serde(default, deserialize_with="deserialize_content")]
+    #[serde(default, deserialize_with="deserialize_string_content")]
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
@@ -257,15 +258,36 @@ pub struct ChatMessage {
     pub usage: Option<ChatUsage>,
 }
 
+// TODO: remove this
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct RealChatMessage {
     pub role: String,
-    #[serde(default, deserialize_with="deserialize_content")]
-    pub content: String,
+    #[serde(default, deserialize_with="deserialize_vec_content")]
+    pub content: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
     #[serde(default)]
     pub tool_call_id: String,
+}
+
+fn formatted_content(content: String, role: String) -> Vec<Value> {
+    let entry_formatted: Value;
+    if role == "image_url" {
+        // url: https://www.wikipedia.org/portal/wikipedia.org/assets/img/Wikipedia-logo-v2.png
+        // base64: data:image/jpeg;base64,base64_image (formats: jpeg[jpg], png, webp, gif)
+        entry_formatted = serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": content.clone(),
+            },
+        });
+    } else {
+        entry_formatted = serde_json::json!({
+            "type": "text",
+            "text": content.clone(),
+        });
+    }
+    vec![entry_formatted]
 }
 
 impl ChatMessage {
@@ -273,21 +295,41 @@ impl ChatMessage {
         ChatMessage { role, content, ..Default::default()}
     }
     pub fn into_real(&self) -> RealChatMessage {
+        let mut role = self.role.clone();
+        if !["system", "user", "assistant", "tool"].contains(&self.role.as_str()) {
+            role = "user".to_string();
+        }
+        let content = formatted_content(self.content.clone(), self.role.clone());
         RealChatMessage {
-            role: self.role.clone(),
-            content: self.content.clone(),
+            role,
+            content,
+            // content: self.content.clone(),
             tool_calls: self.tool_calls.clone(),
             tool_call_id: self.tool_call_id.clone(),
         }
     }
 }
 
-// this converts null to empty string
-fn deserialize_content<'de, D>(deserializer: D) -> Result<String, D::Error>
+impl RealChatMessage {
+    pub fn content_to_string(&self) -> String {
+        serde_json::to_string(&self.content).unwrap()
+    }
+}
+
+// this converts null to empty vec
+fn deserialize_string_content<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
     Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
+}
+
+// this converts null to empty vec
+fn deserialize_vec_content<'de, D>(deserializer: D) -> Result<Vec<Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<Vec<Value>>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

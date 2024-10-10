@@ -7,6 +7,9 @@ use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 use tracing::{error, info, warn};
+use std::fs::File;
+use std::io::{self, Read};
+use base64;
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -60,6 +63,7 @@ pub struct ChatPassthrough {
     pub global_context: Arc<ARwLock<GlobalContext>>,
     pub allow_at: bool,
     pub supports_tools: bool,
+    // pub supports_vision: bool,
 }
 
 impl ChatPassthrough {
@@ -69,6 +73,7 @@ impl ChatPassthrough {
         global_context: Arc<ARwLock<GlobalContext>>,
         allow_at: bool,
         supports_tools: bool,
+        // supports_vision: bool,
     ) -> Self {
         ChatPassthrough {
             t: HasTokenizerAndEot::new(tokenizer),
@@ -79,8 +84,18 @@ impl ChatPassthrough {
             global_context,
             allow_at,
             supports_tools,
+            // supports_vision,
         }
     }
+}
+
+// TODO: an example function how encoding should work with local files
+fn jpg_file_to_base64_content(file_path: &str) -> io::Result<String> {
+    let mut file = File::open(file_path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let base64_encoded = base64::encode(&buffer);
+    Ok(format!("data:image/jpeg;base64,{}", base64_encoded))
 }
 
 #[async_trait]
@@ -128,6 +143,18 @@ impl ScratchpadAbstract for ChatPassthrough {
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
                 filtered_msgs.push(msg.into_real());
+                // // TODO: the following code is just for debugging, we should not be sending these message
+                if msg.role == "user" {
+                    // TODO: first image is too big, we should divide it into pieces or resize
+                    // let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011.jpg").unwrap();
+                    let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011-small.jpg").unwrap();
+                    let image_msg = ChatMessage {
+                        role: "image_url".to_string(),
+                        content: image_content.clone(),
+                        ..Default::default()
+                    };
+                    filtered_msgs.push(image_msg.into_real());
+                }
 
             } else if msg.role == "diff" {
                 let tool_msg = ChatMessage {
@@ -198,7 +225,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let prompt = "PASSTHROUGH ".to_string() + &serde_json::to_string(&big_json).unwrap();
         if DEBUG {
             for msg in &filtered_msgs {
-                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content, 30));
+                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content_to_string(), 30));
             }
         }
         Ok(prompt.to_string())
