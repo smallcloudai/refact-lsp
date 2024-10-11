@@ -276,6 +276,7 @@ impl Tool for ToolPatch {
         results.push(ChatMessage {
             role: "diff".to_string(),
             content: json!(diff_chunks).to_string(),
+            additional_content: vec![],
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             usage: Some(usage),

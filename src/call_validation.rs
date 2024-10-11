@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use axum::http::StatusCode;
 use indexmap::IndexMap;
+use log::warn;
 use ropey::Rope;
 use serde_json::{json, Value};
 use crate::custom_error::ScratchError;
@@ -245,55 +246,87 @@ pub struct ChatUsage {
     pub total_tokens: usize,   // TODO: remove (can produce self-contradictory data when prompt+completion != total)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct TypedContent {
+    pub content_type: String,
+    pub content: String,
+}
+
+// TODO: ChatMessage structure is our inner representation of chat message
+// it looks like we're using it also for:
+// 1. server's chat message response
+// 2. client side chat message structure
+// this approach (without intermediate representations) leads to code misunderstanding
+// and serialization/deserialization issues in the future.
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default)]
+    pub additional_content: Vec<TypedContent>,
+    #[serde(default)]
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(default)]
     pub tool_call_id: String,
+    #[serde(default)]
     pub usage: Option<ChatUsage>,
 }
 
-impl Serialize for ChatMessage {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("ChatMessage", 4)?;
+// NOTE: this structure represents request ChatMessage in openai style
+// we're using it for external inference API interaction only
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct ExternalChatMessage {
+    pub role: String,
+    pub content: Value,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_call_id: String,
+}
 
+impl ChatMessage {
+    fn convert_text_content(content: &String) -> Value {
+        json!({
+            "type": "text",
+            "text": content.clone(),
+        })
+    }
+    fn convert_image_content(content: &String) -> Value {
+        json!({
+            "type": "image_url",
+            "image_url": {
+                "url": content.clone(),
+            },
+        })
+    }
+    pub fn convert_to_external(&self) -> ExternalChatMessage {
         // role
         let mut role = self.role.clone();
         if !["system", "user", "assistant", "tool"].contains(&self.role.as_str()) {
             role = "user".to_string();
         }
-        state.serialize_field("role", &role)?;
 
         // content
-        let formatted_content: Value;
-        if self.role == "image_url" {
-            // url: https://www.wikipedia.org/portal/wikipedia.org/assets/img/Wikipedia-logo-v2.png
-            // base64: data:image/jpeg;base64,base64_image (formats: jpeg[jpg], png, webp, gif)
-            formatted_content = Value::Array(vec![json!({
-                "type": "image_url",
-                "image_url": {
-                    "url": self.content.clone(),
-                },
-            })]);
+        let content: Value;
+        if self.additional_content.is_empty() {
+            content = Value::String(self.content.clone());
         } else {
-            formatted_content = Value::String(self.content.clone());
-            // NOTE: the following format cann be used in case of all-in-one message (text and image parts)
-            // formatted_content = json!({
-            //     "type": "text",
-            //     "text": self.content.clone(),
-            // });
+            let mut content_group = vec![ChatMessage::convert_text_content(&self.content)];
+            for additional_context in self.additional_content.iter() {
+                if additional_context.content_type == "image" {
+                    content_group.push(ChatMessage::convert_image_content(&additional_context.content));
+                } else {
+                    warn!("ChatMessage serialization: content_type '{}' is not supported", additional_context.content_type);
+                }
+            }
+            content = Value::Array(content_group);
         }
 
-        state.serialize_field("content", &formatted_content)?;
-
-        state.serialize_field("tool_calls", &self.tool_calls)?;
-        state.serialize_field("tool_call_id", &self.tool_call_id)?;
-
-        state.end()
+        ExternalChatMessage {
+            role,
+            content,
+            tool_calls: self.tool_calls.clone(),
+            tool_call_id: self.tool_call_id.clone(),
+        }
     }
 }
 
@@ -318,6 +351,7 @@ impl<'de> Deserialize<'de> for ChatMessage {
         let raw = ChatMessageRaw::deserialize(deserializer)?;
 
         // correct context
+        // TODO: for now I'm not sure how content should look like; we need to revise deserialization process
         let content = match raw.content {
             None => String::new(),
             Some(value) => match value {
@@ -344,6 +378,7 @@ impl<'de> Deserialize<'de> for ChatMessage {
         Ok(ChatMessage {
             role: raw.role,
             content,
+            additional_content: vec![],
             tool_calls: raw.tool_calls,
             tool_call_id: raw.tool_call_id,
             usage: raw.usage,

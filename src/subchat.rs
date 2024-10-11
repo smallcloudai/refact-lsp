@@ -165,6 +165,7 @@ async fn chat_interaction_non_stream(
         let msg = ChatMessage {
             role,
             content,
+            additional_content: vec![],
             tool_calls,
             tool_call_id,
             usage: usage_mb.clone(),

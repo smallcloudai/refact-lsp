@@ -48,7 +48,8 @@ pub fn pretend_tool_call(tool_name: &str, tool_arguments: &str, content: String)
     };
     ChatMessage {
         role: "assistant".to_string(),
-        content: content,
+        content,
+        additional_content: vec![],
         tool_calls: Some(vec![tool_call]),
         tool_call_id: "".to_string(),
         ..Default::default()

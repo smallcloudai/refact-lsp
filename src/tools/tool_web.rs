@@ -26,12 +26,13 @@ impl Tool for ToolWeb {
             None => return Err("Missing argument `url` for att_web".to_string())
         };
 
-        let text = execute_at_web(&url).await?;
+        let content = execute_at_web(&url).await?;
 
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: text,
+            content,
+            additional_content: vec![],
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             ..Default::default()

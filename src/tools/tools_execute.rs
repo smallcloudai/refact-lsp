@@ -314,6 +314,7 @@ fn tool_answer(content: String, tool_call_id: String) -> ChatMessage {
     ChatMessage {
         role: "tool".to_string(),
         content,
+        additional_content: vec![],
         tool_calls: None,
         tool_call_id,
         ..Default::default()

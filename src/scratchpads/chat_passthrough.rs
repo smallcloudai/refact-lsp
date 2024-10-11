@@ -16,7 +16,7 @@ use reqwest::Client;
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_execute::run_tools;
-use crate::call_validation::{ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{AdditionalContext, ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -101,8 +101,8 @@ fn jpg_file_to_base64_content(file_path: &str) -> io::Result<String> {
 }
 
 // TODO: an example function how extract image urls
-async fn extract_image_messages_from_content(content: String) -> Result<Vec<ChatMessage>, String> {
-    let mut image_messages = vec![];
+async fn extract_image_messages_from_content(content: String) -> Result<Vec<String>, String> {
+    let mut extracted_urls = vec![];
 
     let image_header_client = Client::new();
     let url_regex = Regex::new(r"https?://[^\s]+").map_err(|e| e.to_string())?;
@@ -114,11 +114,7 @@ async fn extract_image_messages_from_content(content: String) -> Result<Vec<Chat
                     match content_type.to_str() {
                         Ok(content_type_str) => {
                             if ["image/jpeg", "image/png"].contains(&content_type_str) {
-                                image_messages.push(ChatMessage {
-                                    role: "image_url".to_string(),
-                                    content: url.to_string(),
-                                    ..Default::default()
-                                });
+                                extracted_urls.push(url.to_string());
                             } else {
                                 info!("unsupported content type {} for url {}, skip it", content_type_str, url);
                             }
@@ -131,7 +127,7 @@ async fn extract_image_messages_from_content(content: String) -> Result<Vec<Chat
         }
     }
 
-    Ok(image_messages)
+    Ok(extracted_urls)
 }
 
 #[async_trait]
@@ -178,13 +174,16 @@ impl ScratchpadAbstract for ChatPassthrough {
         let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
             if ["system", "user", "assistant", "tool", "plain_text", "cd_instruction", "diff"].contains(&msg.role.as_str()) {
-                filtered_msgs.push(msg.clone());
+                let mut cloned_msg = msg.clone();
                 // TODO: the following code is just for debugging, we should not be sending these message
                 if msg.role == "user" {
-                    if let Ok(image_msgs) = extract_image_messages_from_content(msg.content.clone()).await {
-                        for image_msg in image_msgs {
-                            info!("append image_url into chat: {:?}", image_msg.content);
-                            filtered_msgs.push(image_msg.clone());
+                    if let Ok(extracted_urls) = extract_image_messages_from_content(msg.content.clone()).await {
+                        for image_url in extracted_urls {
+                            info!("append image_url into chat: {:?}", image_url);
+                            cloned_msg.additional_content.push(AdditionalContext {
+                                content_type: "image".to_string(),
+                                content: image_url.clone(),
+                            });
                         }
                     }
                     // // TODO: first image is too big, we should divide it into pieces or resize
@@ -195,6 +194,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                     //     content: image_content.clone(),
                     //     ..Default::default()
                     // });
+                    filtered_msgs.push(cloned_msg.convert_to_external());
                 }
             } else if msg.role == "context_file" {
                 // TODO: probably we can move this code into serializer
@@ -208,7 +208,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                                         context_file.line1,
                                         context_file.line2,
                                         context_file.file_content),
-                            ));
+                            ).convert_to_external());
                         }
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
@@ -244,7 +244,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let prompt = "PASSTHROUGH ".to_string() + &serde_json::to_string(&big_json).unwrap();
         if DEBUG {
             for msg in &filtered_msgs {
-                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content, 30));
+                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content.to_string(), 30));
             }
         }
         Ok(prompt.to_string())

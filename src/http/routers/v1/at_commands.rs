@@ -176,6 +176,7 @@ pub async fn handle_v1_command_preview(
         let message = ChatMessage {
             role: "context_file".to_string(),
             content: serde_json::to_string(&processed).unwrap(),
+            additional_content: vec![],
             tool_calls: None,
             tool_call_id: "".to_string(),
             ..Default::default()

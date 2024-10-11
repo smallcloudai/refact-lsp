@@ -85,7 +85,8 @@ impl Tool for ToolGithub {
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: content,
+            content,
+            additional_content: vec![],
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             ..Default::default()
