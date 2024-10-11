@@ -142,41 +142,39 @@ impl ScratchpadAbstract for ChatPassthrough {
         let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
-                filtered_msgs.push(msg.into_real());
+                filtered_msgs.push(msg.clone());
                 // // TODO: the following code is just for debugging, we should not be sending these message
                 if msg.role == "user" {
                     // TODO: first image is too big, we should divide it into pieces or resize
                     // let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011.jpg").unwrap();
                     let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011-small.jpg").unwrap();
-                    let image_msg = ChatMessage {
+                    filtered_msgs.push(ChatMessage {
                         role: "image_url".to_string(),
                         content: image_content.clone(),
                         ..Default::default()
-                    };
-                    filtered_msgs.push(image_msg.into_real());
+                    });
                 }
 
             } else if msg.role == "diff" {
-                let tool_msg = ChatMessage {
+                filtered_msgs.push(ChatMessage {
                     role: "tool".to_string(),
                     content: msg.content.clone(),
                     tool_calls: None,
                     tool_call_id: msg.tool_call_id.clone(),
                     ..Default::default()
-                };
-                filtered_msgs.push(tool_msg.into_real());
+                });
 
             } else if msg.role == "plain_text" || msg.role == "cd_instruction" {
                 filtered_msgs.push(ChatMessage::new(
                     "user".to_string(),
                     msg.content.clone(),
-                ).into_real());
+                ));
 
             } else if msg.role == "plain_text" {
                 filtered_msgs.push(ChatMessage::new(
                     "user".to_string(),
                     msg.content.clone(),
-                ).into_real());
+                ));
 
             } else if msg.role == "context_file" {
                 match serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
@@ -189,7 +187,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                                         context_file.line1,
                                         context_file.line2,
                                         context_file.file_content),
-                            ).into_real());
+                            ));
                         }
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
@@ -225,7 +223,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let prompt = "PASSTHROUGH ".to_string() + &serde_json::to_string(&big_json).unwrap();
         if DEBUG {
             for msg in &filtered_msgs {
-                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content_to_string(), 30));
+                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content, 30));
             }
         }
         Ok(prompt.to_string())

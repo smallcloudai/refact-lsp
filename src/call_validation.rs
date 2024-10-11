@@ -1,10 +1,10 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::collections::HashMap;
 use std::hash::Hash;
 use axum::http::StatusCode;
 use indexmap::IndexMap;
 use ropey::Rope;
-use serde_json::Value;
+use serde_json::{json, Value};
 use crate::custom_error::ScratchError;
 
 
@@ -245,91 +245,116 @@ pub struct ChatUsage {
     pub total_tokens: usize,   // TODO: remove (can produce self-contradictory data when prompt+completion != total)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
-    #[serde(default, deserialize_with="deserialize_string_content")]
     pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
-    #[serde(default)]
     pub tool_call_id: String,
-    #[serde(default)]
     pub usage: Option<ChatUsage>,
 }
 
-// TODO: remove this
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct RealChatMessage {
-    pub role: String,
-    #[serde(default, deserialize_with="deserialize_vec_content")]
-    pub content: Vec<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
-    #[serde(default)]
-    pub tool_call_id: String,
+impl Serialize for ChatMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ChatMessage", 4)?;
+
+        // role
+        let mut role = self.role.clone();
+        if !["system", "user", "assistant", "tool"].contains(&self.role.as_str()) {
+            role = "user".to_string();
+        }
+        state.serialize_field("role", &role)?;
+
+        // content
+        let formatted_content: Value;
+        if self.role == "image_url" {
+            // url: https://www.wikipedia.org/portal/wikipedia.org/assets/img/Wikipedia-logo-v2.png
+            // base64: data:image/jpeg;base64,base64_image (formats: jpeg[jpg], png, webp, gif)
+            formatted_content = Value::Array(vec![json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": self.content.clone(),
+                },
+            })]);
+        } else {
+            formatted_content = Value::String(self.content.clone());
+            // NOTE: the following format cann be used in case of all-in-one message (text and image parts)
+            // formatted_content = json!({
+            //     "type": "text",
+            //     "text": self.content.clone(),
+            // });
+        }
+
+        state.serialize_field("content", &formatted_content)?;
+
+        state.serialize_field("tool_calls", &self.tool_calls)?;
+        state.serialize_field("tool_call_id", &self.tool_call_id)?;
+
+        state.end()
+    }
 }
 
-fn formatted_content(content: String, role: String) -> Vec<Value> {
-    let entry_formatted: Value;
-    if role == "image_url" {
-        // url: https://www.wikipedia.org/portal/wikipedia.org/assets/img/Wikipedia-logo-v2.png
-        // base64: data:image/jpeg;base64,base64_image (formats: jpeg[jpg], png, webp, gif)
-        entry_formatted = serde_json::json!({
-            "type": "image_url",
-            "image_url": {
-                "url": content.clone(),
+impl<'de> Deserialize<'de> for ChatMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        struct ChatMessageRaw {
+            role: String,
+            #[serde(default)]
+            content: Option<Value>,
+            #[serde(default)]
+            tool_calls: Option<Vec<ChatToolCall>>,
+            #[serde(default)]
+            tool_call_id: String,
+            #[serde(default)]
+            usage: Option<ChatUsage>,
+        }
+
+        let raw = ChatMessageRaw::deserialize(deserializer)?;
+
+        // correct context
+        let content = match raw.content {
+            None => String::new(),
+            Some(value) => match value {
+                Value::String(s) => s,
+                Value::Array(array) => {
+                    if array.len() == 1 {
+                        if let Some(Value::String(type_value)) = array[0].get("type") {
+                            if let Some(Value::String(content_value)) = array[0].get(type_value) {
+                                content_value.to_owned()
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    }
+                },
+                _ => String::new(),
             },
-        });
-    } else {
-        entry_formatted = serde_json::json!({
-            "type": "text",
-            "text": content.clone(),
-        });
+        };
+
+        Ok(ChatMessage {
+            role: raw.role,
+            content,
+            tool_calls: raw.tool_calls,
+            tool_call_id: raw.tool_call_id,
+            usage: raw.usage,
+        })
     }
-    vec![entry_formatted]
 }
 
 impl ChatMessage {
     pub fn new(role: String, content: String) -> Self {
         ChatMessage { role, content, ..Default::default()}
     }
-    pub fn into_real(&self) -> RealChatMessage {
-        let mut role = self.role.clone();
-        if !["system", "user", "assistant", "tool"].contains(&self.role.as_str()) {
-            role = "user".to_string();
-        }
-        let content = formatted_content(self.content.clone(), self.role.clone());
-        RealChatMessage {
-            role,
-            content,
-            // content: self.content.clone(),
-            tool_calls: self.tool_calls.clone(),
-            tool_call_id: self.tool_call_id.clone(),
-        }
-    }
-}
-
-impl RealChatMessage {
-    pub fn content_to_string(&self) -> String {
-        serde_json::to_string(&self.content).unwrap()
-    }
-}
-
-// this converts null to empty vec
-fn deserialize_string_content<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
-}
-
-// this converts null to empty vec
-fn deserialize_vec_content<'de, D>(deserializer: D) -> Result<Vec<Value>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<Vec<Value>>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
