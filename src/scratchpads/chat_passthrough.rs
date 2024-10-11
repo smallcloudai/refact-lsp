@@ -10,6 +10,8 @@ use tracing::{error, info, warn};
 use std::fs::File;
 use std::io::{self, Read};
 use base64;
+use regex::Regex;
+use reqwest::Client;
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -98,6 +100,40 @@ fn jpg_file_to_base64_content(file_path: &str) -> io::Result<String> {
     Ok(format!("data:image/jpeg;base64,{}", base64_encoded))
 }
 
+// TODO: an example function how extract image urls
+async fn extract_image_messages_from_content(content: String) -> Result<Vec<ChatMessage>, String> {
+    let mut image_messages = vec![];
+
+    let image_header_client = Client::new();
+    let url_regex = Regex::new(r"https?://[^\s]+").map_err(|e| e.to_string())?;
+    let urls: Vec<&str> = url_regex.find_iter(content.as_str()).map(|mat| mat.as_str()).collect();
+    for url in urls {
+        match image_header_client.head(url).send().await {
+            Ok(response) => {
+                if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+                    match content_type.to_str() {
+                        Ok(content_type_str) => {
+                            if ["image/jpeg", "image/png"].contains(&content_type_str) {
+                                image_messages.push(ChatMessage {
+                                    role: "image_url".to_string(),
+                                    content: url.to_string(),
+                                    ..Default::default()
+                                });
+                            } else {
+                                info!("unsupported content type {} for url {}, skip it", content_type_str, url);
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                } else {}
+            }
+            Err(_) => {}
+        }
+    }
+
+    Ok(image_messages)
+}
+
 #[async_trait]
 impl ScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
@@ -141,42 +177,27 @@ impl ScratchpadAbstract for ChatPassthrough {
         }
         let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
-            if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
+            if ["system", "user", "assistant", "tool", "plain_text", "cd_instruction", "diff"].contains(&msg.role.as_str()) {
                 filtered_msgs.push(msg.clone());
-                // // TODO: the following code is just for debugging, we should not be sending these message
+                // TODO: the following code is just for debugging, we should not be sending these message
                 if msg.role == "user" {
-                    // TODO: first image is too big, we should divide it into pieces or resize
-                    // let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011.jpg").unwrap();
-                    let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011-small.jpg").unwrap();
-                    filtered_msgs.push(ChatMessage {
-                        role: "image_url".to_string(),
-                        content: image_content.clone(),
-                        ..Default::default()
-                    });
+                    if let Ok(image_msgs) = extract_image_messages_from_content(msg.content.clone()).await {
+                        for image_msg in image_msgs {
+                            info!("append image_url into chat: {:?}", image_msg.content);
+                            filtered_msgs.push(image_msg.clone());
+                        }
+                    }
+                    // // TODO: first image is too big, we should divide it into pieces or resize
+                    // // let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011.jpg").unwrap();
+                    // let image_content = jpg_file_to_base64_content("/home/mitya/projects/refact-lsp/M31_09-01-2011-small.jpg").unwrap();
+                    // filtered_msgs.push(ChatMessage {
+                    //     role: "image_url".to_string(),
+                    //     content: image_content.clone(),
+                    //     ..Default::default()
+                    // });
                 }
-
-            } else if msg.role == "diff" {
-                filtered_msgs.push(ChatMessage {
-                    role: "tool".to_string(),
-                    content: msg.content.clone(),
-                    tool_calls: None,
-                    tool_call_id: msg.tool_call_id.clone(),
-                    ..Default::default()
-                });
-
-            } else if msg.role == "plain_text" || msg.role == "cd_instruction" {
-                filtered_msgs.push(ChatMessage::new(
-                    "user".to_string(),
-                    msg.content.clone(),
-                ));
-
-            } else if msg.role == "plain_text" {
-                filtered_msgs.push(ChatMessage::new(
-                    "user".to_string(),
-                    msg.content.clone(),
-                ));
-
             } else if msg.role == "context_file" {
+                // TODO: probably we can move this code into serializer
                 match serde_json::from_str::<Vec<ContextFile>>(&msg.content) {
                     Ok(vector_of_context_files) => {
                         for context_file in vector_of_context_files {
