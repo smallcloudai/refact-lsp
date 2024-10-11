@@ -21,9 +21,9 @@ pub async fn read_until_token_or_timeout<R>(buffer: &mut R, timeout_ms: u64, tok
 where
     R: AsyncReadExt + Unpin,
 {
-    let mut output = String::new();
+    let mut output = Vec::new();
     let mut buf = [0u8; 1024];
-
+    
     loop {
         let read_result = if timeout_ms > 0 {
             timeout(Duration::from_millis(timeout_ms), buffer.read(&mut buf)).await
@@ -34,17 +34,17 @@ where
         let bytes_read = match read_result {
             Ok(Ok(bytes)) => bytes,                      // Successfully read
             Ok(Err(e)) => return Err(e.to_string()),     // Read error
-            Err(_) => return Ok(output),                 // Timeout, return current output
+            Err(_) => return Ok(String::from_utf8_lossy(&output).to_string()), // Timeout, return current output
         };
 
         if bytes_read == 0 { break; }
         
-        output.push_str(&String::from_utf8_lossy(&buf[..bytes_read]));
+        output.extend_from_slice(&buf[..bytes_read]);
 
-        if !token.is_empty() && output.trim_end().ends_with(token) { break; }
+        if !token.is_empty() && output.trim_ascii_end().ends_with(token.as_bytes()) { break; }
     }
 
-    Ok(output)
+    Ok(String::from_utf8_lossy(&output).to_string())
 }
 
 pub fn first_n_chars(msg: &str, n: usize) -> String {
