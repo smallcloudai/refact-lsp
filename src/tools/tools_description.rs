@@ -15,7 +15,7 @@ use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
 use crate::integrations::integr_chrome::ToolChrome;
 
-use crate::integrations::integr_docker::ToolDocker;
+use crate::integrations::docker::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig { // todo: fix typo
@@ -298,7 +298,7 @@ tools:
   - name: "docker"
     agentic: true
     experimental: true
-    description: "Access to docker daemon, to create and manupulate images."
+    description: "Access to docker cli, in a non-interactive way, don't open a shell."
     parameters:
       - name: "command"
         type: "string"

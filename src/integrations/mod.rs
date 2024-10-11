@@ -1,8 +1,8 @@
 pub mod integr_github;
 pub mod integr_pdb;
 pub mod integr_chrome;
+pub mod docker;
 pub mod sessions;
-pub mod integr_docker;
 pub mod process_io_utils;
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
