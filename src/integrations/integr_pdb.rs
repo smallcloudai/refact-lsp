@@ -151,7 +151,7 @@ async fn start_pdb_session(python_command: &String, command_args: &mut Vec<Strin
     let mut stderr = BufReader::new(process.stderr.take().ok_or("Failed to open stderr for pdb process")?);
 
     let output = read_until_token_or_timeout(&mut stdout, 0, PDB_TOKEN).await?;
-    let error = read_until_token_or_timeout(&mut stderr, 500, "").await?;
+    let error = read_until_token_or_timeout(&mut stderr, 100, "").await?;
 
     let exit_status = process.try_wait().map_err(|e| e.to_string())?;
     if exit_status.is_some() {
