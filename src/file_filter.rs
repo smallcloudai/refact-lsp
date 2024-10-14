@@ -36,14 +36,6 @@ pub fn is_valid_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         return Err("Parent dir stars with a dot".into());
     }
 
-    // if let Some(extension) = path.extension() {
-    //     if !SOURCE_FILE_EXTENSIONS.contains(&extension.to_str().unwrap_or_default()) {
-    //         return Err(format!("Unsupported file extension {:?}", extension).into());
-    //     }
-    // } else {
-    //     return Err("File has no extension".into());
-    // }
-
     if let Ok(metadata) = fs::metadata(path) {
         let file_size = metadata.len();
         if file_size < SMALL_FILE_SIZE_THRESHOLD {
