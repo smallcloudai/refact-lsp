@@ -147,7 +147,7 @@ pub async fn handle_v1_command_preview(
 
     let rag_n_ctx = max_tokens_for_rag_chat(recommended_model_record.n_ctx, 512);  // real maxgen may be different -- comes from request
 
-    let mut preview: Vec<ChatMessage> = vec![];
+    let mut preview = vec![];
     for exec_result in messages_for_postprocessing.iter() {
         // at commands exec() can produce both role="user" and role="assistant" messages
         if let ContextEnum::ChatMessage(raw_msg) = exec_result {

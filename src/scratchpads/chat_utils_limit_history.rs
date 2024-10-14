@@ -1,6 +1,6 @@
-use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::call_validation::ChatMessage;
 use std::collections::HashSet;
+use crate::call_validation::ChatMessage;
+use crate::scratchpad_abstract::HasTokenizerAndEot;
 
 
 pub fn limit_messages_history(
