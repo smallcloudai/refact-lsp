@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use indexmap::{IndexSet, IndexMap};
 use std::sync::{Arc, Weak};
 use tokio::sync::{Mutex as AMutex, Notify as ANotify};
 use tokio::sync::RwLock as ARwLock;
 use tokio::task::JoinHandle;
 use tracing::info;
-use crate::files_in_workspace::Document;
+use crate::files_in_workspace::{Document, is_path_to_enqueue_valid};
 use crate::global_context::GlobalContext;
 
 use crate::ast::ast_structs::{AstDB, AstStatus, AstCounters, AstErrorStats};
@@ -325,8 +327,33 @@ pub async fn ast_indexer_start(
     return vec![indexer_handle];
 }
 
+fn filter_paths_to_enqueue(paths: Vec<String>) -> Vec<String> {
+    let mut rejected_reasons = HashMap::new();
+    let mut filtered_paths = vec![];
+
+    for p in paths {
+        let path = PathBuf::from(&p);
+        match is_path_to_enqueue_valid(&path) {
+            Ok(_) => {
+                filtered_paths.push(p);
+            }
+            Err(e) => {
+                rejected_reasons.entry(e.to_string()).and_modify(|x| *x += 1).or_insert(1);
+            }
+        }
+    }
+    if !rejected_reasons.is_empty() {
+        info!("AST rejected paths to enqueue reasons:");
+        for (reason, count) in &rejected_reasons {
+            info!("    {:>6} {}", count, reason);
+        }
+    }
+    filtered_paths
+}
+
 pub async fn ast_indexer_enqueue_files(ast_service: Arc<AMutex<AstIndexService>>, cpaths: Vec<String>, wake_up_indexer: bool)
 {
+    let cpaths = filter_paths_to_enqueue(cpaths);
     let ast_status;
     let nonzero = cpaths.len() > 0;
     {
