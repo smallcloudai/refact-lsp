@@ -20,6 +20,7 @@ use crate::caps::CodeAssistantCaps;
 use crate::completion_cache::CompletionCache;
 use crate::custom_error::ScratchError;
 use crate::files_in_workspace::DocumentsState;
+use crate::integrations::docker::docker_ssh_tunnel_handler::SshTunnel;
 use crate::integrations::sessions::IntegrationSession;
 use crate::privacy::PrivacySettings;
 use crate::telemetry::telemetry_structs;
@@ -143,6 +144,7 @@ pub struct GlobalContext {
     pub at_commands_preview_cache: Arc<AMutex<AtCommandsPreviewCache>>,
     pub privacy_settings: Arc<PrivacySettings>,
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
+    pub docker_ssh_tunnel: Arc<AMutex<Option<SshTunnel>>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -321,6 +323,7 @@ pub async fn create_global_context(
         at_commands_preview_cache: Arc::new(AMutex::new(AtCommandsPreviewCache::new())),
         privacy_settings: Arc::new(PrivacySettings::default()),
         integration_sessions: HashMap::new(),
+        docker_ssh_tunnel: Arc::new(AMutex::new(None)),
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {
