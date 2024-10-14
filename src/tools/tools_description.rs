@@ -45,8 +45,8 @@ pub trait Tool: Send + Sync {
     }
 }
 
-async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
-    let yaml_path = cache_dir.join("integrations.yaml");
+async fn read_integrations_value(config_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
+    let yaml_path = config_dir.join("integrations.yaml");
 
     let integrations_yaml = tokio::fs::read_to_string(&yaml_path).await.map_err(
         |e| format!("Failed to read integrations.yaml: {}", e)
@@ -65,14 +65,11 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         (gcx_locked.ast_service.is_some(), vecdb.is_some(), gcx_locked.cmdline.experimental)
     };
 
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let integrations_value = match read_integrations_value(&cache_dir).await {
-        Ok(value) => value,
-        Err(e) => {
-            warn!(e);
-            serde_yaml::Value::default()
-        }
-    };
+    let config_dir = gcx.read().await.config_dir.clone();
+    let integrations_value = read_integrations_value(&config_dir).await.unwrap_or_else(|e| {
+        warn!(e);
+        serde_yaml::Value::default()
+    });
 
     let mut tools_all = IndexMap::from([
         ("search".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_search::ToolSearch{}) as Box<dyn Tool + Send>))),
@@ -117,8 +114,8 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
 
 pub async fn commands_require_confirmation_rules_from_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<CommandsRequireConfimationConfig, String>
 {
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let integrations_value = read_integrations_value(&cache_dir).await?;
+    let config_dir = gcx.read().await.config_dir.clone();
+    let integrations_value = read_integrations_value(&config_dir).await?;
 
     serde_yaml::from_value::<CommandsRequireConfimationConfig>(integrations_value)
         .map_err(|e| format!("Failed to parse CommandsRequireConfimationConfig: {}", e))

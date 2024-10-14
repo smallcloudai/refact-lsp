@@ -170,8 +170,8 @@ pub async fn load_customization(
         (caps_locked.customization.clone(), caps_locked.code_chat_default_system_prompt.clone())
     };
 
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let customization_yaml_path = cache_dir.join("customization.yaml");
+    let config_dir = gcx.read().await.config_dir.clone();
+    let customization_yaml_path = config_dir.join("customization.yaml");
 
     let user_config_text = std::fs::read_to_string(&customization_yaml_path).map_err(|e| format!("Failed to read file: {}", e))?;
     load_and_mix_with_users_config(&user_config_text, &caps_config_text, &caps_default_system_prompt, skip_visibility_filtering, allow_experimental).map_err(|e| e.to_string())

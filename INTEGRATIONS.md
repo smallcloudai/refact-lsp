@@ -13,7 +13,7 @@ state between calls.
 
 ## The Config File
 
-It's located at `~/.cache/refact/integrations.yaml`.
+It's located at `~/.config/refact/integrations.yaml`.
 
 Even if an integration is compiled into the `refact-lsp` binary, there are 2 things needed to turn on an integration:
 

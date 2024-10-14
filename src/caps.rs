@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -223,7 +222,7 @@ macro_rules! get_api_key_macro {
             match std::env::var(env_var_name) {
                 Ok(env_value) => env_value,
                 Err(e) => {
-                    error!("tried to read API key from env var {}, but failed: {}\nTry editing ~/.cache/refact/bring-your-own-key.yaml", env_var_name, e);
+                    error!("tried to read API key from env var {}, but failed: {}\nTry editing ~/.config/refact/bring-your-own-key.yaml", env_var_name, e);
                     cx_locked.cmdline.api_key.clone()
                 }
             }
@@ -245,7 +244,7 @@ pub async fn get_api_key(
         match std::env::var(env_var_name) {
             Ok(env_value) => env_value,
             Err(e) => {
-                error!("tried to read API key from env var {}, but failed: {}\nTry editing ~/.cache/refact/bring-your-own-key.yaml", env_var_name, e);
+                error!("tried to read API key from env var {}, but failed: {}\nTry editing ~/.config/refact/bring-your-own-key.yaml", env_var_name, e);
                 gcx_locked.cmdline.api_key.clone()
             }
         }
@@ -305,11 +304,8 @@ async fn load_caps_buf_from_file(
 ) -> Result<(String, String), String> {
     let mut caps_url = cmdline.address_url.clone();
     if caps_url.is_empty() {
-        let cache_dir = {
-            let gcx_locked = gcx.read().await;
-            gcx_locked.cache_dir.clone()
-        };
-        let caps_path = PathBuf::from(cache_dir).join("bring-your-own-key.yaml");
+        let config_dir = gcx.read().await.config_dir.clone();
+        let caps_path = config_dir.join("bring-your-own-key.yaml");
         caps_url = caps_path.to_string_lossy().into_owned();
         info!("will use {} as the caps file", caps_url);
     }
