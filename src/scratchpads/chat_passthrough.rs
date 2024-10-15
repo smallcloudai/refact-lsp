@@ -16,7 +16,7 @@ use reqwest::Client;
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_execute::run_tools;
-use crate::call_validation::{AdditionalContext, ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{TypedContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -180,7 +180,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                     if let Ok(extracted_urls) = extract_image_messages_from_content(msg.content.clone()).await {
                         for image_url in extracted_urls {
                             info!("append image_url into chat: {:?}", image_url);
-                            cloned_msg.additional_content.push(AdditionalContext {
+                            cloned_msg.additional_content.push(TypedContent {
                                 content_type: "image".to_string(),
                                 content: image_url.clone(),
                             });
