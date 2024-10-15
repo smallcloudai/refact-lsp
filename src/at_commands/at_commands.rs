@@ -30,6 +30,7 @@ pub struct AtCommandsContext {
     pub pp_skeleton: bool,
     pub correction_only_up_to_step: usize,  // suppresses context_file messages, writes a correction message instead
     pub chat_id: String,
+    pub docker_image_id: String,
 
     pub at_commands: HashMap<String, Arc<AMutex<Box<dyn AtCommand + Send>>>>,  // a copy from static constant
     pub at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
@@ -48,6 +49,7 @@ impl AtCommandsContext {
         is_preview: bool,
         messages: Vec<ChatMessage>,
         chat_id: String,
+        docker_image_id: String,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel::<serde_json::Value>();
         AtCommandsContext {
@@ -60,6 +62,7 @@ impl AtCommandsContext {
             pp_skeleton: false,
             correction_only_up_to_step: 0,
             chat_id,
+            docker_image_id,
 
             at_commands: at_commands_dict(global_context.clone()).await,
             at_tools: crate::tools::tools_description::tools_merged_and_filtered(global_context.clone()).await,
