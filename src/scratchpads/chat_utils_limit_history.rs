@@ -4,7 +4,7 @@ use image::ImageReader;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::call_validation::ChatMessage;
 use std::collections::HashSet;
-use tracing::info;
+
 
 pub fn limit_messages_history(
     t: &HasTokenizerAndEot,
@@ -22,9 +22,7 @@ pub fn limit_messages_history(
     let mut message_take: Vec<bool> = vec![false; messages.len()];
     let mut have_system = false;
     for (i, msg) in messages.iter().enumerate() {
-        info!("counting tokens");
         let tcnt = 3 + msg.content.count_tokens(t.tokenizer.clone())?;
-        info!("tokens_count={}", tcnt);
         message_token_count[i] = tcnt;
         if i==0 && msg.role == "system" {
             message_take[i] = true;
