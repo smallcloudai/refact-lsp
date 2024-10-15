@@ -97,9 +97,8 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
         }
-        if let Ok(docker_tool) = ToolDocker::new_if_configured(&integrations_value, gcx.clone())
-            .await.map_err(|e| warn!("Failed to start docker tool: {}", e)) {            
-            tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(docker_tool) as Box<dyn Tool + Send>)));
+        if let Some(docker_tool) = ToolDocker::new_if_configured(&integrations_value) {
+            tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(docker_tool) as Box<dyn Tool + Send>)));
         }
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
