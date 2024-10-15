@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use indexmap::IndexMap;
+use regex::Regex;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::call_validation::{ChatMessage, SubchatParameters};
@@ -61,45 +62,33 @@ fn _extract_mapping_values(mapping: &Option<&serde_yaml::Mapping>, variables: &m
     }
 }
 
-fn _replace_variables_in_text(text: &mut String, variables: &HashMap<String, String>) -> bool {
-    let mut replaced = false;
+fn _replace_variables_in_text(text: &mut String, variables: &HashMap<String, String>) {
     for (vname, vtext) in variables.iter() {
         let placeholder = format!("%{}%", vname);
-        if text.contains(&placeholder) {
-            *text = text.replace(&placeholder, vtext);
-            replaced = true;
+        let re = Regex::new(&regex::escape(&placeholder)).unwrap();
+        if re.is_match(text) {
+            *text = re.replace_all(text, vtext.as_str()).to_string();
         }
     }
-    replaced
 }
 
-fn _replace_variables_in_messages(config: &mut CustomizationYaml, variables: &HashMap<String, String>)
-{
+fn _replace_variables_in_messages(config: &mut CustomizationYaml, variables: &HashMap<String, String>) {
     // this is about pre-filled messages in tools, there are no images
     for command in config.toolbox_commands.values_mut() {
         for msg in command.messages.iter_mut() {
-            let mut replaced = true;
-            while replaced {
-                replaced = _replace_variables_in_text(&mut msg.content.content_text_only(), variables);
-            }
+            _replace_variables_in_text(&mut msg.content.content_text_only(), variables);
         }
     }
     for command in config.code_lens.values_mut() {
         for msg in command.messages.iter_mut() {
-            let mut replaced = true;
-            while replaced {
-                replaced = _replace_variables_in_text(&mut msg.content.content_text_only(), variables);
-            }
+            _replace_variables_in_text(&mut msg.content.content_text_only(), variables);
         }
     }
 }
 
 fn _replace_variables_in_system_prompts(config: &mut CustomizationYaml, variables: &HashMap<String, String>) {
     for prompt in config.system_prompts.values_mut() {
-        let mut replaced = true;
-        while replaced {
-            replaced = _replace_variables_in_text(&mut prompt.text, variables);
-        }
+        _replace_variables_in_text(&mut prompt.text, variables);
     }
 }
 
