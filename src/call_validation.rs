@@ -107,6 +107,21 @@ pub enum ChatMultimodalElement {
     MultiModalImageURLElement(MultimodalImageURLElement),
 }
 
+impl TryFrom<serde_json::Value> for ChatMultimodalElement {
+    type Error = String;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let content_type = value.get("type").ok_or("field 'type' is missing".to_string())?;
+        let content_type_str = content_type.as_str().ok_or("field 'type' is not a string".to_string())?;
+        
+        match content_type_str {
+            "text" => Ok(ChatMultimodalElement::MultimodalTextElement(serde_json::from_value(value).map_err(|e| e.to_string())?)),
+            "image_url" => Ok(ChatMultimodalElement::MultiModalImageURLElement(serde_json::from_value(value).map_err(|e| e.to_string())?)),
+            _ => Err(format!("invalid type: {}; must be one of: text, image_url", content_type_str)),
+        }
+    }
+}
+
 impl Default for ChatMultimodalElement {
     fn default() -> Self {
         ChatMultimodalElement::MultimodalTextElement(MultimodalTextElement {
@@ -200,7 +215,7 @@ pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, 
     fn validate_multimodal_element(element: &ChatMultimodalElement) -> Result<(), String> {
         match element {
             ChatMultimodalElement::MultimodalTextElement(el) => {
-                if el.content_type!= "text" {
+                if el.content_type != "text" {
                     return Err("Invalid multimodal element: type must be `text`".to_string());
                 }
             },
@@ -219,10 +234,13 @@ pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, 
     match value {
         serde_json::Value::String(s) => Ok(ChatContent::SimpleText(s)),
         serde_json::Value::Array(array) => {
-            let elements: Vec<ChatMultimodalElement> = serde_json::from_value(serde_json::Value::Array(array))
-                .map_err(|e| e.to_string())?;
-            for e in elements.iter() {
-                validate_multimodal_element(e)?;
+            let mut elements = vec![];
+            for (idx, item) in array.iter().enumerate() {
+                let element: ChatMultimodalElement = ChatMultimodalElement::try_from(item.clone())
+                    .map_err(|e| format!("Error deserializing element at index {}: {}", idx, e))?;
+                validate_multimodal_element(&element)
+                    .map_err(|e| format!("Validation error for element at index {}: {}", idx, e))?;
+                elements.push(element);
             }
             if elements.len() == 1 {
                 if let ChatMultimodalElement::MultimodalTextElement(el) = &elements[0] {
