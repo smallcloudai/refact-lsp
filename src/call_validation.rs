@@ -1,12 +1,15 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use axum::http::StatusCode;
 use indexmap::IndexMap;
+use regex::Regex;
 use ropey::Rope;
 use tokenizers::Tokenizer;
+
 use crate::custom_error::ScratchError;
+use crate::scratchpads::chat_utils_limit_history::calculate_image_tokens_openai;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -98,17 +101,59 @@ fn default_gradient_type_value() -> i32 {
     -1
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ChatMultimodalElement {
+    MultimodalTextElement(MultimodalTextElement),
+    MultiModalImageURLElement(MultimodalImageURLElement),
+}
+
+impl Default for ChatMultimodalElement {
+    fn default() -> Self {
+        ChatMultimodalElement::MultimodalTextElement(MultimodalTextElement {
+            content_type: "text".to_string(),
+            text: String::new(),
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
-pub struct ChatContentElement {
+pub struct MultimodalTextElement {
+    #[serde(rename = "type")]
     pub content_type: String,
-    pub content: String,
+    pub text: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct MultimodalImageURLElement {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub image_url: MultimodalImageURLElementImageURL,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct MultimodalImageURLElementImageURL {
+    pub url: String,
+    #[serde(default = "default_detail")]
+    pub detail: String,
+}
+
+fn default_detail() -> String {
+    "high".to_string()
+}
+
+// todo: images via links are yet not implemented: unclear how to calculate tokens
+fn parse_image_b64_from_image_url(image_url: &str) -> Option<String> {
+    let re = Regex::new(r"data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)").unwrap();
+    re.captures(image_url).and_then(|captures| {
+        captures.get(2).map(|m| m.as_str().to_string())
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ChatContent {
     SimpleText(String),
-    Multimodal(Vec<ChatContentElement>),
+    Multimodal(Vec<ChatMultimodalElement>),
 }
 
 impl Default for ChatContent {
@@ -152,21 +197,39 @@ pub struct ChatMessage {
 }
 
 pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, String> {
+    fn validate_multimodal_element(element: &ChatMultimodalElement) -> Result<(), String> {
+        match element {
+            ChatMultimodalElement::MultimodalTextElement(el) => {
+                if el.content_type!= "text" {
+                    return Err("Invalid multimodal element: type must be `text`".to_string());
+                }
+            },
+            ChatMultimodalElement::MultiModalImageURLElement(el) => {
+                if el.content_type != "image_url" {
+                    return Err("Invalid multimodal element: type must be `image_url`".to_string());
+                }
+                if parse_image_b64_from_image_url(&el.image_url.url).is_none() {
+                    return Err("Invalid image URL in MultimodalImageURLElement: must pass regexp `data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)`".to_string());
+                }
+            }
+        };
+        Ok(())
+    }
+    
     match value {
         serde_json::Value::String(s) => Ok(ChatContent::SimpleText(s)),
         serde_json::Value::Array(array) => {
-            if array.len() == 1 {
-                if let Some(serde_json::Value::Object(map)) = array.get(0) {
-                    if let Some(serde_json::Value::String(type_value)) = map.get("type") {
-                        if let Some(serde_json::Value::String(content_value)) = map.get(type_value) {
-                            return Ok(ChatContent::SimpleText(content_value.clone()));
-                        }
-                    }
+            let elements: Vec<ChatMultimodalElement> = serde_json::from_value(serde_json::Value::Array(array))
+                .map_err(|e| e.to_string())?;
+            for e in elements.iter() {
+                validate_multimodal_element(e)?;
+            }
+            if elements.len() == 1 {
+                if let ChatMultimodalElement::MultimodalTextElement(el) = &elements[0] {
+                    return Ok(ChatContent::SimpleText(el.text.clone()));
                 }
             }
-            serde_json::from_value::<Vec<ChatContentElement>>(serde_json::Value::Array(array))
-                .map(ChatContent::Multimodal)
-                .map_err(|e| e.to_string())
+            Ok(ChatContent::Multimodal(elements))
         },
         _ => Err("deserialize_chat_content() can't parse content".to_string()),
     }
@@ -207,8 +270,12 @@ impl ChatContent {
             ChatContent::Multimodal(elements) => {
                 elements
                     .iter()
-                    .filter(|element| element.content_type == "text")
-                    .map(|element| element.content.clone())
+                    .filter_map(|element| {
+                        match element {
+                            ChatMultimodalElement::MultimodalTextElement(el) => Some(el.text.clone()),
+                            _ => None,
+                        }
+                    })
                     .collect::<Vec<String>>()
                     .join("\n\n")
             }
@@ -218,20 +285,35 @@ impl ChatContent {
     pub fn size_estimate(&self) -> usize {
         match self {
             ChatContent::SimpleText(text) => text.len(),
-            ChatContent::Multimodal(elements) => {
-                elements.iter().map(|element| element.content.len()).sum()
-            }
+            _ => unreachable!()
         }
     }
     
     pub fn count_tokens(&self, tokenizer: Arc<RwLock<Tokenizer>>) -> Result<i32, String> {
+        fn count_tokens_simple_text(tokenizer_lock: &RwLockWriteGuard<Tokenizer>, text: &str) -> Result<i32, String> {
+            tokenizer_lock.encode(text, false)
+                .map(|tokens|tokens.len() as i32)
+               .map_err(|e|format!("Tokenizing error: {e}"))
+        }
         let tokenizer_lock = tokenizer.write().unwrap();
         match self {
-            ChatContent::SimpleText(text) => tokenizer_lock.encode(text.as_str(), false)
-                .map(|tokens|tokens.len() as i32)
-                .map_err(|e|format!("Tokenizing error: {e}")),
-            // todo: implement me!
-            ChatContent::Multimodal(_) => unimplemented!()
+            ChatContent::SimpleText(text) => count_tokens_simple_text(&tokenizer_lock, text),
+            ChatContent::Multimodal(elements) => {
+                let mut tcnt = 0;
+                for e in elements {
+                    tcnt += match e {
+                        ChatMultimodalElement::MultimodalTextElement(el) => count_tokens_simple_text(&tokenizer_lock, el.text.as_str())?,
+                        ChatMultimodalElement::MultiModalImageURLElement(el) => {
+                            if let Some(image_base64) = parse_image_b64_from_image_url(el.image_url.url.as_str()) {
+                                calculate_image_tokens_openai(&image_base64, &el.image_url.detail)?
+                            } else {
+                                0
+                            }
+                        }
+                    };
+                }
+                Ok(tcnt)
+            }
         }
     }
 }
@@ -337,6 +419,19 @@ mod tests {
     use std::collections::HashMap;
     use crate::call_validation::{CodeCompletionInputs, CursorPosition, SamplingParameters};
     use super::*;
+
+    #[test]
+    fn test_parse_image_b64_from_image_url() {
+        let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA";
+        let expected_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAUA";
+        assert_eq!(parse_image_b64_from_image_url(image_url), Some(expected_base64.to_string()));
+
+        let invalid_image_url = "data:image/png;base64,";
+        assert_eq!(parse_image_b64_from_image_url(invalid_image_url), None);
+
+        let non_matching_url = "https://example.com/image.png";
+        assert_eq!(parse_image_b64_from_image_url(non_matching_url), None);
+    }
 
     #[test]
     fn test_valid_post1() {
