@@ -1,9 +1,11 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::{Arc, RwLock};
 use axum::http::StatusCode;
 use indexmap::IndexMap;
 use ropey::Rope;
+use tokenizers::Tokenizer;
 use crate::custom_error::ScratchError;
 
 
@@ -96,6 +98,25 @@ fn default_gradient_type_value() -> i32 {
     -1
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct ChatContentElement {
+    pub content_type: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ChatContent {
+    SimpleText(String),
+    Multimodal(Vec<ChatContentElement>),
+}
+
+impl Default for ChatContent {
+    fn default() -> Self {
+        ChatContent::SimpleText(String::new())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolFunction {
     pub arguments: String,
@@ -120,8 +141,8 @@ pub struct ChatUsage {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
-    #[serde(default, deserialize_with="save_empty_string_on_input_null")]
-    pub content: String,
+    #[serde(default, deserialize_with="deserialize_chat_content")]
+    pub content: ChatContent,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
     #[serde(default)]
@@ -130,9 +151,42 @@ pub struct ChatMessage {
     pub usage: Option<ChatUsage>,
 }
 
+pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, String> {
+    match value {
+        serde_json::Value::String(s) => Ok(ChatContent::SimpleText(s)),
+        serde_json::Value::Array(array) => {
+            if array.len() == 1 {
+                if let Some(serde_json::Value::Object(map)) = array.get(0) {
+                    if let Some(serde_json::Value::String(type_value)) = map.get("type") {
+                        if let Some(serde_json::Value::String(content_value)) = map.get(type_value) {
+                            return Ok(ChatContent::SimpleText(content_value.clone()));
+                        }
+                    }
+                }
+            }
+            serde_json::from_value::<Vec<ChatContentElement>>(serde_json::Value::Array(array))
+                .map(ChatContent::Multimodal)
+                .map_err(|e| e.to_string())
+        },
+        _ => Err("deserialize_chat_content() can't parse content".to_string()),
+    }
+}
+
+fn deserialize_chat_content<'de, D>(deserializer: D) -> Result<ChatContent, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    chat_content_from_value(value).map_err(serde::de::Error::custom)
+}
+
 impl ChatMessage {
     pub fn new(role: String, content: String) -> Self {
-        ChatMessage { role, content, ..Default::default()}
+        ChatMessage { 
+            role, 
+            content: ChatContent::SimpleText(content),
+            ..Default::default()
+        }
     }
 
     pub fn drop_usage(&self) -> ChatMessage {
@@ -146,12 +200,40 @@ impl ChatMessage {
     }
 }
 
-// this converts null to empty string
-fn save_empty_string_on_input_null<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
+impl ChatContent {
+    pub fn content_text_only(&self) -> String {
+        match self {
+            ChatContent::SimpleText(text) => text.clone(),
+            ChatContent::Multimodal(elements) => {
+                elements
+                    .iter()
+                    .filter(|element| element.content_type == "text")
+                    .map(|element| element.content.clone())
+                    .collect::<Vec<String>>()
+                    .join("\n\n")
+            }
+        }
+    }
+
+    pub fn size_estimate(&self) -> usize {
+        match self {
+            ChatContent::SimpleText(text) => text.len(),
+            ChatContent::Multimodal(elements) => {
+                elements.iter().map(|element| element.content.len()).sum()
+            }
+        }
+    }
+    
+    pub fn count_tokens(&self, tokenizer: Arc<RwLock<Tokenizer>>) -> Result<i32, String> {
+        let tokenizer_lock = tokenizer.write().unwrap();
+        match self {
+            ChatContent::SimpleText(text) => tokenizer_lock.encode(text.as_str(), false)
+                .map(|tokens|tokens.len() as i32)
+                .map_err(|e|format!("Tokenizing error: {e}")),
+            // todo: implement me!
+            ChatContent::Multimodal(_) => unimplemented!()
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
