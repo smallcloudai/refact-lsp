@@ -122,7 +122,6 @@ impl Tool for ToolPatch {
                 false,
                 ccx_lock.messages.clone(),
                 ccx_lock.chat_id.clone(),
-                ccx_lock.docker_image_id.clone(),
             ).await))
         };
 
