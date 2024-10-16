@@ -13,6 +13,7 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_postgres::ToolPostgres;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig {
@@ -95,6 +96,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(postgres_tool) = ToolPostgres::new_if_configured(&integrations_value) {
+            tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(postgres_tool) as Box<dyn Tool + Send>)));
         }
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
@@ -268,6 +272,27 @@ tools:
         description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
       - "command"
+      
+  - name: "postgres"
+    agentic: true
+    experimental: true
+    description: "Execute PostgreSQL queries using psql command-line tool."
+    parameters:
+      - name: "table"
+        type: "string"
+        description: "Name of the table to query"
+      - name: "columns"
+        type: "string"
+        description: "Comma-separated list of columns to select (or * for all columns)"
+      - name: "where_clause"
+        type: "string"
+        description: "Optional WHERE clause for filtering rows"
+      - name: "limit"
+        type: "integer"
+        description: "Optional limit for the number of rows to return"
+    parameters_required:
+      - "table"
+      - "columns"   
 "####;
 
 #[allow(dead_code)]
