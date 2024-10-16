@@ -16,7 +16,7 @@ use crate::integrations::integr_pdb::ToolPdb;
 use crate::scratchpads::chat_message::ChatUsage;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CommandsRequireConfimationConfig {
+pub struct CommandsRequireConfimationConfig { // todo: fix typo
     pub commands_need_confirmation: Vec<String>,
     pub commands_deny: Vec<String>,
 }

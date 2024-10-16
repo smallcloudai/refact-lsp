@@ -9,7 +9,7 @@ use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_co
 use crate::call_validation::ContextEnum;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
-use crate::scratchpads::chat_message::ChatMessage;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 use crate::scratchpads::scratchpad_utils::{HasRagResults, count_tokens, max_tokens_for_rag_chat};
 
 pub const MIN_RAG_CONTEXT_LIMIT: usize = 256;
@@ -57,6 +57,12 @@ pub async fn run_at_commands(
     for msg_idx in user_msg_starts..original_messages.len() {
         let msg = original_messages[msg_idx].clone();
         let role = msg.role.clone();
+        // todo: make multimodal messages support @commands
+        if let ChatContent::Multimodal(_) = &msg.content {
+            rebuilt_messages.push(msg.clone());
+            stream_back_to_user.push_in_json(json!(msg));
+            continue;
+        }
         let mut content = msg.content.content_text_only();
         let content_n_tokens = count_tokens(&tokenizer.read().unwrap(), &msg.content);
 
