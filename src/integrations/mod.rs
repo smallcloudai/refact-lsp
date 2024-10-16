@@ -2,6 +2,7 @@ pub mod integr_github;
 pub mod integr_pdb;
 pub mod sessions;
 pub mod process_io_utils;
+pub mod integr_postgres;
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
 # If there is a syntax error in this file, no integrations will work.
@@ -12,6 +13,7 @@ pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure 
 
 commands_need_confirmation:
   - "gh * delete*"
+  - "psql*[!SELECT]*"
 commands_deny:
   - "gh auth token*"
 
@@ -25,5 +27,10 @@ commands_deny:
 # --- Pdb integration ---
 #pdb:
 #  python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
+
+# --- Postgres integration ---
+#postgres:
+#  psql_binary_path: "/path/to/psql"  # Uncomment to set a custom path for the psql binary, defaults to "psql"
+#  connection_string: "postgresql://username:password@localhost/dbname"  # To get a connection string, check out https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 
 "#;
