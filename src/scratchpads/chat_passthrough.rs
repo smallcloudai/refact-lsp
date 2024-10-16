@@ -11,10 +11,11 @@ use tracing::{error, info, warn};
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_execute::run_tools;
-use crate::call_validation::{ChatContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_message::{ChatMessage, ChatContent};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, system_prompt_add_workspace_info};
@@ -112,7 +113,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         if self.supports_tools {
             (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results).await;
         };
-        let mut limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
+        let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
         });

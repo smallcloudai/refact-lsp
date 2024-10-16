@@ -12,8 +12,9 @@ use crate::ast::ast_structs::AstDB;
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::at_file::return_one_candidate_or_a_good_error;
 use crate::at_commands::execute_at::AtCommandMember;
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::files_correction::{correct_to_nearest_dir_path, get_project_dirs, paths_from_anywhere};
+use crate::scratchpads::chat_message::ChatMessage;
 // use crate::files_in_workspace::Document;
 
 

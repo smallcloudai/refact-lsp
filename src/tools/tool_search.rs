@@ -12,7 +12,8 @@ use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_o
 use crate::at_commands::at_search::execute_at_search;
 use crate::files_correction::{correct_to_nearest_dir_path, get_project_dirs};
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ChatContent, ContextEnum, ContextFile};
+use crate::call_validation::{ContextEnum, ContextFile};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 
 
 pub struct ToolSearch;

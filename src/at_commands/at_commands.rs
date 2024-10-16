@@ -8,7 +8,7 @@ use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ContextFile, ContextEnum, SubchatParameters, PostprocessSettings};
+use crate::call_validation::{ContextFile, ContextEnum, SubchatParameters, PostprocessSettings};
 use crate::global_context::GlobalContext;
 
 use crate::at_commands::at_search::AtSearch;
@@ -18,6 +18,7 @@ use crate::at_commands::at_ast_reference::AtAstReference;
 use crate::at_commands::at_tree::AtTree;
 use crate::at_commands::at_web::AtWeb;
 use crate::at_commands::execute_at::AtCommandMember;
+use crate::scratchpads::chat_message::ChatMessage;
 
 
 pub struct AtCommandsContext {

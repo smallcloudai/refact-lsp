@@ -9,10 +9,11 @@ use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
 use tracing::warn;
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatUsage, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::scratchpads::chat_message::ChatUsage;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig {

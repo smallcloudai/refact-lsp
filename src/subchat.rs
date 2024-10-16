@@ -6,10 +6,11 @@ use serde_json::Value;
 use tracing::{error, info, warn};
 use crate::tools::tools_description::{tools_merged_and_filtered, tool_description_list_from_yaml};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatPost, ChatToolCall, ChatUsage, SamplingParameters, PostprocessSettings};
+use crate::call_validation::{SamplingParameters, PostprocessSettings, ChatPost};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_message::{chat_content_from_value, ChatContent, ChatMessage, ChatToolCall, ChatUsage};
 use crate::yaml_configs::customization_loader::load_customization;
 
 
@@ -162,7 +163,7 @@ async fn chat_interaction_non_stream(
             )
         };
 
-        let content: crate::call_validation::ChatContent = crate::call_validation::chat_content_from_value(content_value)
+        let content: ChatContent = chat_content_from_value(content_value)
             .map_err(|e| format!("error parsing model's output: {}", e))?;
 
         let mut ch_results = vec![];

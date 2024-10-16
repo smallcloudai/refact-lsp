@@ -8,7 +8,8 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::ast::ast_structs::AstDB;
 use crate::ast::ast_db::fetch_counters;
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ChatContent, ContextEnum, ContextFile};
+use crate::call_validation::{ContextEnum, ContextFile};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 
 
 pub struct ToolAstDefinition;

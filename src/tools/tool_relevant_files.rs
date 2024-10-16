@@ -18,7 +18,8 @@ use crate::files_in_workspace::get_file_text_from_memory_or_disk;
 use crate::files_correction::{get_project_dirs, shortify_paths};
 use crate::at_commands::at_file::{file_repair_candidates, return_one_candidate_or_a_good_error};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatContent, ChatUsage, ContextEnum, SubchatParameters, ContextFile, ChatToolCall, ChatToolFunction};
+use crate::call_validation::{ContextEnum, SubchatParameters, ContextFile};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage, ChatToolCall, ChatToolFunction, ChatUsage};
 use crate::subchat::subchat;
 use crate::tools::tools_description::Tool;
 

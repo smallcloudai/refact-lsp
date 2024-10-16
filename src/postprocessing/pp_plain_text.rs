@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokenizers::Tokenizer;
-
-use crate::call_validation::ChatMessage;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 
 
 pub async fn postprocess_plain_text(
@@ -25,7 +24,7 @@ pub async fn postprocess_plain_text(
         let mut out = vec![];
         let mut tok_used = 0;
         let text = match &msg.content {
-            crate::call_validation::ChatContent::SimpleText(text) => text,
+            ChatContent::SimpleText(text) => text,
             _ => unreachable!(),
         };
         for line in text.lines() {
@@ -46,7 +45,7 @@ pub async fn postprocess_plain_text(
         }
         tok_used_global += tok_used;
         let mut m_cloned = msg.clone();
-        m_cloned.content = crate::call_validation::ChatContent::SimpleText(out.join("\n"));
+        m_cloned.content = ChatContent::SimpleText(out.join("\n"));
 
         // TODO: find a good way to tell the model how much lines were omitted
 

@@ -6,9 +6,10 @@ use tokenizers::Tokenizer;
 use tracing::{info, warn};
 
 use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_context_file_from_context_tool};
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
+use crate::scratchpads::chat_message::ChatMessage;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, count_tokens, max_tokens_for_rag_chat};
 
 pub const MIN_RAG_CONTEXT_LIMIT: usize = 256;

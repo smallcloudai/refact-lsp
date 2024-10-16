@@ -1,9 +1,7 @@
-use std::io::Cursor;
-use image::ImageReader;
+use std::collections::HashSet;
 
 use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::call_validation::ChatMessage;
-use std::collections::HashSet;
+use crate::scratchpads::chat_message::ChatMessage;
 
 
 pub fn limit_messages_history(
@@ -92,54 +90,4 @@ pub fn limit_messages_history(
     }
     // info!("messages_out: {:?}", messages_out);
     Ok(messages_out)
-}
-
-fn calculate_image_tokens_by_dimensions(mut width: u32, mut height: u32) -> i32 {
-    // as per https://platform.openai.com/docs/guides/vision
-    const SMALL_CHUNK_SIZE: u32 = 512;
-    const COST_PER_SMALL_CHUNK: i32 = 170;
-    const BIG_CHUNK_SIZE: u32 = 2048;
-    const CONST_COST: i32 = 85;
-
-    let shrink_factor = (width.max(height) as f64) / (BIG_CHUNK_SIZE as f64);
-    if shrink_factor > 1.0 {
-        width = (width as f64 / shrink_factor) as u32;
-        height = (height as f64 / shrink_factor) as u32;
-    }
-
-    let width_chunks = (width as f64 / SMALL_CHUNK_SIZE as f64).ceil() as u32;
-    let height_chunks = (height as f64 / SMALL_CHUNK_SIZE as f64).ceil() as u32;
-    let small_chunks_needed = width_chunks * height_chunks;
-
-    small_chunks_needed as i32 * COST_PER_SMALL_CHUNK + CONST_COST
-}
-
-// for detail = high. all images w detail = low cost 85 tokens (independent of image size)
-pub fn calculate_image_tokens_openai(image_string: &String, detail: &String) -> Result<i32, String> {
-    #[allow(deprecated)]
-    let image_bytes = base64::decode(image_string).map_err(|_| "base64 decode failed".to_string())?;
-    let cursor = Cursor::new(image_bytes);
-    let reader = ImageReader::new(cursor).with_guessed_format().map_err(|e| e.to_string())?;
-    let (width, height) = reader.into_dimensions().map_err(|_| "Failed to get dimensions".to_string())?;
-
-    match detail.as_str() {
-        "high" => Ok(calculate_image_tokens_by_dimensions(width, height)),
-        "low" => Ok(85),
-        _ => Err("detail must be one of high or low".to_string()),
-    }
-}
-
-// cargo test scratchpads::chat_utils_limit_history
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_calculate_image_tokens_by_dimensions() {
-        let width = 1024;
-        let height = 1024;
-        let expected_tokens = 765;
-        let tokens = calculate_image_tokens_by_dimensions(width, height);
-        assert_eq!(tokens, expected_tokens, "Expected {} tokens, but got {}", expected_tokens, tokens);
-    }
 }

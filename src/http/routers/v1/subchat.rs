@@ -7,10 +7,9 @@ use serde::Deserialize;
 use tokio::sync::RwLock as ARwLock;
 use crate::subchat::{subchat, subchat_single};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::ChatMessage;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-
+use crate::scratchpads::chat_message::ChatMessage;
 
 #[derive(Deserialize)]
 struct SubChatPost {

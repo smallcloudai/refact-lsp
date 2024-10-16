@@ -8,13 +8,14 @@ use tracing::{info, warn};
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
-use crate::call_validation::{ChatMessage, ChatContent, ContextEnum, ContextFile, SubchatParameters};
+use crate::call_validation::{ContextEnum, ContextFile, SubchatParameters};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
 use crate::tools::tools_description::commands_require_confirmation_rules_from_integrations_yaml;
 use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 
 
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {

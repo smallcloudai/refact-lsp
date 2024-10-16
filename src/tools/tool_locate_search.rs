@@ -9,9 +9,10 @@ use indexmap::IndexMap;
 use hashbrown::HashSet;
 use crate::subchat::subchat;
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ChatContent, ChatUsage, ContextEnum, SubchatParameters, ContextFile};
+use crate::call_validation::{ContextEnum, SubchatParameters, ContextFile};
 use crate::global_context::GlobalContext;
 use crate::at_commands::at_commands::AtCommandsContext;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage, ChatUsage};
 
 
 pub struct ToolLocateSearch;

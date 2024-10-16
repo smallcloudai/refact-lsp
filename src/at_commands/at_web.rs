@@ -10,8 +10,8 @@ use html2text::render::text_renderer::{TaggedLine, TextDecorator};
 
 use crate::at_commands::at_commands::{AtCommand, AtCommandsContext, AtParam};
 use crate::at_commands::execute_at::AtCommandMember;
-use crate::call_validation::{ChatMessage, ContextEnum};
-
+use crate::call_validation::ContextEnum;
+use crate::scratchpads::chat_message::ChatMessage;
 
 pub struct AtWeb {
     pub params: Vec<Arc<AMutex<dyn AtParam>>>,

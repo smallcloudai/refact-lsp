@@ -7,11 +7,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::RwLock as ARwLock;
 
-use crate::call_validation::ChatToolCall;
 use crate::tools::tools_description::{commands_require_confirmation_rules_from_integrations_yaml, tool_description_list_from_yaml, tools_merged_and_filtered};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
+use crate::scratchpads::chat_message::ChatToolCall;
 use crate::tools::tools_execute::{command_should_be_confirmed_by_user, command_should_be_denied};
+
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ToolsPermissionCheckPost {
