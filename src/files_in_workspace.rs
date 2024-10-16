@@ -599,7 +599,9 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
         }
         // info!("EventKind::Create/Modify {} paths", event.paths.len());
         if let Some(gcx) = gcx_weak.clone().upgrade() {
-            enqueue_some_docs(gcx, &docs, false).await;
+            enqueue_some_docs(gcx.clone(), &docs, false).await;
+            let cache_dirty = gcx.read().await.documents_state.cache_dirty.clone();
+            *cache_dirty.lock().await = true;
         }
     }
 
@@ -622,7 +624,9 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
             return;
         }
         if let Some(gcx) = gcx_weak.clone().upgrade() {
-            enqueue_some_docs(gcx, &docs, false).await;
+            enqueue_some_docs(gcx.clone(), &docs, false).await;
+            let cache_dirty = gcx.read().await.documents_state.cache_dirty.clone();
+            *cache_dirty.lock().await = true;
         }
     }
 

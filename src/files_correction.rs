@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
+
+use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 use crate::global_context::GlobalContext;
 use crate::fuzzy_search::fuzzy_search;
 
@@ -89,6 +91,16 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
         info!("rebuilding files cache...");
         // filter only get_project_dirs?
         let start_time = Instant::now();
+
+        {
+            let cx = global_context.read().await;
+            let folders = cx.documents_state.workspace_folders.lock().unwrap().clone();
+            let paths = retrieve_files_in_workspace_folders(folders).await;
+            let mut workspace_files = cx.documents_state.workspace_files.lock().unwrap();
+            workspace_files.clear();
+            workspace_files.extend(paths);
+        }
+
         let paths_from_anywhere = paths_from_anywhere(global_context.clone()).await;
         let workspace_folders = get_project_dirs(global_context.clone()).await;
         let (cache_correction, cache_shortened, cnt) = make_cache(&paths_from_anywhere, &workspace_folders);
