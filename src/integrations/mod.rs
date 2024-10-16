@@ -14,13 +14,13 @@ pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure 
 
 commands_need_confirmation:
   - "gh * delete*"
+commands_deny:
   - "docker* rm *"
   - "docker* remove *"
   - "docker* rmi *"
   - "docker* pause *"
   - "docker* stop *"
   - "docker* kill *"
-commands_deny:
   - "gh auth token*"
 
 
