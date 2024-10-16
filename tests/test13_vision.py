@@ -59,7 +59,7 @@ def test_image_sending():
             "content": [
                 {
                     "type": "text",
-                    "text": "print number you see on the image"
+                    "text": "print number you see on the image, respond only numbers"
                 },
                 {
                     "type": "image_url",
@@ -70,7 +70,7 @@ def test_image_sending():
             ]
         }
     ]
-    m = chat_request(messages ,5)
+    m = chat_request(messages,5)
     assert "200" in m, m
     print(colored("test_image_sending PASSED", "green"))
 
@@ -84,7 +84,7 @@ def test_multiple_images_sending():
             "content": [
                 {
                     "type": "text",
-                    "text": "print numbers you see on images"
+                    "text": "print numbers you see on images. respond only numbers"
                 },
                 {
                     "type": "image_url",
