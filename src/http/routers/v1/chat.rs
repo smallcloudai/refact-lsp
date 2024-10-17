@@ -15,6 +15,7 @@ use crate::global_context::SharedGlobalContext;
 use crate::{caps, scratchpads};
 use crate::scratchpads::chat_message::{ChatContent, ChatMultimodalElement};
 
+
 pub const CHAT_TOP_N: usize = 7;
 
 pub async fn lookup_chat_scratchpad(
@@ -90,7 +91,9 @@ async fn chat(
     for message in &mut chat_post.messages {
         if !supports_multimodality {
             if let ChatContent::Multimodal(content) = &message.content {
-                if content.iter().any(|el| matches!(el, ChatMultimodalElement::MultiModalImageURLElementOpenAI(_))) {
+                if content.iter().filter_map(|el| {
+                    if let ChatMultimodalElement::MultimodalElement(element) = el { Some(element) } else { None }
+                }).any(|el| el.m_type.starts_with("image")) {
                     return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("model '{}' does not support multimodality", model_name)));
                 }
             }

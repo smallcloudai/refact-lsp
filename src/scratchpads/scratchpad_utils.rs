@@ -1,11 +1,12 @@
 use std::io::Cursor;
+use std::sync::RwLockReadGuard;
 use image::ImageReader;
 use regex::Regex;
 use serde_json::Value;
 use tokenizers::Tokenizer;
 
 use crate::postprocessing::pp_context_files::RESERVE_FOR_QUESTION_AND_FOLLOWUP;
-use crate::scratchpads::chat_message::{ChatContent, MultimodalElementImageOpenAI};
+use crate::scratchpads::chat_message::ChatContent;
 
 
 pub struct HasRagResults {
@@ -54,17 +55,20 @@ pub fn count_tokens_text_only(
     }
 }
 
-pub fn parse_image_b64_from_image_url(image_url: &str) -> Option<String> {
-    let re = Regex::new(r"data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)").unwrap();
-    re.captures(image_url).and_then(|captures| {
-        captures.get(2).map(|m| m.as_str().to_string())
-    })
+pub fn count_tokens_simple_text(tokenizer_lock: &RwLockReadGuard<Tokenizer>, text: &str) -> Result<i32, String> {
+    tokenizer_lock.encode(text, false)
+        .map(|tokens|tokens.len() as i32)
+        .map_err(|e|format!("Tokenizing error: {e}"))
 }
 
-pub fn multimodal_image_count_tokens(el: &MultimodalElementImageOpenAI) -> usize {
-    parse_image_b64_from_image_url(el.image_url.url.as_str())
-        .and_then(|image_b64| calculate_image_tokens_openai(&image_b64, &el.image_url.detail).ok())
-        .unwrap_or(0) as usize
+pub fn parse_image_b64_from_image_url_openai(image_url: &str) -> Option<(String, String, String)> {
+    let re = Regex::new(r"data:(image/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)").unwrap();
+    re.captures(image_url).and_then(|captures| {
+        let image_type = captures.get(1)?.as_str().to_string();
+        let encoding = "base64".to_string();
+        let value = captures.get(3)?.as_str().to_string();
+        Some((image_type, encoding, value))
+    })
 }
 
 pub fn max_tokens_for_rag_chat(n_ctx: usize, maxgen: usize) -> usize {
@@ -92,14 +96,14 @@ fn calculate_image_tokens_by_dimensions_openai(mut width: u32, mut height: u32) 
 }
 
 // for detail = high. all images w detail = low cost 85 tokens (independent of image size)
-pub fn calculate_image_tokens_openai(image_string: &String, detail: &String) -> Result<i32, String> {
+pub fn calculate_image_tokens_openai(image_string: &String, detail: &str) -> Result<i32, String> {
     #[allow(deprecated)]
     let image_bytes = base64::decode(image_string).map_err(|_| "base64 decode failed".to_string())?;
     let cursor = Cursor::new(image_bytes);
     let reader = ImageReader::new(cursor).with_guessed_format().map_err(|e| e.to_string())?;
     let (width, height) = reader.into_dimensions().map_err(|_| "Failed to get dimensions".to_string())?;
 
-    match detail.as_str() {
+    match detail {
         "high" => Ok(calculate_image_tokens_by_dimensions_openai(width, height)),
         "low" => Ok(85),
         _ => Err("detail must be one of high or low".to_string()),
@@ -118,5 +122,23 @@ mod tests {
         let expected_tokens = 765;
         let tokens = calculate_image_tokens_by_dimensions_openai(width, height);
         assert_eq!(tokens, expected_tokens, "Expected {} tokens, but got {}", expected_tokens, tokens);
+    }
+
+    #[test]
+    fn test_parse_from_image_url_openai() {
+        let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA";
+        let expected_image_type = "image/png".to_string();
+        let expected_encoding = "base64".to_string();
+        let expected_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAUA".to_string();
+        assert_eq!(
+            parse_image_b64_from_image_url_openai(image_url),
+            Some((expected_image_type, expected_encoding, expected_base64))
+        );
+
+        let invalid_image_url = "data:image/png;base64,";
+        assert_eq!(parse_image_b64_from_image_url_openai(invalid_image_url), None);
+
+        let non_matching_url = "https://example.com/image.png";
+        assert_eq!(parse_image_b64_from_image_url_openai(non_matching_url), None);
     }
 }
