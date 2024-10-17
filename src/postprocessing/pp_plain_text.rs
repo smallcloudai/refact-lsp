@@ -23,29 +23,51 @@ pub async fn postprocess_plain_text(
     for (idx, msg) in messages_sorted.iter().cloned().enumerate() {
         let mut out = vec![];
         let mut tok_used = 0;
-        let text = match &msg.content {
-            ChatContent::SimpleText(text) => text,
-            _ => unreachable!(),
-        };
-        for line in text.lines() {
-            let line_tokens = crate::scratchpads::scratchpad_utils::count_tokens_text_only(&tokenizer_guard, &line);
-            if tok_used + line_tokens > tok_per_m {
-                if out.is_empty() {
-                    out.push("No content: tokens limit reached");
-                }
-                out.push("Truncated: too many tokens\n");
-                break;
-            }
-            tok_used += line_tokens;
-            out.push(line);
-        }
-        if idx != messages_sorted.len() - 1 {
-            // distributing non-used rest of tokens among the others
-            tok_per_m += (tok_per_m - tok_used) / (messages_sorted.len() - idx - 1);
-        }
-        tok_used_global += tok_used;
         let mut m_cloned = msg.clone();
-        m_cloned.content = ChatContent::SimpleText(out.join("\n"));
+        m_cloned.content = match &msg.content {
+            ChatContent::SimpleText(text) => {
+                for line in text.lines() {
+                    let line_tokens = crate::scratchpads::scratchpad_utils::count_tokens_text_only(&tokenizer_guard, &line);
+                    if tok_used + line_tokens > tok_per_m {
+                        if out.is_empty() {
+                            out.push("No content: tokens limit reached");
+                        }
+                        out.push("Truncated: too many tokens\n");
+                        break;
+                    }
+                    tok_used += line_tokens;
+                    out.push(line);
+                }
+                if idx != messages_sorted.len() - 1 {
+                    // distributing non-used rest of tokens among the others
+                    tok_per_m += (tok_per_m - tok_used) / (messages_sorted.len() - idx - 1);
+                }
+                tok_used_global += tok_used;
+                ChatContent::SimpleText(out.join("\n"))
+            },
+            ChatContent::Multimodal(elements) => {
+                ChatContent::Multimodal(elements.clone())
+            }
+        };
+        // for line in text.lines() {
+        //     let line_tokens = crate::scratchpads::scratchpad_utils::count_tokens_text_only(&tokenizer_guard, &line);
+        //     if tok_used + line_tokens > tok_per_m {
+        //         if out.is_empty() {
+        //             out.push("No content: tokens limit reached");
+        //         }
+        //         out.push("Truncated: too many tokens\n");
+        //         break;
+        //     }
+        //     tok_used += line_tokens;
+        //     out.push(line);
+        // }
+        // if idx != messages_sorted.len() - 1 {
+        //     // distributing non-used rest of tokens among the others
+        //     tok_per_m += (tok_per_m - tok_used) / (messages_sorted.len() - idx - 1);
+        // }
+        // tok_used_global += tok_used;
+        // let mut m_cloned = msg.clone();
+        // m_cloned.content = ChatContent::SimpleText(out.join("\n"));
 
         // TODO: find a good way to tell the model how much lines were omitted
 

@@ -20,6 +20,19 @@ pub struct MultimodalElementImage {
     pub image_url: MultimodalElementImageImageURL,
 }
 
+impl MultimodalElementImage {
+    pub fn new(url: String) -> Self {
+        let image_url = MultimodalElementImageImageURL {
+            url: url.clone(),
+            detail: default_detail().to_string(),  // TODO: ..Default::default() doesn't work here
+        };
+        MultimodalElementImage {
+            content_type: "image_url".to_string(),
+            image_url
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub struct MultimodalElementImageImageURL {
     pub url: String,
@@ -82,7 +95,7 @@ impl ChatContent {
     pub fn size_estimate(&self) -> usize {
         match self {
             ChatContent::SimpleText(text) => text.len(),
-            _ => unreachable!()
+            ChatContent::Multimodal(_elements) => 0,  // TODO: implement
         }
     }
 
@@ -206,6 +219,7 @@ pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, 
     }
 
     match value {
+        serde_json::Value::Null => Ok(ChatContent::SimpleText(String::new())),
         serde_json::Value::String(s) => Ok(ChatContent::SimpleText(s)),
         serde_json::Value::Array(array) => {
             let mut elements = vec![];
