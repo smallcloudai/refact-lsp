@@ -13,14 +13,14 @@ use crate::custom_error::ScratchError;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::global_context::SharedGlobalContext;
 use crate::{caps, scratchpads};
-
+use crate::scratchpads::chat_message::{ChatContent, ChatMultimodalElement};
 
 pub const CHAT_TOP_N: usize = 7;
 
 pub async fn lookup_chat_scratchpad(
     caps: Arc<StdRwLock<CodeAssistantCaps>>,
     chat_post: &ChatPost,
-) -> Result<(String, String, serde_json::Value, usize, bool), String> {
+) -> Result<(String, String, serde_json::Value, usize, bool, bool), String> {
     let caps_locked = caps.read().unwrap();
     let (model_name, recommended_model_record) =
         caps::which_model_to_use(
@@ -33,7 +33,14 @@ pub async fn lookup_chat_scratchpad(
         &chat_post.scratchpad,
         &recommended_model_record.default_scratchpad,
     )?;
-    Ok((model_name, sname.clone(), patch.clone(), recommended_model_record.n_ctx, recommended_model_record.supports_tools))
+    Ok((
+        model_name, 
+        sname.clone(), 
+        patch.clone(), 
+        recommended_model_record.n_ctx, 
+        recommended_model_record.supports_tools,
+        recommended_model_record.supports_multimodality,
+    ))
 }
 
 pub async fn handle_v1_chat_completions(
@@ -62,7 +69,7 @@ async fn chat(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, supports_multimodality) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await.map_err(|e| {
@@ -81,6 +88,15 @@ async fn chat(
     // extra validation to catch {"query": "Frog", "scope": "workspace"}{"query": "Toad", "scope": "workspace"}
     let re = regex::Regex::new(r"\{.*?\}").unwrap();
     for message in &mut chat_post.messages {
+        if !supports_multimodality {
+            if let ChatContent::Multimodal(content) = &message.content {
+                if content.iter().any(|el| matches!(el, ChatMultimodalElement::MultiModalImageURLElement(_))) {
+                    return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("model '{}' does not support multimodality", model_name)));
+                }
+            }
+            message.content = ChatContent::SimpleText(message.content.content_text_only());
+        }
+        
         if let Some(tool_calls) = &mut message.tool_calls {
             for call in tool_calls {
                 let args_input = &call.function.arguments;

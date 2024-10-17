@@ -24,7 +24,7 @@ def get_base64_image(image_path):
 def chat_request(msgs, max_tokens: int = 200):
     url = "http://localhost:8001/v1/chat"
     payload = {
-        "model_name": "gpt-4o",
+        "model": "gpt-4o",
         "messages": msgs,
         "stream": False,
         "max_tokens": max_tokens,

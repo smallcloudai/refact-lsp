@@ -60,7 +60,7 @@ async fn create_chat_post_and_scratchpad(
         chat_id: "".to_string(),
     };
 
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await?;
