@@ -47,6 +47,7 @@ pub async fn postprocess_plain_text(
             },
             ChatContent::Multimodal(elements) => {
                 ChatContent::Multimodal(elements.clone())
+                // todo: count tokens
             }
         };
         // for line in text.lines() {
