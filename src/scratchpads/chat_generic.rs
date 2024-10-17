@@ -27,6 +27,7 @@ pub struct GenericChatScratchpad {
     pub t: HasTokenizerAndEot,
     pub dd: DeltaDeltaChatStreamer,
     pub post: ChatPost,
+    pub token_bos: String,
     pub token_esc: String,
     // for models that switch between sections using <esc>SECTION
     pub keyword_syst: String,
@@ -50,6 +51,7 @@ impl GenericChatScratchpad {
             t: HasTokenizerAndEot::new(tokenizer),
             dd: DeltaDeltaChatStreamer::new(),
             post: post.clone(),
+            token_bos: "".to_string(),
             token_esc: "".to_string(),
             keyword_syst: "".to_string(),
             keyword_user: "".to_string(),
@@ -70,6 +72,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         exploration_tools: bool,
         agentic_tools: bool,
     ) -> Result<(), String> {
+        self.token_bos = patch.get("token_bos").and_then(|x| x.as_str()).unwrap_or("").to_string();
         self.token_esc = patch.get("token_esc").and_then(|x| x.as_str()).unwrap_or("").to_string();
         self.keyword_syst = patch.get("keyword_system").and_then(|x| x.as_str()).unwrap_or("SYSTEM:").to_string();
         self.keyword_user = patch.get("keyword_user").and_then(|x| x.as_str()).unwrap_or("USER:").to_string();
@@ -119,10 +122,9 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         }
         sampling_parameters_to_patch.stop = self.dd.stop_list.clone();
         // adapted from https://huggingface.co/spaces/huggingface-projects/llama-2-13b-chat/blob/main/model.py#L24
-        let mut prompt = "".to_string();
+        let mut prompt = self.token_bos.to_string();
         let mut last_role = "assistant".to_string();
         for msg in limited_msgs {
-            prompt.push_str(self.token_esc.as_str());
             if msg.role == "system" {
                 prompt.push_str(self.keyword_syst.as_str());
                 prompt.push_str(msg.content.as_str());
@@ -148,6 +150,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
                 return Err(format!("role \"{}\"not recognized", msg.role));
             }
             last_role = msg.role.clone();
+            prompt.push_str(self.token_esc.as_str());
         }
         prompt.push_str(self.token_esc.as_str());
         if last_role == "assistant" || last_role == "system" {
