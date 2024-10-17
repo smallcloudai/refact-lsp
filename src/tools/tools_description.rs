@@ -86,6 +86,7 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         // ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_locate::ToolLocate{}) as Box<dyn Tool + Send>))),
         // ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_relevant_files::ToolRelevantFiles{}) as Box<dyn Tool + Send>))),
         ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_locate_search::ToolLocateSearch{}) as Box<dyn Tool + Send>))),
+        ("web_screenshot".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_web_screenshot::ToolWebScreenshot{}) as Box<dyn Tool + Send>))),
     ]);
 
     if allow_experimental {
@@ -269,6 +270,15 @@ tools:
         description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
     parameters_required:
       - "command"
+
+  - name: "web_screenshot"
+    description: "Add screenshot of a web page to the chat."
+    parameters:
+      - name: "url"
+        type: "string"
+        description: "URL of the web page to make screenshot."
+    parameters_required:
+      - "url"
 "####;
 
 #[allow(dead_code)]
