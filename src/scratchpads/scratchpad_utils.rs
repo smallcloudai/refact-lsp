@@ -1,10 +1,11 @@
 use std::io::Cursor;
 use image::ImageReader;
+use regex::Regex;
 use serde_json::Value;
 use tokenizers::Tokenizer;
 
 use crate::postprocessing::pp_context_files::RESERVE_FOR_QUESTION_AND_FOLLOWUP;
-use crate::scratchpads::chat_message::ChatContent;
+use crate::scratchpads::chat_message::{ChatContent, MultimodalElementImage};
 
 
 pub struct HasRagResults {
@@ -53,11 +54,24 @@ pub fn count_tokens_text_only(
     }
 }
 
+pub fn parse_image_b64_from_image_url(image_url: &str) -> Option<String> {
+    let re = Regex::new(r"data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)").unwrap();
+    re.captures(image_url).and_then(|captures| {
+        captures.get(2).map(|m| m.as_str().to_string())
+    })
+}
+
+pub fn multimodal_image_count_tokens(el: &MultimodalElementImage) -> usize {
+    parse_image_b64_from_image_url(el.image_url.url.as_str())
+        .and_then(|image_b64| calculate_image_tokens_openai(&image_b64, &el.image_url.detail).ok())
+        .unwrap_or(0) as usize
+}
+
 pub fn max_tokens_for_rag_chat(n_ctx: usize, maxgen: usize) -> usize {
     (n_ctx/2).saturating_sub(maxgen).saturating_sub(RESERVE_FOR_QUESTION_AND_FOLLOWUP)
 }
 
-fn calculate_image_tokens_by_dimensions(mut width: u32, mut height: u32) -> i32 {
+fn calculate_image_tokens_by_dimensions_openai(mut width: u32, mut height: u32) -> i32 {
     // as per https://platform.openai.com/docs/guides/vision
     const SMALL_CHUNK_SIZE: u32 = 512;
     const COST_PER_SMALL_CHUNK: i32 = 170;
@@ -86,23 +100,23 @@ pub fn calculate_image_tokens_openai(image_string: &String, detail: &String) -> 
     let (width, height) = reader.into_dimensions().map_err(|_| "Failed to get dimensions".to_string())?;
 
     match detail.as_str() {
-        "high" => Ok(calculate_image_tokens_by_dimensions(width, height)),
+        "high" => Ok(calculate_image_tokens_by_dimensions_openai(width, height)),
         "low" => Ok(85),
         _ => Err("detail must be one of high or low".to_string()),
     }
 }
 
-// cargo test scratchpads::chat_utils_limit_history
+// cargo test scratchpads::scratchpad_utils
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_calculate_image_tokens_by_dimensions() {
+    fn test_calculate_image_tokens_by_dimensions_openai() {
         let width = 1024;
         let height = 1024;
         let expected_tokens = 765;
-        let tokens = calculate_image_tokens_by_dimensions(width, height);
+        let tokens = calculate_image_tokens_by_dimensions_openai(width, height);
         assert_eq!(tokens, expected_tokens, "Expected {} tokens, but got {}", expected_tokens, tokens);
     }
 }

@@ -1,9 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
-use regex::Regex;
 use tokenizers::Tokenizer;
 
-use crate::scratchpads::scratchpad_utils::calculate_image_tokens_openai;
+use crate::scratchpads::scratchpad_utils::{calculate_image_tokens_openai, parse_image_b64_from_image_url};
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -24,7 +23,7 @@ impl MultimodalElementImage {
     pub fn new(url: String) -> Self {
         let image_url = MultimodalElementImageImageURL {
             url: url.clone(),
-            detail: default_detail().to_string(),  // TODO: ..Default::default() doesn't work here
+            detail: default_detail().to_string(),
         };
         MultimodalElementImage {
             content_type: "image_url".to_string(),
@@ -92,10 +91,13 @@ impl ChatContent {
         }
     }
 
-    pub fn size_estimate(&self) -> usize {
+    pub fn size_estimate(&self, tokenizer: Arc<RwLock<Tokenizer>>) -> usize {
         match self {
             ChatContent::SimpleText(text) => text.len(),
-            ChatContent::Multimodal(_elements) => 0,  // TODO: implement
+            ChatContent::Multimodal(_elements) => { 
+                let tcnt = self.count_tokens(tokenizer).unwrap_or(0);
+                (tcnt as f32 * 2.618) as usize
+            }
         }
     }
 
@@ -188,14 +190,6 @@ where
 {
     let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
     chat_content_from_value(value).map_err(serde::de::Error::custom)
-}
-
-// todo: images via links are yet not implemented: unclear how to calculate tokens
-fn parse_image_b64_from_image_url(image_url: &str) -> Option<String> {
-    let re = Regex::new(r"data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)").unwrap();
-    re.captures(image_url).and_then(|captures| {
-        captures.get(2).map(|m| m.as_str().to_string())
-    })
 }
 
 pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, String> {
