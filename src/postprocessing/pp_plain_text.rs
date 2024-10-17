@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLockReadGuard};
 use std::sync::RwLock;
 use tokenizers::Tokenizer;
-use crate::scratchpads::chat_message::{ChatContent, ChatMessage, ChatMultimodalElement, MultimodalElementText};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage, ChatMultimodalElement, MultimodalElementTextOpenAI};
 use crate::scratchpads::scratchpad_utils::{count_tokens_text_only, multimodal_image_count_tokens};
 
 
@@ -57,21 +57,21 @@ pub async fn postprocess_plain_text(
                 
                 for element in elements {
                     match element {
-                        ChatMultimodalElement::MultimodalElementText(text_el) => {
-                            new_content.push(ChatMultimodalElement::MultimodalElementText(MultimodalElementText {
+                        ChatMultimodalElement::MultimodalElementTextOpenAI(text_el) => {
+                            new_content.push(ChatMultimodalElement::MultimodalElementTextOpenAI(MultimodalElementTextOpenAI {
                                 content_type: text_el.content_type.clone(),
                                 text: limit_text_content(&tokenizer_guard, &text_el.text, &mut tok_used, tok_per_m)
                             }));
                         },
-                        ChatMultimodalElement::MultiModalImageURLElement(image_el) => {
+                        ChatMultimodalElement::MultiModalImageURLElementOpenAI(image_el) => {
                             let tokens = multimodal_image_count_tokens(image_el);
                             if tok_used + tokens > tok_per_m {
-                                new_content.push(ChatMultimodalElement::MultimodalElementText(MultimodalElementText {
+                                new_content.push(ChatMultimodalElement::MultimodalElementTextOpenAI(MultimodalElementTextOpenAI {
                                     content_type: "text".to_string(),
                                     text: "Image truncated: too many tokens".to_string()
                                 }));
                             } else {
-                                new_content.push(ChatMultimodalElement::MultiModalImageURLElement(image_el.clone()));
+                                new_content.push(ChatMultimodalElement::MultiModalImageURLElementOpenAI(image_el.clone()));
                                 tok_used += tokens;
                             }
                         }

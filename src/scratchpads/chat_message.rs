@@ -6,26 +6,26 @@ use crate::scratchpads::scratchpad_utils::{calculate_image_tokens_openai, parse_
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
-pub struct MultimodalElementText {
+pub struct MultimodalElementTextOpenAI {
     #[serde(rename = "type")]
     pub content_type: String,
     pub text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
-pub struct MultimodalElementImage {
+pub struct MultimodalElementImageOpenAI {
     #[serde(rename = "type")]
     pub content_type: String,
     pub image_url: MultimodalElementImageImageURL,
 }
 
-impl MultimodalElementImage {
+impl MultimodalElementImageOpenAI {
     pub fn new(url: String) -> Self {
         let image_url = MultimodalElementImageImageURL {
             url: url.clone(),
             detail: default_detail().to_string(),
         };
-        MultimodalElementImage {
+        MultimodalElementImageOpenAI {
             content_type: "image_url".to_string(),
             image_url
         }
@@ -46,13 +46,13 @@ fn default_detail() -> String {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)] // tries to deserialize each enum variant in order
 pub enum ChatMultimodalElement {
-    MultimodalElementText(MultimodalElementText),
-    MultiModalImageURLElement(MultimodalElementImage),
+    MultimodalElementTextOpenAI(MultimodalElementTextOpenAI),
+    MultiModalImageURLElementOpenAI(MultimodalElementImageOpenAI),
 }
 
 impl Default for ChatMultimodalElement {
     fn default() -> Self {
-        ChatMultimodalElement::MultimodalElementText(MultimodalElementText {
+        ChatMultimodalElement::MultimodalElementTextOpenAI(MultimodalElementTextOpenAI {
             content_type: "text".to_string(),
             text: String::new(),
         })
@@ -81,7 +81,7 @@ impl ChatContent {
                     .iter()
                     .filter_map(|element| {
                         match element {
-                            ChatMultimodalElement::MultimodalElementText(el) => Some(el.text.clone()),
+                            ChatMultimodalElement::MultimodalElementTextOpenAI(el) => Some(el.text.clone()),
                             _ => None,
                         }
                     })
@@ -114,8 +114,8 @@ impl ChatContent {
                 let mut tcnt = 0;
                 for e in elements {
                     tcnt += match e {
-                        ChatMultimodalElement::MultimodalElementText(el) => count_tokens_simple_text(&tokenizer_lock, el.text.as_str())?,
-                        ChatMultimodalElement::MultiModalImageURLElement(el) => {
+                        ChatMultimodalElement::MultimodalElementTextOpenAI(el) => count_tokens_simple_text(&tokenizer_lock, el.text.as_str())?,
+                        ChatMultimodalElement::MultiModalImageURLElementOpenAI(el) => {
                             if let Some(image_base64) = parse_image_b64_from_image_url(el.image_url.url.as_str()) {
                                 calculate_image_tokens_openai(&image_base64, &el.image_url.detail)?
                             } else {
@@ -195,17 +195,17 @@ where
 pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, String> {
     fn validate_multimodal_element(element: &ChatMultimodalElement) -> Result<(), String> {
         match element {
-            ChatMultimodalElement::MultimodalElementText(el) => {
+            ChatMultimodalElement::MultimodalElementTextOpenAI(el) => {
                 if el.content_type != "text" {
                     return Err("Invalid multimodal element: type must be `text`".to_string());
                 }
             },
-            ChatMultimodalElement::MultiModalImageURLElement(el) => {
+            ChatMultimodalElement::MultiModalImageURLElementOpenAI(el) => {
                 if el.content_type != "image_url" {
                     return Err("Invalid multimodal element: type must be `image_url`".to_string());
                 }
                 if parse_image_b64_from_image_url(&el.image_url.url).is_none() {
-                    return Err("Invalid image URL in MultimodalElementImage: must pass regexp `data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)`".to_string());
+                    return Err("Invalid image URL in MultimodalElementImageOpenAI: must pass regexp `data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)`".to_string());
                 }
             }
         };
@@ -225,7 +225,7 @@ pub fn chat_content_from_value(value: serde_json::Value) -> Result<ChatContent, 
                 elements.push(element);
             }
             if elements.len() == 1 {
-                if let ChatMultimodalElement::MultimodalElementText(el) = &elements[0] {
+                if let ChatMultimodalElement::MultimodalElementTextOpenAI(el) = &elements[0] {
                     return Ok(ChatContent::SimpleText(el.text.clone()));
                 }
             }

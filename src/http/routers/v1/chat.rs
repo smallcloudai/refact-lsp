@@ -90,7 +90,7 @@ async fn chat(
     for message in &mut chat_post.messages {
         if !supports_multimodality {
             if let ChatContent::Multimodal(content) = &message.content {
-                if content.iter().any(|el| matches!(el, ChatMultimodalElement::MultiModalImageURLElement(_))) {
+                if content.iter().any(|el| matches!(el, ChatMultimodalElement::MultiModalImageURLElementOpenAI(_))) {
                     return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("model '{}' does not support multimodality", model_name)));
                 }
             }

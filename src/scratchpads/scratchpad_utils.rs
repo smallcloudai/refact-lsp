@@ -5,7 +5,7 @@ use serde_json::Value;
 use tokenizers::Tokenizer;
 
 use crate::postprocessing::pp_context_files::RESERVE_FOR_QUESTION_AND_FOLLOWUP;
-use crate::scratchpads::chat_message::{ChatContent, MultimodalElementImage};
+use crate::scratchpads::chat_message::{ChatContent, MultimodalElementImageOpenAI};
 
 
 pub struct HasRagResults {
@@ -61,7 +61,7 @@ pub fn parse_image_b64_from_image_url(image_url: &str) -> Option<String> {
     })
 }
 
-pub fn multimodal_image_count_tokens(el: &MultimodalElementImage) -> usize {
+pub fn multimodal_image_count_tokens(el: &MultimodalElementImageOpenAI) -> usize {
     parse_image_b64_from_image_url(el.image_url.url.as_str())
         .and_then(|image_b64| calculate_image_tokens_openai(&image_b64, &el.image_url.detail).ok())
         .unwrap_or(0) as usize
