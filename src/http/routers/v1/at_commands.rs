@@ -17,9 +17,10 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::{execute_at_commands_in_query, parse_words_from_line};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::at_commands::at_commands::filter_only_context_file_from_context_tool;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 use crate::scratchpads::scratchpad_utils::max_tokens_for_rag_chat;
 
 

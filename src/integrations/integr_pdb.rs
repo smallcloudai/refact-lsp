@@ -13,9 +13,10 @@ use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
+use crate::call_validation::ContextEnum;
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 use crate::tools::tools_description::Tool;
 
 const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);

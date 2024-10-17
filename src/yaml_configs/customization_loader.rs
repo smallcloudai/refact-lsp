@@ -6,8 +6,9 @@ use indexmap::IndexMap;
 use regex::Regex;
 use tokio::sync::RwLock as ARwLock;
 
-use crate::call_validation::{ChatMessage, SubchatParameters};
+use crate::call_validation::SubchatParameters;
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
+use crate::scratchpads::chat_message::ChatMessage;
 use crate::yaml_configs::customization_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML;
 
 

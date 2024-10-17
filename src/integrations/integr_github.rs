@@ -5,12 +5,12 @@ use tokio::process::Command;
 use async_trait::async_trait;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
-
+use crate::call_validation::ContextEnum;
+use crate::scratchpads::chat_message::{ChatMessage, ChatContent};
 use crate::tools::tools_description::Tool;
-use serde_json::Value;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

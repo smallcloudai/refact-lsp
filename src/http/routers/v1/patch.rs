@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatUsage, DiffChunk};
+use crate::call_validation::DiffChunk;
 use crate::custom_error::ScratchError;
 use crate::diffs::{ApplyDiffResult, ApplyDiffUnwrapped, correct_and_validate_chunks, read_files_n_apply_diff_chunks, unwrap_diff_apply_outputs};
 use crate::global_context::GlobalContext;
+use crate::scratchpads::chat_message::{ChatMessage, ChatUsage};
 use crate::tools::tool_patch_aux::tickets_parsing::{get_and_correct_active_tickets, get_tickets_from_messages};
 use crate::tools::tool_patch::process_tickets;
 use crate::tools::tools_execute::unwrap_subchat_params;

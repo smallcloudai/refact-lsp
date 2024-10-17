@@ -11,10 +11,11 @@ use tracing::{error, info, warn};
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_execute::run_tools;
-use crate::call_validation::{ChatContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
+use crate::call_validation::{ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_message::{ChatMessage, ChatContent};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, system_prompt_add_workspace_info};
@@ -112,7 +113,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         if self.supports_tools {
             (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results).await;
         };
-        let mut limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
+        let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
         });
@@ -127,7 +128,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
-                filtered_msgs.push(msg.drop_usage());
+                filtered_msgs.push(msg.to_orig_format());
 
             } else if msg.role == "diff" {
                 let tool_msg = ChatMessage {
@@ -137,20 +138,14 @@ impl ScratchpadAbstract for ChatPassthrough {
                     tool_call_id: msg.tool_call_id.clone(),
                     ..Default::default()
                 };
-                filtered_msgs.push(tool_msg.drop_usage());
+                filtered_msgs.push(tool_msg.to_orig_format());
 
             } else if msg.role == "plain_text" || msg.role == "cd_instruction" {
                 filtered_msgs.push(ChatMessage::new(
                     "user".to_string(),
                     msg.content.content_text_only(),
-                ).drop_usage());
-
-            } else if msg.role == "plain_text" {
-                filtered_msgs.push(ChatMessage::new(
-                    "user".to_string(),
-                    msg.content.content_text_only(),
-                ).drop_usage());
-
+                ).to_orig_format());
+                
             } else if msg.role == "context_file" {
                 match serde_json::from_str::<Vec<ContextFile>>(&msg.content.content_text_only()) {
                     Ok(vector_of_context_files) => {
@@ -162,7 +157,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                                         context_file.line1,
                                         context_file.line2,
                                         context_file.file_content),
-                            ).drop_usage());
+                            ).to_orig_format());
                         }
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
