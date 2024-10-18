@@ -189,7 +189,7 @@ pub async fn run_tools(
     let mut all_messages = original_messages.to_vec();
     for msg in generated_tool.iter().chain(generated_other.iter()) {
         all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
+        stream_back_to_user.push_in_json(json!(msg.into_raw()));
     }
 
     ccx.lock().await.pp_skeleton = false;

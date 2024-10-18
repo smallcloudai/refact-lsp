@@ -9,12 +9,12 @@ use crate::subchat::{subchat, subchat_single};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::scratchpads::chat_message::ChatMessage;
+use crate::scratchpads::chat_message::{ChatMessageRaw, into_chat_messages, into_chat_messages_raw};
 
 #[derive(Deserialize)]
 struct SubChatPost {
     model_name: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<ChatMessageRaw>,
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,
     tools_turn_on: Vec<String>,
@@ -27,17 +27,18 @@ pub async fn handle_v1_subchat(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<SubChatPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    let messages = into_chat_messages(&post.messages);
 
     let top_n = 7;
     let fake_n_ctx = 4096;
     let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(
-        AtCommandsContext::new(global_context.clone(), fake_n_ctx, top_n, false, post.messages.clone(), "".to_string()).await
+        AtCommandsContext::new(global_context.clone(), fake_n_ctx, top_n, false, messages.clone(), "".to_string()).await
     ));
 
     let new_messages = subchat(
         ccx.clone(),
         post.model_name.as_str(),
-        post.messages,
+        messages,
         post.tools_turn_on,
         post.wrap_up_depth,
         post.wrap_up_tokens_cnt,
@@ -48,6 +49,7 @@ pub async fn handle_v1_subchat(
         None,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
+    let new_messages = new_messages.into_iter().map(|msgs|into_chat_messages_raw(&msgs)).collect::<Vec<Vec<_>>>();
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();
     Ok(
         Response::builder()
@@ -61,7 +63,7 @@ pub async fn handle_v1_subchat(
 #[derive(Deserialize)]
 struct SubChatSinglePost {
     model_name: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<ChatMessageRaw>,
     tools_turn_on: Vec<String>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
@@ -78,17 +80,18 @@ pub async fn handle_v1_subchat_single(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<SubChatSinglePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    let messages = into_chat_messages(&post.messages);
 
     let top_n = 7;
     let fake_n_ctx = 4096;
     let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(
-        AtCommandsContext::new(global_context.clone(), fake_n_ctx, top_n, false, post.messages.clone(), "".to_string()).await)
+        AtCommandsContext::new(global_context.clone(), fake_n_ctx, top_n, false, messages.clone(), "".to_string()).await)
     );
 
     let new_messages = subchat_single(
         ccx.clone(),
         post.model_name.as_str(),
-        post.messages,
+        messages,
         post.tools_turn_on,
         post.tool_choice,
         post.only_deterministic_messages,
@@ -100,6 +103,7 @@ pub async fn handle_v1_subchat_single(
         None,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
+    let new_messages = new_messages.into_iter().map(|msgs|into_chat_messages_raw(&msgs)).collect::<Vec<Vec<_>>>();
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();
     Ok(
         Response::builder()

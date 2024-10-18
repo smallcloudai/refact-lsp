@@ -14,7 +14,7 @@ use std::fs::File;
 use std::io::Write;
 
 use crate::call_validation::SamplingParameters;
-use crate::scratchpads::chat_message::ChatMessage;
+use crate::scratchpads::chat_message::ChatMessageRaw;
 
 
 pub async fn forward_to_openai_style_endpoint(
@@ -130,8 +130,8 @@ fn passthrough_messages_to_json(
     let big_json: serde_json::Value = serde_json::from_str(&messages_str).unwrap();
 
     if false {
-        let messages: Vec<ChatMessage> = big_json["messages"].as_array().unwrap().iter().map(|x| {
-            let mut t = serde_json::from_value::<ChatMessage>(x.clone()).unwrap();
+        let messages: Vec<ChatMessageRaw> = big_json["messages"].as_array().unwrap().iter().map(|x| {
+            let mut t = serde_json::from_value::<ChatMessageRaw>(x.clone()).unwrap();
             if let Some(ref tool_calls) = t.tool_calls {
                 if tool_calls.len() == 0 {
                     t.tool_calls = None;

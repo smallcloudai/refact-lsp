@@ -7,13 +7,13 @@ use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
 use tracing::info;
 
-use crate::call_validation::ChatPost;
+use crate::call_validation::{ChatPost, ChatPostRaw};
 use crate::caps::CodeAssistantCaps;
 use crate::custom_error::ScratchError;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::global_context::SharedGlobalContext;
 use crate::{caps, scratchpads};
-use crate::scratchpads::chat_message::{ChatContent, ChatMultimodalElement};
+use crate::scratchpads::chat_message::ChatContent;
 
 
 pub const CHAT_TOP_N: usize = 7;
@@ -65,10 +65,12 @@ async fn chat(
     body_bytes: hyper::body::Bytes,
     allow_at: bool,
 ) -> Result<Response<Body>, ScratchError> {
-    let mut chat_post = serde_json::from_slice::<ChatPost>(&body_bytes).map_err(|e| {
+    let chat_post_raw = serde_json::from_slice::<ChatPostRaw>(&body_bytes).map_err(|e| {
         info!("chat handler cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
+    let mut chat_post = ChatPost::from_raw(chat_post_raw);
+    
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, supports_multimodality) = lookup_chat_scratchpad(
         caps.clone(),
@@ -91,9 +93,7 @@ async fn chat(
     for message in &mut chat_post.messages {
         if !supports_multimodality {
             if let ChatContent::Multimodal(content) = &message.content {
-                if content.iter().filter_map(|el| {
-                    if let ChatMultimodalElement::MultimodalElement(element) = el { Some(element) } else { None }
-                }).any(|el| el.m_type.starts_with("image")) {
+                if content.iter().any(|el| el.is_image()) {
                     return Err(ScratchError::new(StatusCode::BAD_REQUEST, format!("model '{}' does not support multimodality", model_name)));
                 }
             }

@@ -128,7 +128,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let mut filtered_msgs = vec![];
         for msg in &limited_msgs {
             if msg.role == "assistant" || msg.role == "system" || msg.role == "user" || msg.role == "tool" {
-                filtered_msgs.push(msg.to_orig_format());
+                filtered_msgs.push(msg.into_raw());
 
             } else if msg.role == "diff" {
                 let tool_msg = ChatMessage {
@@ -138,13 +138,13 @@ impl ScratchpadAbstract for ChatPassthrough {
                     tool_call_id: msg.tool_call_id.clone(),
                     ..Default::default()
                 };
-                filtered_msgs.push(tool_msg.to_orig_format());
+                filtered_msgs.push(tool_msg.into_raw());
 
             } else if msg.role == "plain_text" || msg.role == "cd_instruction" {
                 filtered_msgs.push(ChatMessage::new(
                     "user".to_string(),
                     msg.content.content_text_only(),
-                ).to_orig_format());
+                ).into_raw());
                 
             } else if msg.role == "context_file" {
                 match serde_json::from_str::<Vec<ContextFile>>(&msg.content.content_text_only()) {
@@ -157,7 +157,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                                         context_file.line1,
                                         context_file.line2,
                                         context_file.file_content),
-                            ).to_orig_format());
+                            ).into_raw());
                         }
                     },
                     Err(e) => { error!("error parsing context file: {}", e); }
@@ -193,7 +193,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let prompt = "PASSTHROUGH ".to_string() + &serde_json::to_string(&big_json).unwrap();
         if DEBUG {
             for msg in &filtered_msgs {
-                info!("keep role={} {:?}", msg.role, crate::nicer_logs::first_n_chars(&msg.content.content_text_only(), 30));
+                info!("keep role={}", msg.role);
             }
         }
         Ok(prompt.to_string())

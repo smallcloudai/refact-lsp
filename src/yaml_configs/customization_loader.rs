@@ -8,20 +8,48 @@ use tokio::sync::RwLock as ARwLock;
 
 use crate::call_validation::SubchatParameters;
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
-use crate::scratchpads::chat_message::ChatMessage;
+use crate::scratchpads::chat_message::{ChatMessage, ChatMessageRaw, into_chat_messages, into_chat_messages_raw};
 use crate::yaml_configs::customization_compiled_in::COMPILED_IN_CUSTOMIZATION_YAML;
 
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct CustomizationYaml {
+pub struct CustomizationYamlRaw {
     #[serde(default)]
     pub system_prompts: IndexMap<String, SystemPrompt>,
     #[serde(default)]
     pub subchat_tool_parameters: IndexMap<String, SubchatParameters>,
     #[serde(default)]
-    pub toolbox_commands: IndexMap<String, ToolboxCommand>,
+    pub toolbox_commands: IndexMap<String, ToolboxCommandRaw>,
     #[serde(default)]
+    pub code_lens: IndexMap<String, CodeLensCommandRaw>,
+}
+
+#[derive(Debug, Default)]
+pub struct CustomizationYaml {
+    pub system_prompts: IndexMap<String, SystemPrompt>,
+    pub subchat_tool_parameters: IndexMap<String, SubchatParameters>,
+    pub toolbox_commands: IndexMap<String, ToolboxCommand>,
     pub code_lens: IndexMap<String, CodeLensCommand>,
+}
+
+impl CustomizationYaml {
+    pub fn from_raw(raw: CustomizationYamlRaw) -> Self {
+        CustomizationYaml {
+            system_prompts: raw.system_prompts,
+            subchat_tool_parameters: raw.subchat_tool_parameters,
+            toolbox_commands: raw.toolbox_commands.into_iter().map(|(k, v)| (k, ToolboxCommand::from_raw(v))).collect(),
+            code_lens: raw.code_lens.into_iter().map(|(k, v)| (k, CodeLensCommand::from_raw(v))).collect(),
+        }
+    }
+    
+    pub fn into_raw(self) -> CustomizationYamlRaw {
+        CustomizationYamlRaw {
+            system_prompts: self.system_prompts,
+            subchat_tool_parameters: self.subchat_tool_parameters,
+            toolbox_commands: self.toolbox_commands.into_iter().map(|(k, v)| (k, v.into_raw())).collect(),
+            code_lens: self.code_lens.into_iter().map(|(k, v)| (k, v.into_raw())).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,9 +62,9 @@ pub struct SystemPrompt {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ToolboxCommand {
+pub struct ToolboxCommandRaw {
     pub description: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<ChatMessageRaw>,
     #[serde(default)]
     pub selection_needed: Vec<usize>,
     #[serde(default)]
@@ -45,12 +73,68 @@ pub struct ToolboxCommand {
     pub insert_at_cursor: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ToolboxCommand {
+    pub description: String,
+    pub messages: Vec<ChatMessage>,
+    pub selection_needed: Vec<usize>,
+    pub selection_unwanted: bool,
+    pub insert_at_cursor: bool,
+}
+
+impl ToolboxCommand {
+    pub fn from_raw(raw: ToolboxCommandRaw) -> Self {
+        ToolboxCommand {
+            description: raw.description,
+            messages: into_chat_messages(&raw.messages),
+            selection_needed: raw.selection_needed,
+            selection_unwanted: raw.selection_unwanted,
+            insert_at_cursor: raw.insert_at_cursor,
+        }
+    }
+    
+    pub fn into_raw(self) -> ToolboxCommandRaw {
+        ToolboxCommandRaw {
+            description: self.description,
+            messages: into_chat_messages_raw(&self.messages),
+            selection_needed: self.selection_needed,
+            selection_unwanted: self.selection_unwanted,
+            insert_at_cursor: self.insert_at_cursor,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CodeLensCommand {
+pub struct CodeLensCommandRaw {
     pub label: String,
     pub auto_submit: bool,
     #[serde(default)]
+    pub messages: Vec<ChatMessageRaw>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeLensCommand {
+    pub label: String,
+    pub auto_submit: bool,
     pub messages: Vec<ChatMessage>,
+}
+
+impl CodeLensCommand {
+    pub fn from_raw(raw: CodeLensCommandRaw) -> Self {
+        CodeLensCommand {
+            label: raw.label,
+            auto_submit: raw.auto_submit,
+            messages: into_chat_messages(&raw.messages),
+        }
+    }
+    
+    pub fn into_raw(self) -> CodeLensCommandRaw {
+        CodeLensCommandRaw {
+            label: self.label,
+            auto_submit: self.auto_submit,
+            messages: into_chat_messages_raw(&self.messages),
+        }
+    }
 }
 
 fn _extract_mapping_values(mapping: &Option<&serde_yaml::Mapping>, variables: &mut HashMap<String, String>) {
@@ -109,12 +193,16 @@ fn load_and_mix_with_users_config(
     _extract_mapping_values(&default_unstructured.as_mapping(), &mut variables);
     _extract_mapping_values(&user_unstructured.as_mapping(), &mut variables);
 
-    let mut work_config: CustomizationYaml = serde_yaml::from_str(COMPILED_IN_CUSTOMIZATION_YAML)
+    let work_config_raw: CustomizationYamlRaw = serde_yaml::from_str(COMPILED_IN_CUSTOMIZATION_YAML)
         .map_err(|e| format!("Error parsing default ToolboxConfig: {}\n{}", e, COMPILED_IN_CUSTOMIZATION_YAML))?;
-    let mut user_config: CustomizationYaml = serde_yaml::from_str(user_yaml)
+    let user_config_raw: CustomizationYamlRaw = serde_yaml::from_str(user_yaml)
         .map_err(|e| format!("Error parsing user ToolboxConfig: {}\n{}", e, user_yaml))?;
-    let caps_config: CustomizationYaml = serde_yaml::from_str(caps_yaml)
+    let caps_config_raw: CustomizationYamlRaw = serde_yaml::from_str(caps_yaml)
         .map_err(|e| format!("Error parsing default ToolboxConfig: {}\n{}", e, caps_yaml))?;
+    
+    let mut work_config = CustomizationYaml::from_raw(work_config_raw);
+    let mut user_config = CustomizationYaml::from_raw(user_config_raw);
+    let caps_config = CustomizationYaml::from_raw(caps_config_raw);
 
     _replace_variables_in_messages(&mut work_config, &variables);
     _replace_variables_in_messages(&mut user_config, &variables);

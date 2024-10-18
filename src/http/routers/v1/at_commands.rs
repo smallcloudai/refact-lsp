@@ -20,7 +20,7 @@ use crate::global_context::GlobalContext;
 use crate::call_validation::ContextEnum;
 use crate::at_commands::at_commands::filter_only_context_file_from_context_tool;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
-use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage, into_chat_messages_raw};
 use crate::scratchpads::scratchpad_utils::max_tokens_for_rag_chat;
 
 
@@ -148,7 +148,7 @@ pub async fn handle_v1_command_preview(
 
     let rag_n_ctx = max_tokens_for_rag_chat(recommended_model_record.n_ctx, 512);  // real maxgen may be different -- comes from request
 
-    let mut preview: Vec<ChatMessage> = vec![];
+    let mut preview = vec![];
     for exec_result in messages_for_postprocessing.iter() {
         // at commands exec() can produce both role="user" and role="assistant" messages
         if let ContextEnum::ChatMessage(raw_msg) = exec_result {
@@ -194,10 +194,11 @@ pub async fn handle_v1_command_preview(
             reason: h.reason.unwrap_or_default(),
         })
     }
+    let messages = into_chat_messages_raw(&preview);
     Ok(Response::builder()
         .status(StatusCode::OK)
         .body(Body::from(serde_json::to_string_pretty(
-            &json!({"messages": preview, "model": model_name, "highlight": highlights})
+            &json!({"messages": messages, "model": model_name, "highlight": highlights})
         ).unwrap()))
         .unwrap())
 }

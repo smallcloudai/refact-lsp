@@ -10,7 +10,7 @@ use crate::call_validation::{SamplingParameters, PostprocessSettings, ChatPost};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
 use crate::scratchpad_abstract::ScratchpadAbstract;
-use crate::scratchpads::chat_message::{chat_content_from_value, ChatContent, ChatMessage, ChatToolCall, ChatUsage};
+use crate::scratchpads::chat_message::{chat_content_from_value, ChatMessage, ChatMessageRaw, ChatToolCall, ChatUsage, into_chat_messages};
 use crate::yaml_configs::customization_loader::load_customization;
 
 
@@ -128,11 +128,12 @@ async fn chat_interaction_non_stream(
             }
         });
 
-    let det_messages = j.get("deterministic_messages")
+    let det_messages_raw = j.get("deterministic_messages")
         .and_then(|value| value.as_array())
         .and_then(|arr| {
-            serde_json::from_value::<Vec<ChatMessage>>(Value::Array(arr.clone())).ok()
+            serde_json::from_value::<Vec<ChatMessageRaw>>(Value::Array(arr.clone())).ok()
         }).unwrap_or_else(Vec::new);
+    let det_messages = into_chat_messages(&det_messages_raw);
 
     let mut results = vec![];
 
@@ -163,7 +164,7 @@ async fn chat_interaction_non_stream(
             )
         };
 
-        let content: ChatContent = chat_content_from_value(content_value)
+        let content = chat_content_from_value(content_value).and_then(|c|c.to_internal_format())
             .map_err(|e| format!("error parsing model's output: {}", e))?;
 
         let mut ch_results = vec![];
@@ -290,7 +291,7 @@ pub async fn subchat_single(
                 tx_chatid.clone()
             };
             for msg_in_choice in choice {
-                let message = serde_json::json!({"tool_call_id": tx_toolid, "subchat_id": cid, "add_message": msg_in_choice});
+                let message = serde_json::json!({"tool_call_id": tx_toolid, "subchat_id": cid, "add_message": msg_in_choice.into_raw()});
                 let _ = subchat_tx.lock().await.send(message);
             }
         }

@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLockReadGuard};
 use std::sync::RwLock;
 use tokenizers::Tokenizer;
-use crate::scratchpads::chat_message::{ChatContent, ChatMessage, ChatMultimodalElement, MultimodalElement};
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage, MultimodalElement};
 use crate::scratchpads::scratchpad_utils::count_tokens_text_only;
 
 
@@ -56,32 +56,26 @@ pub async fn postprocess_plain_text(
                 let mut new_content = vec![];
                 
                 for element in elements {
-                    if let ChatMultimodalElement::MultimodalElement(element) = element {
-                        if element.m_type == "text" {
-                            let mut el_cloned = element.clone();
-                            el_cloned.m_content = limit_text_content(&tokenizer_guard, &el_cloned.m_content, &mut tok_used, tok_per_m);
-                            new_content.push(el_cloned)
-                        } else if element.m_type.starts_with("image") {
-                            let tokens = element.count_tokens(None).unwrap() as usize;
-                            if tok_used + tokens > tok_per_m {
-                                let m_from = format!("{}_text", element.m_from_prefix());
-                                let new_el = MultimodalElement {
-                                    m_type: "text".to_string(),
-                                    m_content: "Image truncated: too many tokens".to_string(),
-                                    m_from,
-                                    ..Default::default()
-                                };
-                                new_content.push(new_el);
-                            } else {
-                                new_content.push(element.clone());
-                                tok_used += tokens;
-                            }
+                    if element.is_text() {
+                        let mut el_cloned = element.clone();
+                        el_cloned.m_content = limit_text_content(&tokenizer_guard, &el_cloned.m_content, &mut tok_used, tok_per_m);
+                        new_content.push(el_cloned)
+                    } else if element.is_image() {
+                        let tokens = element.count_tokens(None).unwrap() as usize;
+                        if tok_used + tokens > tok_per_m {
+                            let new_el = MultimodalElement {
+                                m_type: "text".to_string(),
+                                m_content: "Image truncated: too many tokens".to_string(),
+                                provider: element.provider.clone(),
+                            };
+                            new_content.push(new_el);
+                        } else {
+                            new_content.push(element.clone());
+                            tok_used += tokens;
                         }
                     }
                 }
-                ChatContent::Multimodal(
-                    new_content.into_iter().map(|el|ChatMultimodalElement::MultimodalElement(el)).collect::<Vec<_>>()
-                )
+                ChatContent::Multimodal(new_content)
             }
         };
 

@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use ropey::Rope;
 
 use crate::custom_error::ScratchError;
-use crate::scratchpads::chat_message::ChatMessage;
+use crate::scratchpads::chat_message::{ChatMessage, ChatMessageRaw, into_chat_messages};
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -88,7 +88,7 @@ pub struct ContextFile {
     pub usefulness: f32,  // higher is better
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub enum ContextEnum {
     ContextFile(ContextFile),
     ChatMessage(ChatMessage),
@@ -111,8 +111,8 @@ pub struct SubchatParameters {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct ChatPost {
-    pub messages: Vec<ChatMessage>,
+pub struct ChatPostRaw {
+    pub messages: Vec<ChatMessageRaw>,
     #[serde(default)]
     pub parameters: SamplingParameters,
     #[serde(default)]
@@ -138,6 +138,45 @@ pub struct ChatPost {
     #[allow(dead_code)]
     #[serde(default)]
     pub chat_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatPost {
+    pub messages: Vec<ChatMessage>,
+    pub parameters: SamplingParameters,
+    pub model: String,
+    pub scratchpad: String,
+    pub stream: Option<bool>,
+    pub temperature: Option<f32>,
+    pub max_tokens: usize,
+    pub n: Option<usize>,
+    pub tools: Option<Vec<serde_json::Value>>,
+    pub tool_choice: Option<String>,
+    pub only_deterministic_messages: bool,  // means don't sample from the model
+    pub subchat_tool_parameters: IndexMap<String, SubchatParameters>, // tool_name: {model, allowed_context, temperature}
+    pub postprocess_parameters: PostprocessSettings,
+    pub chat_id: String,
+}
+
+impl ChatPost {
+    pub fn from_raw(raw: ChatPostRaw) -> Self {
+        ChatPost {
+            messages: into_chat_messages(&raw.messages),
+            parameters: raw.parameters,
+            model: raw.model,
+            scratchpad: raw.scratchpad,
+            stream: raw.stream,
+            temperature: raw.temperature,
+            max_tokens: raw.max_tokens,
+            n: raw.n,
+            tools: raw.tools,
+            tool_choice: raw.tool_choice,
+            only_deterministic_messages: raw.only_deterministic_messages,
+            subchat_tool_parameters: raw.subchat_tool_parameters,
+            postprocess_parameters: raw.postprocess_parameters,
+            chat_id: raw.chat_id,
+        }
+    }
 }
 
 fn default_true() -> bool {
