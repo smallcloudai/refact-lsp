@@ -164,7 +164,7 @@ async def chat_main():
     parser.add_argument('--experimental', type=bool, default=False, help="Enable experimental features, such as new integrations")
     parser.add_argument('--xdebug', type=int, default=0, help="Connect to refact-lsp on the given port, as opposed to starting a new refact-lsp process")
     parser.add_argument('--always-pause', type=bool, default=False, help="Pause even if the model tries to run tools, normally that's submitteed automatically")
-    parser.add_argument('question', nargs=argparse.REMAINDER, help="You can continue your question in the command line after --")
+    # parser.add_argument('question', nargs=argparse.REMAINDER, help="You can continue your question in the command line after --")
     args = parser.parse_args(before_minus_minus)
     arg_question = " ".join(after_minus_minus)
 

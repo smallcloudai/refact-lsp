@@ -107,6 +107,8 @@ def process_streaming_data(data):
     global streaming_toolcall
     global tool_calls
     if "choices" in data:
+        if not data["choices"]:
+            return
         choices = data['choices']
         delta = choices[0]['delta']
         content = delta.get('content', None)
