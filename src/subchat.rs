@@ -6,10 +6,11 @@ use serde_json::Value;
 use tracing::{error, info, warn};
 use crate::tools::tools_description::{tools_merged_and_filtered, tool_description_list_from_yaml};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{ChatMessage, ChatPost, ChatToolCall, ChatUsage, SamplingParameters, PostprocessSettings};
+use crate::call_validation::{SamplingParameters, PostprocessSettings, ChatPost};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
 use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpads::chat_message::{chat_content_from_value, ChatMessage, ChatMessageRaw, ChatToolCall, ChatUsage, into_chat_messages};
 use crate::yaml_configs::customization_loader::load_customization;
 
 
@@ -59,7 +60,7 @@ async fn create_chat_post_and_scratchpad(
         chat_id: "".to_string(),
     };
 
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await?;
@@ -127,11 +128,12 @@ async fn chat_interaction_non_stream(
             }
         });
 
-    let det_messages = j.get("deterministic_messages")
+    let det_messages_raw = j.get("deterministic_messages")
         .and_then(|value| value.as_array())
         .and_then(|arr| {
-            serde_json::from_value::<Vec<ChatMessage>>(Value::Array(arr.clone())).ok()
+            serde_json::from_value::<Vec<ChatMessageRaw>>(Value::Array(arr.clone())).ok()
         }).unwrap_or_else(Vec::new);
+    let det_messages = into_chat_messages(&det_messages_raw);
 
     let mut results = vec![];
 
@@ -162,7 +164,7 @@ async fn chat_interaction_non_stream(
             )
         };
 
-        let content: crate::call_validation::ChatContent = crate::call_validation::chat_content_from_value(content_value)
+        let content = chat_content_from_value(content_value).and_then(|c|c.to_internal_format())
             .map_err(|e| format!("error parsing model's output: {}", e))?;
 
         let mut ch_results = vec![];
@@ -289,7 +291,7 @@ pub async fn subchat_single(
                 tx_chatid.clone()
             };
             for msg_in_choice in choice {
-                let message = serde_json::json!({"tool_call_id": tx_toolid, "subchat_id": cid, "add_message": msg_in_choice});
+                let message = serde_json::json!({"tool_call_id": tx_toolid, "subchat_id": cid, "add_message": msg_in_choice.into_raw()});
                 let _ = subchat_tx.lock().await.send(message);
             }
         }

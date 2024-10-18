@@ -38,6 +38,6 @@ pub async fn handle_v1_customization(
 	};
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::from(serde_json::to_string_pretty(&tconfig).unwrap()))
+        .body(Body::from(serde_json::to_string_pretty(&tconfig.into_raw()).unwrap()))
         .unwrap())
 }

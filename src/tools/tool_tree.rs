@@ -10,10 +10,10 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::at_file::return_one_candidate_or_a_good_error;
 use crate::at_commands::at_tree::{construct_tree_out_of_flat_list_of_paths, print_files_tree_with_budget};
 use crate::tools::tools_description::Tool;
-use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::files_correction::{correct_to_nearest_dir_path, correct_to_nearest_filename, get_project_dirs, paths_from_anywhere};
 use crate::files_in_workspace::ls_files;
-
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 
 pub struct ToolTree;
 

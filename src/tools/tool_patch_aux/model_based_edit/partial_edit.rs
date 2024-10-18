@@ -4,10 +4,12 @@ use std::sync::Arc;
 use itertools::Itertools;
 use tokio::sync::Mutex as AMutex;
 use tracing::warn;
-use crate::call_validation::{ChatUsage, DiffChunk, SubchatParameters};
+use crate::call_validation::{DiffChunk, SubchatParameters};
+use crate::scratchpads::chat_message::ChatUsage;
 use crate::tools::tool_patch_aux::model_based_edit::model_execution::{execute_blocks_of_code_patch, execute_whole_file_patch};
 use crate::tools::tool_patch_aux::postprocessing_utils::postprocess_diff_chunks;
 use crate::tools::tool_patch_aux::tickets_parsing::TicketToApply;
+
 
 fn partial_edit_choose_correct_chunk(chunks: Vec<Result<Vec<DiffChunk>, String>>) -> Result<Vec<DiffChunk>, String> {
     let errors = chunks

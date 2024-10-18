@@ -6,9 +6,10 @@ use tokenizers::Tokenizer;
 use tracing::{info, warn};
 
 use crate::at_commands::at_commands::{AtCommandsContext, AtParam, filter_only_context_file_from_context_tool};
-use crate::call_validation::{ChatMessage, ContextEnum};
+use crate::call_validation::ContextEnum;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
+use crate::scratchpads::chat_message::{ChatContent, ChatMessage};
 use crate::scratchpads::scratchpad_utils::{HasRagResults, count_tokens, max_tokens_for_rag_chat};
 
 pub const MIN_RAG_CONTEXT_LIMIT: usize = 256;
@@ -56,6 +57,12 @@ pub async fn run_at_commands(
     for msg_idx in user_msg_starts..original_messages.len() {
         let msg = original_messages[msg_idx].clone();
         let role = msg.role.clone();
+        // todo: make multimodal messages support @commands
+        if let ChatContent::Multimodal(_) = &msg.content {
+            rebuilt_messages.push(msg.clone());
+            stream_back_to_user.push_in_json(json!(msg.into_raw()));
+            continue;
+        }
         let mut content = msg.content.content_text_only();
         let content_n_tokens = count_tokens(&tokenizer.read().unwrap(), &msg.content);
 
@@ -76,7 +83,7 @@ pub async fn run_at_commands(
             if let ContextEnum::ChatMessage(raw_msg) = exec_result {  // means not context_file
                 if raw_msg.role != "plain_text" {
                     rebuilt_messages.push(raw_msg.clone());
-                    stream_back_to_user.push_in_json(json!(raw_msg));
+                    stream_back_to_user.push_in_json(json!(raw_msg.into_raw()));
                 } else {
                     plain_text_messages.push(raw_msg);
                 }
@@ -106,7 +113,7 @@ pub async fn run_at_commands(
             for m in pp_plain_text {
                 // OUTPUT: plain text after all custom messages
                 rebuilt_messages.push(m.clone());
-                stream_back_to_user.push_in_json(json!(m));
+                stream_back_to_user.push_in_json(json!(m.into_raw()));
             }
             tokens_limit_files += non_used_plain;
             info!("tokens_limit_files {}", tokens_limit_files);
@@ -135,7 +142,7 @@ pub async fn run_at_commands(
                         serde_json::to_string(&json_vec).unwrap_or("".to_string()),
                     );
                     rebuilt_messages.push(message.clone());
-                    stream_back_to_user.push_in_json(json!(message));
+                    stream_back_to_user.push_in_json(json!(message.into_raw()));
                 }
             }
             info!("postprocess_plain_text_messages + postprocess_context_files {:.3}s", t0.elapsed().as_secs_f32());
@@ -145,7 +152,7 @@ pub async fn run_at_commands(
             // stream back to the user, with at-commands replaced
             let msg = ChatMessage::new(role.clone(), content);
             rebuilt_messages.push(msg.clone());
-            stream_back_to_user.push_in_json(json!(msg));
+            stream_back_to_user.push_in_json(json!(msg.into_raw()));
         }
     }
 
