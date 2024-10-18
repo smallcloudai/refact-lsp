@@ -1,4 +1,4 @@
-pub const COMPILED_IN_CUSTOMIZATION_YAML: &str = r#"# Customization will merge this compiled-in config and the user config.
+pub const COMPILED_IN_CUSTOMIZATION_YAML: &str = r####"# Customization will merge this compiled-in config and the user config.
 #
 # There are magic keys:
 #    %ARGS%
@@ -22,14 +22,14 @@ PROMPT_PINS: |
   Before any code block, you need to write one of: 📍REWRITE_ONE_SYMBOL, 📍REWRITE_WHOLE_FILE, 📍PARTIAL_EDIT, 📍NEW_FILE, 📍OTHER followed by a
   unique ticket (3-digit number that you need to start from 000 and increase by one each code block) and the absolute path to the file the
   changes apply to, then write the code block. Explanation:
-  📍REWRITE_ONE_SYMBOL <ticket> </dir/dir/existing_file.ext> SYMBOL_NAME <namespace::class::method>  -- when you need to rewrite a single function or class
-  📍REWRITE_WHOLE_FILE <ticket> </dir/dir/existing_file.ext>                                         -- when you need to rewrite the whole file
-  📍PARTIAL_EDIT <ticket> </dir/dir/existing_file.ext>                                               -- for an edit doesn't start at the top and end at the bottom
-  📍NEW_FILE <ticket> </dir/dir/new_file.ext>                  -- create a new file, you need an absolute path here even more than anywhere else
+  📍REWRITE_ONE_SYMBOL <ticket> <absolute_path_to_file> SYMBOL_NAME <namespace::class::method>  -- when you need to rewrite a single function or class
+  📍REWRITE_WHOLE_FILE <ticket> <absolute_path_to_file>                                         -- when you need to rewrite the whole file
+  📍PARTIAL_EDIT <ticket> <absolute_path_to_file>                                               -- for an edit doesn't start at the top and end at the bottom
+  📍NEW_FILE <ticket> <absolute_path_to_file>                  -- create a new file, you need an absolute path here even more than anywhere else
   📍OTHER <ticket>                                             -- command line, pseudo code, examples, answers to questions unrelated to the project
 
-  Example:
-  📍PARTIAL_EDIT 000 /home/user/code/my_project/my_file.py
+  Examples:
+  📍PARTIAL_EDIT 000 c:/Users/UserName/code/my_project/my_file.py
   ```python
   [some portion of the original code]
   def f(): pass
@@ -46,7 +46,7 @@ PROMPT_PINS: |
   def g(): pass
   ```
 
-  📍REWRITE_ONE_SYMBOL 003 /home/user/code/my_project/my_other_file.py SYMBOL_NAME Test
+  📍REWRITE_ONE_SYMBOL 003 c:/Users/UserName/some_project/my_other_file.py SYMBOL_NAME Test
   ```python
   class Test():
       # to be implemented
@@ -317,7 +317,7 @@ toolbox_commands:
     description: "Show available commands"
     messages: []
 
-"#;
+"####;
 
 
 pub const COMPILED_IN_INITIAL_USER_YAML : &str = r#"# You can find the compiled-in config by searching for COMPILED_IN_CUSTOMIZATION_YAML in the `refact-lsp` repo.
