@@ -118,7 +118,7 @@ async fn write_results_on_disk(
     Ok(docs2index)
 }
 
-pub async fn set_chunks_detail_and_sync_documents_ast_vecdb(
+async fn set_chunks_detail_and_sync_documents_ast_vecdb(
     gcx: Arc<ARwLock<GlobalContext>>,
     new_documents: Vec<Document>,
     apply_outputs: Vec<ApplyDiffUnwrapped>,
