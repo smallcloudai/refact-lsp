@@ -65,7 +65,16 @@ async fn main() {
     rayon::ThreadPoolBuilder::new().num_threads(cpu_num / 2).build_global().unwrap();
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
     let cache_dir = home_dir.join(".cache/refact");
-    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone()).await;
+    let config_dir = home_dir.join(".config/refact");
+    if !config_dir.is_dir() {
+        if let Err(e) = std::fs::create_dir_all(&config_dir) {
+            let _ = write!(std::io::stderr(), "{}", format!("Failed to create config directory at {}: {}", config_dir.display(), e));
+            std::process::exit(1);
+        }
+    }
+    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(
+        cache_dir.clone(), config_dir
+    ).await;
     let mut writer_is_stderr = false;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
         writer_is_stderr = true;
