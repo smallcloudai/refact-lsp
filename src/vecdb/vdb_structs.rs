@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::RwLock as StdRwLock;
 use std::sync::Arc;
@@ -44,6 +46,7 @@ pub struct VecDbStatus {
     pub state: String,   // "starting", "parsing", "done"
     pub queue_additions: bool,
     pub vecdb_max_files_hit: bool,
+    pub errors: HashMap<String, usize>,
 }
 
 
