@@ -13,6 +13,7 @@ use crate::call_validation::ContextEnum;
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_chrome::ToolChrome;
 use crate::scratchpads::chat_message::ChatUsage;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -86,6 +87,7 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         // ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_locate::ToolLocate{}) as Box<dyn Tool + Send>))),
         // ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_relevant_files::ToolRelevantFiles{}) as Box<dyn Tool + Send>))),
         ("locate".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_locate_search::ToolLocateSearch{}) as Box<dyn Tool + Send>))),
+        // ("web_screenshot".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_web_screenshot::ToolWebScreenshot{}) as Box<dyn Tool + Send>))),
     ]);
 
     if allow_experimental {
@@ -96,6 +98,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(chrome_tool) = ToolChrome::new_if_configured(&integrations_value) {
+            tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(chrome_tool) as Box<dyn Tool + Send>)));
         }
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
@@ -267,6 +272,29 @@ tools:
       - name: "command"
         type: "string"
         description: "Examples:\npython -m pdb script.py\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit"
+    parameters_required:
+      - "command"
+
+  - name: "web_screenshot"
+    description: "Add screenshot of a web page to the chat."
+    parameters:
+      - name: "url"
+        type: "string"
+        description: "URL of the web page to make screenshot."
+      - name: "html"
+        type: "boolean"
+        description: "In addition to the screenshot, return inner HTML of the page."
+    parameters_required:
+      - "url"
+
+  - name: "chrome"
+    agentic: true
+    experimental: true
+    description: "Web browser. Opens a tab and operates in it."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Chrome has this commands: navigate_to url, screenshot."
     parameters_required:
       - "command"
 "####;
