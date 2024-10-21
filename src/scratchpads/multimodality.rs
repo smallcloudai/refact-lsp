@@ -41,7 +41,7 @@ impl MultimodalElement {
     
     pub fn to_orig(&self) -> ChatMultimodalElement {
         match self.provider.as_str() {
-            "openai" => {
+            "openai" | "" => {
                 if self.is_text() {
                     self.to_openai_text()
                 } else if self.is_image() {
@@ -143,6 +143,7 @@ impl ChatContentRaw {
                 internal_elements.map(ChatContent::Multimodal)
             }
             ChatContentRaw::MultimodalInner(elements) => {
+                // todo: validate provider
                 Ok(ChatContent::Multimodal(elements.clone()))
             }
         }
