@@ -37,14 +37,6 @@ impl HasRagResults {
 
 pub fn count_tokens(
     tokenizer: &Tokenizer,
-    content: &crate::call_validation::ChatContent,
-) -> usize {
-    // XXX count image size
-    count_tokens_text_only(tokenizer, content.content_text_only().as_str())
-}
-
-pub fn count_tokens_text_only(
-    tokenizer: &Tokenizer,
     text: &str,
 ) -> usize {
     match tokenizer.encode(text, false) {
