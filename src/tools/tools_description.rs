@@ -13,6 +13,7 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_postgres::ToolPostgres;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig {
@@ -95,6 +96,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(postgres_tool) = ToolPostgres::new_if_configured(&integrations_value) {
+            tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(postgres_tool) as Box<dyn Tool + Send>)));
         }
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
@@ -268,6 +272,17 @@ tools:
         description: "Examples: 'python -m pdb script.py', 'break module_name.function_name', 'break 10', 'continue', 'print(variable_name)', 'list', 'quit'"
     parameters_required:
       - "command"
+      
+  - name: "postgres"
+    agentic: true
+    experimental: true
+    description: "Execute PostgreSQL queries using psql command-line tool."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Examples: 'SELECT * FROM table_name', 'SELECT * FROM table_name WHERE column_name = value'" 
+    parameters_required:
+      - "columns"   
 "####;
 
 #[allow(dead_code)]
