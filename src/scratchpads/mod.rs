@@ -12,6 +12,7 @@ pub mod chat_utils_limit_history;
 pub mod chat_utils_prompts;
 pub mod scratchpad_utils;
 pub mod code_completion_replace;
+pub mod multimodality;
 
 use crate::ast::ast_indexer_thread::AstIndexService;
 use crate::call_validation::CodeCompletionPost;

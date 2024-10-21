@@ -10,9 +10,6 @@ use serde_json::json;
 use tokio::sync::Mutex as AMutex;
 use tracing::info;
 
-use std::fs::File;
-use std::io::Write;
-
 use crate::call_validation::SamplingParameters;
 
 
@@ -127,40 +124,6 @@ fn passthrough_messages_to_json(
     assert!(prompt.starts_with("PASSTHROUGH "));
     let messages_str = &prompt[12..];
     let big_json: serde_json::Value = serde_json::from_str(&messages_str).unwrap();
-
-    if false {
-        let messages: Vec<crate::call_validation::ChatMessage> = big_json["messages"].as_array().unwrap().iter().map(|x| {
-            let mut t = serde_json::from_value::<crate::call_validation::ChatMessage>(x.clone()).unwrap();
-            if let Some(ref tool_calls) = t.tool_calls {
-                if tool_calls.len() == 0 {
-                    t.tool_calls = None;
-                }
-            }
-            t
-        }).collect();
-        for msg in messages.iter() {
-            info!("PASSTHROUGH MSG: {:?}", msg);
-        }
-        let tools_mb: Option<Vec<serde_json::Value>> = match big_json["tools"].as_array() {
-            Some(x) => Some(x.iter().map(|x| x.clone()).collect()),
-            None => None,
-        };
-        if let Some(tools) = tools_mb {
-            for tool in tools.iter() {
-                info!("PASSTHROUGH TOOL: {:?}", tool);
-            }
-        }
-    }
-    // TODO: remove (dump to file)
-    if false {
-        let mut messages_file = File::create("/tmp/aaa_messages.json").unwrap();
-        let messages_json = serde_json::to_string_pretty(&big_json["messages"]).unwrap();
-        messages_file.write_all(messages_json.as_bytes()).unwrap();
-
-        let mut tools_file = File::create("/tmp/aaa_tools.json").unwrap();
-        let tools_json = serde_json::to_string_pretty(&big_json["tools"]).unwrap();
-        tools_file.write_all(tools_json.as_bytes()).unwrap();
-    }
 
     data["messages"] = big_json["messages"].clone();
     if let Some(tools) = big_json.get("tools") {
