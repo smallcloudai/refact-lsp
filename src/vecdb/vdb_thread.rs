@@ -99,7 +99,7 @@ async fn vectorize_batch_from_q(
     let batch = run_actual_model_on_these.drain(..B.min(run_actual_model_on_these.len())).collect::<Vec<_>>();
     assert!(batch.len() > 0);
 
-    let batch_result = get_embedding_with_retry(
+    let batch_result = match get_embedding_with_retry(
         client.clone(),
         &constants.endpoint_embeddings_style.clone(),
         &constants.embedding_model.clone(),
@@ -107,7 +107,14 @@ async fn vectorize_batch_from_q(
         batch.iter().map(|x| x.window_text.clone()).collect(),
         api_key,
         10,
-    ).await?;
+    ).await {
+        Ok(res) => res,
+        Err(e) => {
+            let mut vstatus_locked = vstatus.lock().await;
+            *vstatus_locked.errors.entry(e.clone()).or_insert(0) += 1;
+            return Err(e);
+        }
+    };
 
     if batch_result.len() != batch.len() {
         return Err(format!("vectorize: batch_result.len() != batch.len(): {} vs {}", batch_result.len(), batch.len()));
@@ -317,6 +324,12 @@ async fn vectorize_thread(
                         let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
                         vstatus_notify.notify_waiters();
+                        {
+                            let vstatus_locked = vstatus.lock().await;
+                            if !vstatus_locked.errors.is_empty() {
+                                info!("VECDB ERRORS: {:#?}", vstatus_locked.errors);
+                            }
+                        }
                     }
                     tokio::select! {
                         _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {},
@@ -411,6 +424,7 @@ impl FileVectorizerService {
                 state: "starting".to_string(),
                 queue_additions: true,
                 vecdb_max_files_hit: false,
+                errors: HashMap::new(),
             }
         ));
         FileVectorizerService {
