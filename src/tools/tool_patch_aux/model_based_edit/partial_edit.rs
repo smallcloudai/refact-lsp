@@ -9,7 +9,6 @@ use crate::tools::tool_patch_aux::model_based_edit::model_execution::{execute_bl
 use crate::tools::tool_patch_aux::postprocessing_utils::postprocess_diff_chunks;
 use crate::tools::tool_patch_aux::tickets_parsing::TicketToApply;
 
-
 fn partial_edit_choose_correct_chunk(chunks: Vec<Result<Vec<DiffChunk>, String>>) -> Result<Vec<DiffChunk>, String> {
     let errors = chunks
         .iter()
