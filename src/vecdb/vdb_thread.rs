@@ -110,10 +110,8 @@ async fn vectorize_batch_from_q(
     ).await {
         Ok(res) => res,
         Err(e) => {
-            {
-                let mut vstatus_locked = vstatus.lock().await;
-                *vstatus_locked.errors.entry(e.clone()).or_insert(0) += 1;
-            }
+            let mut vstatus_locked = vstatus.lock().await;
+            *vstatus_locked.errors.entry(e.clone()).or_insert(0) += 1;
             return Err(e);
         }
     };
