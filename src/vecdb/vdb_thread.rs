@@ -326,6 +326,12 @@ async fn vectorize_thread(
                         let _ = write!(std::io::stderr(), "VECDB COMPLETE\n");
                         info!("VECDB COMPLETE"); // you can see stderr "VECDB COMPLETE" sometimes faster vs logs
                         vstatus_notify.notify_waiters();
+                        {
+                            let vstatus_locked = vstatus.lock().await;
+                            if !vstatus_locked.errors.is_empty() {
+                                info!("VECDB ERRORS: {:#?}", vstatus_locked.errors);
+                            }
+                        }
                     }
                     tokio::select! {
                         _ = tokio::time::sleep(tokio::time::Duration::from_millis(5000)) => {},

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::RwLock as StdRwLock;
 use std::sync::Arc;
