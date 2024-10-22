@@ -22,16 +22,15 @@ use tracing::info;
 use crate::scratchpads::comments_parser::parse_comments;
 
 const DEBUG: bool = true;
-const SYSTEM_PROMPT: &str = r#"You are given a code file and a block of code from that file. 
-Within this block there is an unfinished line. The unfinished spot on this line is marked with <USER_CURSOR>. 
-Your task is to rewrite the block and complete the code after the <USER_CURSOR> position.
-Ensure you copy the additional lines from before and after the <USER_CURSOR> line exactly as they are.
-Do not comment new code you added!"#;
-const SYSTEM_PROMPT_COMMENTS: &str = r#"You are given a code file and a block of code from that file. 
-Within this block there is an unfinished line. The unfinished spot on this line is marked with <USER_CURSOR>. 
-Your task is to rewrite the block and complete the code after the <USER_CURSOR> position.
-Ensure you copy the additional lines from before and after the <USER_CURSOR> line exactly as they are.
-You must finish the code (a function or a class). Follow user's intention:
+const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
+An unfinished line in this block is marked with <CURSOR>. 
+Complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE>. 
+Produce a single <REWROTE_BLOCK_OF_CODE> containing all changes.
+Copy additional lines before and after the <CURSOR> line exactly as they are"#;
+const SYSTEM_PROMPT_COMMENTS: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
+Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
+Provide a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes.
+User's intention:
 <comment>"#;
 const SUBBLOCK_CUT_TOKENS_N: usize = 3;
 
@@ -89,14 +88,14 @@ impl SubBlock {
         } else {
             (self.cursor_line.clone(), "".to_string())
         };
-        code.push_str(format!("{}<USER_CURSOR>\n", new_cursor_line).as_str());
+        code.push_str(format!("{}<CURSOR>\n", new_cursor_line).as_str());
         code.push_str(self.after_lines
             .iter()
             .map(|x| x.replace("\r\n", "\n"))
             .collect::<Vec<_>>()
             .join("")
             .as_str());
-        Ok(format!("# Block of code:\n```\n{code}\n```"))
+        Ok(format!("<BLOCK_OF_CDDE>:\n```\n{code}\n```"))
     }
 
     fn prefilling_prompt(&mut self, tokenizer: &HasTokenizerAndEot) -> Result<String, String> {
@@ -126,7 +125,7 @@ impl SubBlock {
         };
         code.push_str(&new_cursor_line);
         self.cut_part = Some(cut_part);
-        Ok(format!("# Completed block of code:\n```\n{code}"))
+        Ok(format!("<REWROTE_BLOCK_OF_CODE>:\n```\n{code}"))
     }
     
     fn after_lines_str(&self) -> String {
@@ -200,6 +199,7 @@ fn prepare_subblock(
     max_tokens: usize,
     file_text: &Rope,
     cursor_pos: &CursorPosition,
+    max_rows_up_or_downs: usize
 ) -> Result<(SubBlock, usize), String> {
     let mut subblock: SubBlock = SubBlock {
         before_lines: vec![],
@@ -219,10 +219,13 @@ fn prepare_subblock(
         return Err("Cannot retrieve the cursor line from the given file".to_string());
     }
 
-    for i in cursor_pos.line - 4..cursor_pos.line {
+    for i in (cursor_pos.line - max_rows_up_or_downs as i32..cursor_pos.line).rev() {
         if i >= 0 {
             if let Some(line) = file_text.line(i as usize).as_str() {
-                subblock.before_lines.push(line.to_string());
+                if line.trim().is_empty() {
+                    break;
+                }
+                subblock.before_lines.insert(0, line.to_string());
                 tokens_used += tokenizer.count_tokens(line).unwrap_or(0) as usize;
                 if tokens_used > max_tokens {
                     return Err("Tokens limit is too small to fit the context for the code subblock".to_string());
@@ -231,10 +234,13 @@ fn prepare_subblock(
         }
     }
 
-    for i in cursor_pos.line + 1..cursor_pos.line + 5 {
+    for i in cursor_pos.line + 1..cursor_pos.line + max_rows_up_or_downs as i32 {
         if i < file_text.len_lines() as i32 {
             let line = file_text.line(i as usize);
             if let Some(line) = line.as_str() {
+                if line.trim().is_empty() {
+                    break;
+                }
                 tokens_used += tokenizer.count_tokens(line).unwrap_or(0) as usize;
                 if tokens_used > max_tokens {
                     break;
@@ -387,6 +393,7 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
             subblock_available_tokens,
             &text,
             &self.post.inputs.cursor,
+            10
         )?;
         self.cursor_subblock = Some(subblock);
         self.new_line_symbol = if self.cursor_subblock.as_ref().unwrap().cursor_line.ends_with("\r\n") {
@@ -436,6 +443,16 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
                 }
             }
             cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str());
+            // 
+            // if !cut_part.trim().is_empty() {
+            //     if let Some(idx) = cc.find(cut_part.as_str()) {
+            //         cc = cc.split_at(idx).1.to_string();
+            //     } else if let Some(idx) = cc.find(cut_part.trim()) {
+            //         cc = cc.split_at(idx).1.to_string();
+            //     } else  {
+            //     }
+            // }
+            
             finished |= stopped[i];
             let finish_reason = if finished {
                 cc = cc.trim_end().to_string();
