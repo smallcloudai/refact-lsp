@@ -19,13 +19,20 @@ use tokenizers::Tokenizer;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
+use crate::scratchpads::comments_parser::parse_comments;
 
-const DEBUG: bool = true ;
+const DEBUG: bool = true;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a block of code from that file. 
 Within this block there is an unfinished line. The unfinished spot on this line is marked with <USER_CURSOR>. 
-Your task is to complete the code after the <USER_CURSOR> position.
+Your task is to rewrite the block and complete the code after the <USER_CURSOR> position.
 Ensure you copy the additional lines from before and after the <USER_CURSOR> line exactly as they are.
 Do not comment new code you added!"#;
+const SYSTEM_PROMPT_COMMENTS: &str = r#"You are given a code file and a block of code from that file. 
+Within this block there is an unfinished line. The unfinished spot on this line is marked with <USER_CURSOR>. 
+Your task is to rewrite the block and complete the code after the <USER_CURSOR> position.
+Ensure you copy the additional lines from before and after the <USER_CURSOR> line exactly as they are.
+You must finish the code (a function or a class). Follow user's intention:
+<comment>"#;
 const SUBBLOCK_CUT_TOKENS_N: usize = 3;
 
 #[derive(Debug, Clone)] 
@@ -89,12 +96,7 @@ impl SubBlock {
             .collect::<Vec<_>>()
             .join("")
             .as_str());
-        if 0 > 0 {
-            let extra_user_message = format!("# The user started to type this after the <USER_CURSOR>, continue that:\n```\n{}\n```", self.cursor_line);
-            Ok(format!("# Block of code:\n```\n{code}\n```\n{extra_user_message}"))
-        } else {
-            Ok(format!("# Block of code:\n```\n{code}\n```"))
-        }
+        Ok(format!("# Block of code:\n```\n{code}\n```"))
     }
 
     fn prefilling_prompt(&mut self, tokenizer: &HasTokenizerAndEot) -> Result<String, String> {
@@ -333,11 +335,30 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
         if !self.post.inputs.multiline {
             sampling_parameters_to_patch.stop.push("\n".to_string());
         }
+
+        let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
+        let mut source = self.post.inputs.sources.get(
+            &self.post.inputs.cursor.file
+        ).ok_or("Cursor is in file not found in sources".to_string())?.clone();
+        let comment = parse_comments(
+            &source, 
+            &cpath.extension().map(|x| x.to_string_lossy().to_string()).unwrap_or("".to_string())
+        )
+            .into_iter()
+            .filter(|x| x.end_line == self.post.inputs.cursor.line as usize && !x.is_inline)
+            .next();
         let mut prompt = self.token_bos.clone();
         prompt.push_str(self.keyword_syst.as_str());
-        prompt.push_str(SYSTEM_PROMPT);
+        if let Some(comment) = comment {
+            prompt.push_str(&SYSTEM_PROMPT_COMMENTS.replace("<comment>", &comment.text));
+            sampling_parameters_to_patch.max_new_tokens = 512;
+            sampling_parameters_to_patch.temperature = Some(0.2);
+            sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
+        } else {
+            prompt.push_str(SYSTEM_PROMPT);
+        }
         prompt.push_str(self.token_esc.as_str());
-
+        
         let mut available_tokens = n_ctx.saturating_sub(self.t.count_tokens(prompt.as_str())? as usize);
         // let mut rag_tokens_n = if self.post.rag_tokens_n > 0 {
         //     self.post.rag_tokens_n.min(4096).max(50)
@@ -350,10 +371,7 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
         let main_file_available_tokens = (available_tokens as f64 * 0.9) as usize;
         let subblock_available_tokens = available_tokens.saturating_sub(main_file_available_tokens).min(256).max(32);
 
-        let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
-        let mut source = self.post.inputs.sources.get(
-            &self.post.inputs.cursor.file
-        ).ok_or("Cursor is in file not found in sources".to_string())?.clone();
+        
         source = self.cleanup_prompt(&source);
         let text = Rope::from_str(&*source);
 
