@@ -5,9 +5,9 @@ use tokio::sync::Mutex as AMutex;
 use axum::Extension;
 use axum::response::Result;
 use hyper::{Body, Response, StatusCode};
-use tracing::info;
+use tracing::{info, warn};
 
-use crate::call_validation::{ChatContent, ChatPost, ChatPostRaw};
+use crate::call_validation::{ChatContent, ChatMessage, ChatPost};
 use crate::caps::CodeAssistantCaps;
 use crate::custom_error::ScratchError;
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -59,16 +59,27 @@ pub async fn handle_v1_chat(
     chat(global_context, body_bytes, true).await
 }
 
+pub fn deserialize_messages_from_post(messages: &Vec<serde_json::Value>) -> Result<Vec<ChatMessage>, ScratchError> {
+    let messages: Vec<ChatMessage> = messages.iter()
+        .map(|x| serde_json::from_value(x.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            warn!("couldn't parse message:\n{:?}", e);
+            ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+        })?;
+    Ok(messages)
+}
+
 async fn chat(
     global_context: SharedGlobalContext,
     body_bytes: hyper::body::Bytes,
     allow_at: bool,
 ) -> Result<Response<Body>, ScratchError> {
-    let chat_post_raw = serde_json::from_slice::<ChatPostRaw>(&body_bytes).map_err(|e| {
+    let mut chat_post = serde_json::from_slice::<ChatPost>(&body_bytes).map_err(|e| {
         info!("chat handler cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    let mut chat_post = ChatPost::from_raw(chat_post_raw);
+    let mut messages = deserialize_messages_from_post(&chat_post.messages)?;
     
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, supports_multimodality) = lookup_chat_scratchpad(
@@ -89,7 +100,7 @@ async fn chat(
 
     // extra validation to catch {"query": "Frog", "scope": "workspace"}{"query": "Toad", "scope": "workspace"}
     let re = regex::Regex::new(r"\{.*?\}").unwrap();
-    for message in &mut chat_post.messages {
+    for message in messages.iter_mut() {
         if !supports_multimodality {
             if let ChatContent::Multimodal(content) = &message.content {
                 if content.iter().any(|el| el.is_image()) {
@@ -137,6 +148,7 @@ async fn chat(
         caps,
         model_name.clone(),
         &chat_post,
+        &messages,
         &scratchpad_name,
         &scratchpad_patch,
         allow_at,
@@ -162,7 +174,7 @@ async fn chat(
         n_ctx,
         CHAT_TOP_N,
         false,
-        chat_post.messages.clone(),
+        messages.clone(),
         chat_post.chat_id,
     ).await;
     ccx.subchat_tool_parameters = chat_post.subchat_tool_parameters.clone();

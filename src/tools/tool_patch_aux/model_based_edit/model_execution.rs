@@ -76,7 +76,7 @@ async fn make_chat_history(
     }
 
     let tokens = messages.iter().map(|x| 
-        3 + x.content.count_tokens(tokenizer_arc.clone()).unwrap_or(0) as usize
+        3 + x.content.count_tokens(tokenizer_arc.clone(), &None).unwrap_or(0) as usize
     ).sum::<usize>();
     if tokens > max_tokens {
         return Err(format!(
@@ -118,7 +118,7 @@ async fn make_follow_up_chat_history(
     }
 
     let tokens = messages.iter().map(|x| 
-        3 + x.content.count_tokens(tokenizer_arc.clone()).unwrap_or(0) as usize
+        3 + x.content.count_tokens(tokenizer_arc.clone(), &None).unwrap_or(0) as usize
     ).sum::<usize>();
     if tokens > max_tokens {
         return Err(format!(

@@ -7,16 +7,15 @@ use serde::Deserialize;
 use tokio::sync::RwLock as ARwLock;
 use crate::subchat::{subchat, subchat_single};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::ChatMessageRaw;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::scratchpads::multimodality::{into_chat_messages, into_chat_messages_raw};
+use crate::http::routers::v1::chat::deserialize_messages_from_post;
 
 
 #[derive(Deserialize)]
 struct SubChatPost {
     model_name: String,
-    messages: Vec<ChatMessageRaw>,
+    messages: Vec<serde_json::Value>,
     wrap_up_depth: usize,
     wrap_up_tokens_cnt: usize,
     tools_turn_on: Vec<String>,
@@ -29,7 +28,7 @@ pub async fn handle_v1_subchat(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<SubChatPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    let messages = into_chat_messages(&post.messages);
+    let messages = deserialize_messages_from_post(&post.messages)?;
 
     let top_n = 7;
     let fake_n_ctx = 4096;
@@ -51,7 +50,9 @@ pub async fn handle_v1_subchat(
         None,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
-    let new_messages = new_messages.into_iter().map(|msgs|into_chat_messages_raw(&msgs)).collect::<Vec<Vec<_>>>();
+    let new_messages = new_messages.into_iter()
+        .map(|msgs|msgs.iter().map(|msg|msg.into_value(&None)).collect::<Vec<_>>())
+       .collect::<Vec<Vec<_>>>();
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();
     Ok(
         Response::builder()
@@ -65,7 +66,7 @@ pub async fn handle_v1_subchat(
 #[derive(Deserialize)]
 struct SubChatSinglePost {
     model_name: String,
-    messages: Vec<ChatMessageRaw>,
+    messages: Vec<serde_json::Value>,
     tools_turn_on: Vec<String>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
@@ -82,7 +83,7 @@ pub async fn handle_v1_subchat_single(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<SubChatSinglePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    let messages = into_chat_messages(&post.messages);
+    let messages = deserialize_messages_from_post(&post.messages)?;
 
     let top_n = 7;
     let fake_n_ctx = 4096;
@@ -105,7 +106,9 @@ pub async fn handle_v1_subchat_single(
         None,
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)))?;
 
-    let new_messages = new_messages.into_iter().map(|msgs|into_chat_messages_raw(&msgs)).collect::<Vec<Vec<_>>>();
+    let new_messages = new_messages.into_iter()
+        .map(|msgs|msgs.iter().map(|msg|msg.into_value(&None)).collect::<Vec<_>>())
+        .collect::<Vec<Vec<_>>>();
     let resp_serialised = serde_json::to_string_pretty(&new_messages).unwrap();
     Ok(
         Response::builder()

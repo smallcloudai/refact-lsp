@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
 use axum::http::StatusCode;
@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use ropey::Rope;
 
 use crate::custom_error::ScratchError;
-use crate::scratchpads::multimodality::{chat_content_raw_from_value, ChatMultimodalElement, into_chat_messages, MultimodalElement};
+use crate::scratchpads::multimodality::MultimodalElement;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -98,22 +98,6 @@ pub enum ContextEnum {
     ChatMessage(ChatMessage),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(untagged)]
-pub enum ChatContentRaw {
-    SimpleText(String),
-    Multimodal(Vec<ChatMultimodalElement>),
-    MultimodalInner(Vec<MultimodalElement>),
-}
-
-pub fn deserialize_chat_content_raw<'de, D>(deserializer: D) -> Result<ChatContentRaw, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
-    chat_content_raw_from_value(value).map_err(serde::de::Error::custom)
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolFunction {
     pub arguments: String,
@@ -126,17 +110,6 @@ pub struct ChatToolCall {
     pub function: ChatToolFunction,
     #[serde(rename = "type")]
     pub tool_type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChatMessageRaw {
-    pub role: String,
-    #[serde(deserialize_with="deserialize_chat_content_raw")]
-    pub content: ChatContentRaw,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
-    #[serde(default)]
-    pub tool_call_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -159,15 +132,12 @@ pub struct ChatUsage {
     pub total_tokens: usize,   // TODO: remove (can produce self-contradictory data when prompt+completion != total)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ChatMessage {
     pub role: String,
     pub content: ChatContent,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
-    #[serde(default)]
     pub tool_call_id: String,
-    #[serde(default)]
     pub usage: Option<ChatUsage>,
 }
 
@@ -184,8 +154,8 @@ pub struct SubchatParameters {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct ChatPostRaw {
-    pub messages: Vec<ChatMessageRaw>,
+pub struct ChatPost {
+    pub messages: Vec<serde_json::Value>,
     #[serde(default)]
     pub parameters: SamplingParameters,
     #[serde(default)]
@@ -211,45 +181,8 @@ pub struct ChatPostRaw {
     #[allow(dead_code)]
     #[serde(default)]
     pub chat_id: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatPost {
-    pub messages: Vec<ChatMessage>,
-    pub parameters: SamplingParameters,
-    pub model: String,
-    pub scratchpad: String,
-    pub stream: Option<bool>,
-    pub temperature: Option<f32>,
-    pub max_tokens: usize,
-    pub n: Option<usize>,
-    pub tools: Option<Vec<serde_json::Value>>,
-    pub tool_choice: Option<String>,
-    pub only_deterministic_messages: bool,  // means don't sample from the model
-    pub subchat_tool_parameters: IndexMap<String, SubchatParameters>, // tool_name: {model, allowed_context, temperature}
-    pub postprocess_parameters: PostprocessSettings,
-    pub chat_id: String,
-}
-
-impl ChatPost {
-    pub fn from_raw(raw: ChatPostRaw) -> Self {
-        ChatPost {
-            messages: into_chat_messages(&raw.messages),
-            parameters: raw.parameters,
-            model: raw.model,
-            scratchpad: raw.scratchpad,
-            stream: raw.stream,
-            temperature: raw.temperature,
-            max_tokens: raw.max_tokens,
-            n: raw.n,
-            tools: raw.tools,
-            tool_choice: raw.tool_choice,
-            only_deterministic_messages: raw.only_deterministic_messages,
-            subchat_tool_parameters: raw.subchat_tool_parameters,
-            postprocess_parameters: raw.postprocess_parameters,
-            chat_id: raw.chat_id,
-        }
-    }
+    #[serde(default)]
+    pub style: Option<String>,
 }
 
 fn default_true() -> bool {

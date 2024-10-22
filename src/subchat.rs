@@ -2,16 +2,16 @@ use std::sync::Arc;
 use std::collections::HashSet;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{error, info, warn};
 
 use crate::tools::tools_description::{tools_merged_and_filtered, tool_description_list_from_yaml};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{SamplingParameters, PostprocessSettings, ChatPost, ChatMessage, ChatUsage, ChatMessageRaw, ChatToolCall};
+use crate::call_validation::{SamplingParameters, PostprocessSettings, ChatPost, ChatMessage, ChatUsage, ChatToolCall};
 use crate::global_context::{GlobalContext, try_load_caps_quickly_if_not_present};
 use crate::http::routers::v1::chat::lookup_chat_scratchpad;
 use crate::scratchpad_abstract::ScratchpadAbstract;
-use crate::scratchpads::multimodality::{chat_content_raw_from_value, into_chat_messages};
+use crate::scratchpads::multimodality::chat_content_raw_from_value;
 use crate::yaml_configs::customization_loader::load_customization;
 
 
@@ -39,7 +39,7 @@ async fn create_chat_post_and_scratchpad(
     let tconfig = load_customization(global_context.clone(), true).await?;
 
     let mut chat_post = ChatPost {
-        messages: messages.iter().cloned().cloned().collect::<Vec<_>>(),
+        messages: messages.iter().map(|x|json!(x)).collect(),
         parameters: SamplingParameters {
             max_new_tokens,
             temperature,
@@ -59,6 +59,7 @@ async fn create_chat_post_and_scratchpad(
         subchat_tool_parameters: tconfig.subchat_tool_parameters.clone(),
         postprocess_parameters: PostprocessSettings::new(),
         chat_id: "".to_string(),
+        style: None,
     };
 
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
@@ -78,6 +79,7 @@ async fn create_chat_post_and_scratchpad(
         caps,
         model_name.to_string(),
         &chat_post,
+        &messages.into_iter().cloned().collect::<Vec<_>>(),
         &scratchpad_name,
         &scratchpad_patch,
         false,
@@ -129,12 +131,11 @@ async fn chat_interaction_non_stream(
             }
         });
 
-    let det_messages_raw = j.get("deterministic_messages")
+    let det_messages = j.get("deterministic_messages")
         .and_then(|value| value.as_array())
         .and_then(|arr| {
-            serde_json::from_value::<Vec<ChatMessageRaw>>(Value::Array(arr.clone())).ok()
+            serde_json::from_value::<Vec<ChatMessage>>(Value::Array(arr.clone())).ok()
         }).unwrap_or_else(Vec::new);
-    let det_messages = into_chat_messages(&det_messages_raw);
 
     let mut results = vec![];
 

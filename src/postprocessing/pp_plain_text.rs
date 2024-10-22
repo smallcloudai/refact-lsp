@@ -33,12 +33,13 @@ pub async fn postprocess_plain_text(
     plain_text_messages: Vec<&ChatMessage>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     tokens_limit: usize,
+    style: &Option<String>,
 ) -> (Vec<ChatMessage>, usize) {
     if plain_text_messages.is_empty() {
         return (vec![], tokens_limit);
     }
     let mut messages_sorted = plain_text_messages.clone();
-    messages_sorted.sort_by(|a, b| a.content.size_estimate(tokenizer.clone()).cmp(&b.content.size_estimate(tokenizer.clone())));
+    messages_sorted.sort_by(|a, b| a.content.size_estimate(tokenizer.clone(), style).cmp(&b.content.size_estimate(tokenizer.clone(), style)));
 
     let mut tok_used_global = 0;
     let mut tok_per_m = tokens_limit / messages_sorted.len();
@@ -63,12 +64,11 @@ pub async fn postprocess_plain_text(
                         el_cloned.m_content = limit_text_content(&tokenizer_guard, &el_cloned.m_content, &mut tok_used, tok_per_m);
                         new_content.push(el_cloned)
                     } else if element.is_image() {
-                        let tokens = element.count_tokens(None).unwrap() as usize;
+                        let tokens = element.count_tokens(None, style).unwrap() as usize;
                         if tok_used + tokens > tok_per_m {
                             let new_el = MultimodalElement {
                                 m_type: "text".to_string(),
                                 m_content: "Image truncated: too many tokens".to_string(),
-                                provider: element.provider.clone(),
                             };
                             new_content.push(new_el);
                         } else {
