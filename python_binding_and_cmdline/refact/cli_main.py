@@ -5,6 +5,7 @@ import argparse
 import requests
 import random
 import termcolor
+import json
 from typing import Any, Optional
 
 from prompt_toolkit import PromptSession, Application, print_formatted_text
@@ -17,13 +18,14 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.widgets import TextArea
 
-from refact.chat_client import Message
 from refact.cli_inspect import inspect_app, open_label
 from refact.cli_streaming import the_chatting_loop, print_response, get_entertainment_box
 from refact.cli_streaming import stop_streaming, is_not_streaming_condition, start_streaming
+from refact import chat_client
 from refact import cli_streaming
 from refact import cli_printing
 from refact import cli_export
+from refact import traj_compressor
 from refact.cli_app_switcher import start_app, exit_all_apps, push_app
 from refact import cli_statusbar, cli_settings
 from refact.lsp_runner import LSPServerRunner
@@ -34,7 +36,7 @@ app: Optional[Application] = None
 
 
 async def answer_question_in_arguments(settings, arg_question):
-    cli_streaming.add_streaming_message(Message(role="user", content=arg_question))
+    cli_streaming.add_streaming_message(chat_client.Message(role="user", content=arg_question))
     await the_chatting_loop(settings.model, max_auto_resubmit=4)
 
 
@@ -45,7 +47,7 @@ Refact Agent is essentially its tools, ask: "what tools do you have?"
 '''.strip().split('\n')
 
 
-async def welcome_message(settings: cli_settings.CmdlineSettings, tip: str):
+async def welcome_message(settings: cli_settings.CmdlineArgs, tip: str):
     text = f"""
 ~/.cache/refact/cli.yaml                -- set up this program
 ~/.cache/refact/bring-your-own-key.yaml -- set up models you want to use
@@ -54,7 +56,10 @@ async def welcome_message(settings: cli_settings.CmdlineSettings, tip: str):
 Project: {settings.project_path}
 To exit, type 'exit' or Ctrl+D. {tip}.
 """
-    print(termcolor.colored(text.strip(), "white", None, ["dark"]))
+    cli_printing.print_formatted_text(FormattedText([
+        (f"fg:#707070", text.strip()),
+    ]))
+
 
 kb = KeyBindings()
 
@@ -119,10 +124,23 @@ def on_submit(buffer):
         if args[0] == "/export":
             loop = asyncio.get_event_loop()
             loop.create_task(cli_export.think_of_good_filename_and_export(cli_streaming.streaming_messages))
+            return
+        elif args[0] == "/hint":
+            if cli_streaming.streaming_messages[-1].role != "assistant":
+                print_formatted_text(f"\nthe last message is not role=\"assistant\", you can't use /hint here")
+                return
+            cli_streaming.streaming_messages.pop()
+            if cli_streaming.streaming_messages[-1].role == "cd_instruction":
+                cli_streaming.streaming_messages.pop()
+            cli_streaming.streaming_messages.append(chat_client.Message(
+                role="cd_instruction",
+                content=("💿 Hint: %s" % " ".join(args[1:])),
+            ))
+            user_input = ""
         else:
             print_formatted_text(f"\nchat> {user_input}")
             print_formatted_text(f"\nunknown command %s" % args[0])
-        return
+            return
 
     elif user_input == "" and len(cli_streaming.streaming_messages) > 0:
         last_message = cli_streaming.streaming_messages[-1]
@@ -132,6 +150,7 @@ def on_submit(buffer):
             return
 
     elif user_input.strip() == "":
+        print_formatted_text("\n")
         return
 
     elif user_input.startswith("?"):
@@ -145,14 +164,14 @@ def on_submit(buffer):
 
     if user_input.strip() != "":
         print_response(f"\nchat> {user_input}\n")
+        cli_streaming.add_streaming_message(chat_client.Message(role="user", content=user_input))
 
     start_streaming()
 
     # print_response("\nwait\n")
-    cli_streaming.add_streaming_message(Message(role="user", content=user_input))
 
     async def asyncfunc():
-        await the_chatting_loop(cli_settings.args.model, max_auto_resubmit=(1 if cli_settings.args.always_pause else 4))
+        await the_chatting_loop(cli_settings.args.model, max_auto_resubmit=(1 if cli_settings.args.always_pause else 6))
         if len(cli_streaming.streaming_messages) == 0:
             return
         # cli_streaming.print_response("\n")  # flush_response inside
@@ -162,10 +181,10 @@ def on_submit(buffer):
             for tool_call in last_message.tool_calls:
                 function = tool_call.function
                 cli_printing.print_formatted_text(FormattedText([
-                    (f"fg:#808080", f"🔨PAUSED {function.name}({function.arguments})\n")
+                    (f"fg:#707070", f"🔨PAUSED {function.name}({function.arguments})\n")
                 ]))
             cli_printing.print_formatted_text(FormattedText([
-                (f"fg:#808080", f"tool calls paused because of max_auto_resubmit, press Enter to submit"),
+                (f"fg:#707070", f"tool calls paused because of max_auto_resubmit, press Enter to submit"),
             ]))
 
     loop = asyncio.get_event_loop()
@@ -190,9 +209,11 @@ async def chat_main():
     parser.add_argument('--model', type=str, help="Specify the model to use")
     parser.add_argument('--experimental', type=bool, default=False, help="Enable experimental features, such as new integrations")
     parser.add_argument('--xdebug', type=int, default=0, help="Connect to refact-lsp on the given port, as opposed to starting a new refact-lsp process")
-    parser.add_argument('--always-pause', type=bool, default=False, help="Pause even if the model tries to run tools, normally that's submitteed automatically")
+    parser.add_argument('--always-pause', action='store_true', help="Pause even if the model tries to run tools, normally that's submitted automatically")
+    parser.add_argument('--start-with', type=str, default=False, help="Start with messages in a .json file, the format is [msg, msg, ...]")
+    parser.add_argument('--compressor', action='store_true', help="Compress trajectory that comes from reading --start-with and exit")
     parser.add_argument('question', nargs=argparse.REMAINDER, help="You can continue your question in the command line after --")
-    args = parser.parse_args(before_minus_minus)
+    args_parsed = parser.parse_args(before_minus_minus)
     arg_question = " ".join(after_minus_minus)
 
     history_fn = os.path.expanduser("~/.cache/refact/cli_history")
@@ -248,9 +269,9 @@ async def chat_main():
         refact_args.append("--vecdb")
         refact_args.append("--vecdb-max-files")
         refact_args.append(str(cli_settings.cli_yaml.vecdb_max_files))
-    if args.path_to_project:
+    if args_parsed.path_to_project:
         refact_args.append("--workspace-folder")
-        refact_args.append(args.path_to_project)
+        refact_args.append(args_parsed.path_to_project)
     lsp_runner = LSPServerRunner(
         refact_args,
         wait_for_ast_vecdb=False,
@@ -258,18 +279,33 @@ async def chat_main():
         verbose=False
     )
 
-    lsp_runner.set_xdebug(args.xdebug)
+    if args_parsed.start_with:
+        with open(args_parsed.start_with, "r") as f:
+            startwith = json.loads(f.read())
+        for msg_j in startwith:
+            cli_streaming.process_streaming_data(msg_j)
+        cli_streaming.flush_response()
+        cli_printing.print_formatted_text(FormattedText([
+            (f"fg:#808080", "\n\n -- started with %d messages --\n" % len(cli_streaming.streaming_messages)),
+        ]))
+
+    lsp_runner.set_xdebug(args_parsed.xdebug)
     async with lsp_runner:
         caps = await cli_settings.fetch_caps(lsp_runner.base_url())
-        cli_settings.args = cli_settings.CmdlineSettings(caps, args)
+        cli_settings.args = cli_settings.CmdlineArgs(caps, args_parsed)
 
         if cli_settings.args.model not in caps.code_chat_models:
             known_models = list(caps.code_chat_models.keys())
             print(f"model {cli_settings.args.model} is unknown, pick one of {known_models}")
             return
 
-        await welcome_message(cli_settings.args, random.choice(tips_of_the_day))
         cli_statusbar.model_section = f"model {cli_settings.args.model} context {cli_settings.args.n_ctx()}"
+
+        if args_parsed.compressor:
+            await traj_compressor.trajectory_compressor(cli_streaming.streaming_messages)
+            return
+
+        await welcome_message(cli_settings.args, random.choice(tips_of_the_day))
 
         if arg_question:
             print(arg_question)
