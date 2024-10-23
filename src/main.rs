@@ -55,6 +55,8 @@ mod forward_to_openai_endpoint;
 mod restream;
 
 mod call_validation;
+mod chore_schema;
+mod chore_db;
 mod dashboard;
 mod lsp;
 mod http;
