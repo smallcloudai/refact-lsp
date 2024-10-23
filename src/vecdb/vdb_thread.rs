@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::time::SystemTime;
 use std::collections::HashSet;
+use indexmap::IndexMap;
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock, Notify as ANotify};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -424,7 +425,7 @@ impl FileVectorizerService {
                 state: "starting".to_string(),
                 queue_additions: true,
                 vecdb_max_files_hit: false,
-                errors: HashMap::new(),
+                errors: IndexMap::new(),
             }
         ));
         FileVectorizerService {
