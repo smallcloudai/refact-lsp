@@ -51,7 +51,7 @@ pub trait Tool: Send + Sync {
     }
 }
 
-async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
+pub async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
     let yaml_path = cache_dir.join("integrations.yaml");
 
     let integrations_yaml = tokio::fs::read_to_string(&yaml_path).await.map_err(
