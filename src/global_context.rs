@@ -153,6 +153,7 @@ pub struct GlobalContext {
     pub privacy_settings: Arc<PrivacySettings>,
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
     pub codelens_cache: Arc<AMutex<crate::http::routers::v1::code_lens::CodeLensCache>>,
+    pub chore_db: Arc<AMutex<crate::chore_schema::ChoreDB>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -335,6 +336,7 @@ pub async fn create_global_context(
         privacy_settings: Arc::new(PrivacySettings::default()),
         integration_sessions: HashMap::new(),
         codelens_cache: Arc::new(AMutex::new(crate::http::routers::v1::code_lens::CodeLensCache::default())),
+        chore_db: crate::chore_db::chore_db_init("/tmp/chore.db".to_string()).await,
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {
