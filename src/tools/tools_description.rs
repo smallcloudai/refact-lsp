@@ -297,7 +297,7 @@ tools:
     parameters:
       - name: "command"
         type: "string"
-        description: "Chrome has this commands: navigate_to url, screenshot, html, reload."
+        description: "Chrome has this commands: navigate_to uri, screenshot, html, reload."
     parameters_required:
       - "command"
 "####;
