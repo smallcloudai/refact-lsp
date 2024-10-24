@@ -106,6 +106,7 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         if let Some(chrome_tool) = ToolChrome::new_if_configured(&integrations_value) {
             tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(chrome_tool) as Box<dyn Tool + Send>)));
         }
+        tools_all.insert("image_attach".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_image_attach::ToolImageAttach{}) as Box<dyn Tool + Send>)));
         #[cfg(feature="vecdb")]
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }
@@ -220,6 +221,15 @@ tools:
       - name: "skeleton"
         type: "boolean"
         description: "if true, files will be skeletonized - mostly only AST symbols will be visible"
+    parameters_required:
+      - "paths"
+
+  - name: "image_attach"
+    description: "Attach images to the chat."
+    parameters:
+      - name: "paths"
+        type: "string"
+        description: "Comma separated paths to images. Supports jpg, jpeg, png and svg formats."
     parameters_required:
       - "paths"
 
