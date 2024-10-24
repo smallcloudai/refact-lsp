@@ -69,4 +69,6 @@ docker:
   # Will be added as a label to containers, images, and other resources created by Refact Agent, defaults to "refact"
   label: "refact"
 
+  # Uncomment to execute a command inside the container when the thread starts. Regardless, refact-lsp will run independently of this setting.
+  # command: "npm run dev"
 "#;
