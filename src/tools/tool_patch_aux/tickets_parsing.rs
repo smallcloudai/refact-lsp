@@ -278,7 +278,7 @@ async fn retain_non_applied_tickets(
                 let file_text = context_file.file_content.clone();
                 let line_ending = if file_text.contains("\r\n") { "\r\n" } else { "\n" };
                 let file_lines = file_text.split(line_ending).collect::<Vec<&str>>();
-                let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2() - 1].to_vec();
+                let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2()].to_vec();
                 let (indent_spaces, indent_tabs) = minimal_common_indent(&symbol_lines);
 
                 let ticket_code = ticket.code.clone();
@@ -292,10 +292,10 @@ async fn retain_non_applied_tickets(
 
                 let search_in_code = match locate_as {
                     PatchLocateAs::BEFORE => {
-                        Some(file_lines[..symbol.full_line1() - 1].to_vec())
+                        Some(file_lines[.. symbol.full_line1() - 1].to_vec())
                     }
                     PatchLocateAs::AFTER => {
-                        Some(file_lines[symbol.full_line2() - 1 ..].to_vec())
+                        Some(file_lines[symbol.full_line2() ..].to_vec())
                     }
                     _ => None
                 };
@@ -318,7 +318,7 @@ async fn retain_non_applied_tickets(
 
                 match ticket.locate_symbol.clone() {
                     Some(symbol) => {
-                        let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2() - 1].to_vec();
+                        let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2()].to_vec();
                         let (indent_spaces, indent_tabs) = minimal_common_indent(&symbol_lines);
 
                         let ticket_code = ticket.code.clone();

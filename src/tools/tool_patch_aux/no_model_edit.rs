@@ -34,7 +34,7 @@ pub async fn add_to_file_diff(
     let file_text = context_file.file_content.clone();
     let line_ending = if file_text.contains("\r\n") { "\r\n" } else { "\n" };
     let file_lines = file_text.split(line_ending).collect::<Vec<&str>>();
-    let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2() - 1].to_vec();
+    let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2()].to_vec();
     let file_lines = file_lines.into_iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let (indent_spaces, indent_tabs) = minimal_common_indent(&symbol_lines);
 
@@ -102,7 +102,7 @@ pub async fn rewrite_symbol_diff(
     let file_text = context_file.file_content.clone();
     let line_ending = if file_text.contains("\r\n") { "\r\n" } else { "\n" };
     let file_lines = file_text.split(line_ending).collect::<Vec<&str>>();
-    let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2() - 1].to_vec();
+    let symbol_lines = file_lines[symbol.full_line1() - 1 .. symbol.full_line2()].to_vec();
     let (indent_spaces, indent_tabs) = minimal_common_indent(&symbol_lines);
 
     let ticket_code = ticket.code.clone();
