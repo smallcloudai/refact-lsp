@@ -293,13 +293,17 @@ tools:
   - name: "chrome"
     agentic: true
     experimental: true
-    description: "Web browser. Opens a tab and operates in it."
+    description: "Web browser. Operates in given tab."
     parameters:
       - name: "command"
         type: "string"
         description: "Chrome has this commands: navigate_to uri, screenshot, html, reload."
+      - name: "tab"
+        type: "string"
+        description: "Tab where command will be executed."
     parameters_required:
       - "command"
+      - "tab"
 "####;
 
 #[allow(dead_code)]
