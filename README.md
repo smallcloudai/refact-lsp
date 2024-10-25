@@ -152,7 +152,7 @@ When using Refact self-hosted server, telemetry goes to the self-hosted server, 
 ## Caps File
 
 The capabilities file stores the same things as [bring-your-own-key.yaml](bring_your_own_key), the file describes how to access AI models.
-The `--address-url` parameter controls where to get this file, it defaults to `~/.cache/refact/bring-your-own-key.yaml`.
+The `--address-url` parameter controls where to get this file, it defaults to `~/.config/refact/bring-your-own-key.yaml`.
 If it's a URL, the executable fetches `$URL/refact-caps` to know what to do. This is especially useful to connect to Refact Self-Hosting Server,
 because the configuration does not need to be copy-pasted among engineers who use the server.
 
