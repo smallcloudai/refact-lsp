@@ -1,6 +1,7 @@
 pub mod integr_github;
 pub mod integr_pdb;
 pub mod integr_chrome;
+pub mod docker;
 pub mod sessions;
 pub mod process_io_utils;
 
@@ -14,6 +15,12 @@ pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure 
 commands_need_confirmation:
   - "gh * delete*"
 commands_deny:
+  - "docker* rm *"
+  - "docker* remove *"
+  - "docker* rmi *"
+  - "docker* pause *"
+  - "docker* stop *"
+  - "docker* kill *"
   - "gh auth token*"
 
 
@@ -34,4 +41,34 @@ chrome:
   window_size: [1024, 768]   # Size of the window, defaults to [1024, 768]
   idle_browser_timeout: 600  # Timeout in seconds for idle browsers, defaults to 600 seconds
 
+
+# --- Docker integration ---
+docker:
+  connect_to_daemon_at: "unix:///var/run/docker.sock"  # Path to the Docker daemon. For remote Docker, the path to the daemon on the remote server.
+  # docker_cli_path: "/usr/local/bin/docker"  # Uncomment to set a custom path for the docker cli, defaults to "docker"
+
+  # Uncomment the following to connect to a remote Docker daemon (uncomment all of them)
+  # Docker and necessary ports will be forwarded for container communication. No additional commands will be executed over SSH.
+  # ssh_config:
+  #   host: "<your_server_domain_or_ip_here>"
+  #   user: "root"
+  #   port: 22
+  #   identity_file: "~/.ssh/id_rsa"
+
+  run_chat_threads_inside_container: false
+
+  # The folder inside the container where the workspace is mounted, refact-lsp will start there, defaults to "/app"
+  # container_workspace_folder: "/app"  
+
+  # Image ID for running containers, which can later be selected in the UI before starting a chat thread.
+  # docker_image_id: "079b939b3ea1"
+
+  # Path to the LSP binary on the host machine, to be bound into the containers.
+  host_lsp_path: "/opt/refact/bin/refact-lsp"
+
+  # Will be added as a label to containers, images, and other resources created by Refact Agent, defaults to "refact"
+  label: "refact"
+
+  # Uncomment to execute a command inside the container when the thread starts. Regardless, refact-lsp will run independently of this setting.
+  # command: "npm run dev"
 "#;

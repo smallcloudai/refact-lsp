@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_pdb::ToolPdb;
 use crate::integrations::integr_chrome::ToolChrome;
 
+use crate::integrations::docker::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfimationConfig { // todo: fix typo
@@ -24,6 +26,8 @@ pub struct CommandsRequireConfimationConfig { // todo: fix typo
 
 #[async_trait]
 pub trait Tool: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+
     async fn tool_execute(
         &mut self,
         ccx: Arc<AMutex<AtCommandsContext>>,
@@ -47,7 +51,7 @@ pub trait Tool: Send + Sync {
     }
 }
 
-async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
+pub async fn read_integrations_value(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
     let yaml_path = cache_dir.join("integrations.yaml");
 
     let integrations_yaml = tokio::fs::read_to_string(&yaml_path).await.map_err(
@@ -105,6 +109,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(chrome_tool) = ToolChrome::new_if_configured(&integrations_value) {
             tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(chrome_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(docker_tool) = ToolDocker::new_if_configured(&integrations_value) {
+            tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(docker_tool) as Box<dyn Tool + Send>)));
         }
         #[cfg(feature="vecdb")]
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
@@ -294,6 +301,18 @@ tools:
           html
           reload
     parameters_required:
+      - "command"
+
+  - name: "docker"
+    agentic: true
+    experimental: true
+    description: "Access to docker cli, in a non-interactive way, don't open a shell."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Examples: docker images"
+    parameters_required:
+      - "project_dir"
       - "command"
 "####;
 

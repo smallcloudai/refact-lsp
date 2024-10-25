@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::tools::tools_execute::run_tools;
+use crate::integrations::docker::integr_docker::ToolDocker;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
@@ -18,6 +18,7 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, system_prompt_add_workspace_info};
+use crate::tools::tools_execute::{run_tools_locally, run_tools_remotely};
 
 
 const DEBUG: bool = false;
@@ -103,18 +104,32 @@ impl ScratchpadAbstract for ChatPassthrough {
         ccx: Arc<AMutex<AtCommandsContext>>,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        let (n_ctx, gcx) = {
+        let (n_ctx, gcx, docker_tool_maybe) = {
             let ccx_locked = ccx.lock().await;
-            (ccx_locked.n_ctx, ccx_locked.global_context.clone())
+            (ccx_locked.n_ctx, ccx_locked.global_context.clone(), ccx_locked.at_tools.get("docker").cloned())
+        };
+        let run_chat_threads_inside_container = match docker_tool_maybe {
+            Some(docker_tool) => {
+                let docker_tool_locked = docker_tool.lock().await;
+                let docker_tool_downcasted = docker_tool_locked.as_any().downcast_ref::<ToolDocker>()
+                    .ok_or_else(|| "Failed to downcast docker tool".to_string())?;
+                docker_tool_downcasted.integration_docker.run_chat_threads_inside_container
+            },
+            None => false,
         };
         let style = self.post.style.clone();
+        let is_inside_container = gcx.read().await.cmdline.inside_container;
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {
             (self.messages.clone(), self.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await;
+            (messages, _) = if run_chat_threads_inside_container && !is_inside_container {
+                run_tools_remotely(ccx.clone(), &self.post.model, sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
+            } else {
+                run_tools_locally(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await
+            }
         };
         let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);

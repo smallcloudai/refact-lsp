@@ -20,6 +20,7 @@ use crate::caps::CodeAssistantCaps;
 use crate::completion_cache::CompletionCache;
 use crate::custom_error::ScratchError;
 use crate::files_in_workspace::DocumentsState;
+use crate::integrations::docker::docker_ssh_tunnel_utils::SshTunnel;
 use crate::integrations::sessions::IntegrationSession;
 use crate::privacy::PrivacySettings;
 use crate::telemetry::telemetry_structs;
@@ -86,6 +87,8 @@ pub struct CommandLine {
 
     #[structopt(long, help="Enable experimental features, such as new integrations.")]
     pub experimental: bool,
+    #[structopt(long, help="Indicates whether this application is running inside a docker container.")]
+    pub inside_container: bool,
 }
 
 impl CommandLine {
@@ -151,6 +154,7 @@ pub struct GlobalContext {
     pub privacy_settings: Arc<PrivacySettings>,
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
     pub codelens_cache: Arc<AMutex<crate::http::routers::v1::code_lens::CodeLensCache>>,
+    pub docker_ssh_tunnel: Arc<AMutex<Option<SshTunnel>>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -333,6 +337,7 @@ pub async fn create_global_context(
         privacy_settings: Arc::new(PrivacySettings::default()),
         integration_sessions: HashMap::new(),
         codelens_cache: Arc::new(AMutex::new(crate::http::routers::v1::code_lens::CodeLensCache::default())),
+        docker_ssh_tunnel: Arc::new(AMutex::new(None)),
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {
