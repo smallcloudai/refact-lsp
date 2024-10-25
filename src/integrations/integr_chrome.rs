@@ -17,6 +17,7 @@ use crate::tools::tools_description::Tool;
 use reqwest::Client;
 use std::path::PathBuf;
 use headless_chrome::{Browser, LaunchOptions, Tab};
+use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use serde::{Deserialize, Serialize};
 
