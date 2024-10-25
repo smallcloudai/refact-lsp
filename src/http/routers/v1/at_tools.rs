@@ -44,7 +44,8 @@ pub async fn handle_v1_tools(
         vec![]
     });
 
-    let tools_openai_stype = tool_desclist.into_iter().map(|x| x.into_openai_style()).collect::<Vec<_>>();
+    // let tools_openai_stype = tool_desclist.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>();
+    let tools_openai_stype = tool_desclist.into_iter().map(|x|x.into_anthropic_style()).collect::<Vec<_>>();
 
     let body = serde_json::to_string_pretty(&tools_openai_stype).map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     Ok(Response::builder()

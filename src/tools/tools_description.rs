@@ -324,6 +324,8 @@ tools:
           screenshot
           html
           reload
+          click <x> <y>
+          type_str <some text>
       - name: "tab"
         type: "string"
         description: "Tab where command will be executed."

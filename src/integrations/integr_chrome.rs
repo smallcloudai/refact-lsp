@@ -30,6 +30,12 @@ pub struct ToolChrome {
     integration_chrome: IntegrationChrome,
 }
 
+// NOTE:
+// we can connect to the running process with opened tabs
+// so let's add them if they exist
+// another problem with gui browser is events: if you do something with the browser,
+// existing connection will be terminated
+// so we need to handle session with care!
 pub struct ChromeSession {
     #[allow(dead_code)]    // it's not actually useless code, it keeps strong reference on browser so it doesn't die
     browser: Browser,
@@ -175,6 +181,20 @@ async fn navigate_to(tab: &Arc<Tab>, url: &String) -> Result<String, String> {
     Ok(format!("Chrome tab navigated to {}", tab.get_url()))
 }
 
+async fn click_on(tab: &Arc<Tab>, x_str: &String, y_str: &String) -> Result<String, String> {
+    let x = x_str.parse::<f64>().unwrap();
+    let y = y_str.parse::<f64>().unwrap();
+    let point = Point {x: x.clone(), y: y.clone()};
+    tab.click_point(point.clone()).map_err(|e| e.to_string())?;
+    tab.wait_until_navigated().map_err(|e| e.to_string())?;
+    Ok(format!("Successfully clicked on `{} {}`", x, y))
+}
+
+async fn type_str(tab: &Arc<Tab>, text: &String) -> Result<String, String> {
+    tab.type_str(text.as_str()).map_err(|e| e.to_string())?;
+    Ok(format!("Successfully typed `{}`", text.clone()))
+}
+
 async fn interact_with_chrome(
     tab_name: &String,
     command_args: &Vec<String>,
@@ -220,6 +240,25 @@ async fn interact_with_chrome(
         }
     } else if command_args[0] == "screenshot" {
         force_screenshot = true;
+    } else if command_args[0] == "click" {
+        if command_args.len() < 3 {
+            tool_log.push(format!("Missing one or both location arguments `x` and `y`: {:?}. Call this command another time using format `click x y`.", command_args));
+        } else {
+            let content = click_on(&tab, &command_args[1], &command_args[2]).await.map_err(
+                |e| format!("Failed to click on `{} {}`: {}.", command_args[1], command_args[2], e)
+            )?;
+            tool_log.push(content);
+        }
+    } else if command_args[0] == "type_str" {
+        if command_args.len() < 2 {
+            tool_log.push("type_str command requires text. Call this command again wth text you need to type.".to_string());
+        } else {
+            let text = command_args[1..].join(" ");
+            let content = type_str(&tab, &text).await.map_err(
+                |e| format!("Failed to type text: {}.", e)
+            )?;
+            tool_log.push(content);
+        }
     } else if command_args[0] == "html" {
         let client = Client::builder()
             .build()
