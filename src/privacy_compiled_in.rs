@@ -13,7 +13,8 @@ privacy_rules:
         - "*/secret_project2/*.txt"
         - "*.pem"
 
-    only_send_to_servers_I_control:       # You can set up which ones you control in bring-your-own-key.yaml, otherwise you control none
+    # Restrict files to self-hosted and Refact servers; code completion works, but they are not sent to third-party models like GPT.
+    only_send_to_servers_I_control:       
         - "secret_passwords.txt"
 
 
