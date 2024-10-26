@@ -14,6 +14,8 @@ use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_gitlab::ToolGitlab;
 use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_chrome::ToolChrome;
+use crate::integrations::integr_postgres::ToolPostgres;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -105,6 +107,12 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Inde
         }
         if let Some(pdb_tool) = ToolPdb::new_if_configured(&integrations_value) {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(pdb_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(chrome_tool) = ToolChrome::new_if_configured(&integrations_value) {
+            tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(chrome_tool) as Box<dyn Tool + Send>)));
+        }
+        if let Some(postgres_tool) = ToolPostgres::new_if_configured(&integrations_value) {
+            tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(postgres_tool) as Box<dyn Tool + Send>)));
         }
         #[cfg(feature="vecdb")]
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
@@ -294,6 +302,36 @@ tools:
         description: "Examples: 'python -m pdb script.py', 'break module_name.function_name', 'break 10', 'continue', 'print(variable_name)', 'list', 'quit'"
     parameters_required:
       - "command"
+
+  - name: "chrome"
+    agentic: true
+    experimental: true
+    description: "A real web browser with graphical interface."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: |
+          Supports these commands:
+          navigate_to <url>
+          screenshot
+          html
+          reload
+    parameters_required:
+      - "command"
+
+  - name: "postgres"
+    agentic: true
+    experimental: true
+    description: "PostgreSQL integration, can run a single query per call."
+    parameters:
+      - name: "query"
+        type: "string"
+        description: |
+          Don't forget semicolon at the end, examples:
+          SELECT * FROM table_name;
+          CREATE INDEX my_index_users_email ON my_users (email);
+    parameters_required:
+      - "query"
 "####;
 
 #[allow(dead_code)]

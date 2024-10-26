@@ -17,7 +17,7 @@ use crate::knowledge::{lance_search, MemoriesDatabase};
 use crate::vecdb::vdb_cache::VecDBCache;
 use crate::vecdb::vdb_lance::VecDBHandler;
 use crate::vecdb::vdb_structs::{MemoRecord, MemoSearchResult, OngoingWork, SearchResult, VecDbStatus, VecdbConstants, VecdbSearch};
-use crate::vecdb::vdb_thread::{vectorizer_enqueue_dirty_memory, vectorizer_enqueue_files, FileVectorizerService};
+use crate::vecdb::vdb_thread::{vecdb_start_background_tasks, vectorizer_enqueue_dirty_memory, vectorizer_enqueue_files, FileVectorizerService};
 
 const VECDB_DISTANCE_REJECT_COMPLETELY: f32 = 0.25;  // XXX: it's actually a constant per embedding model, not universal for all models
 
@@ -254,12 +254,7 @@ impl VecDb {
     ) -> Vec<JoinHandle<()>> {
         info!("vecdb: start_background_tasks");
         vectorizer_enqueue_dirty_memory(self.vectorizer_service.clone()).await;
-        let my_tokenizer = self.constants.tokenizer.clone().unwrap();
-        return self.vectorizer_service.lock().await.vecdb_start_background_tasks(
-            self.vecdb_emb_client.clone(),
-            gcx.clone(),
-            my_tokenizer.clone(),
-        ).await;
+        return vecdb_start_background_tasks(self.vecdb_emb_client.clone(), self.vectorizer_service.clone(), gcx.clone()).await;
     }
 
     pub async fn vectorizer_enqueue_files(&self, documents: &Vec<Document>, process_immediately: bool) {
@@ -296,14 +291,13 @@ pub async fn memories_add(
     Ok(memid)
 }
 
-pub async fn memories_block_until_vectorized(
-    vec_db: Arc<AMutex<Option<VecDb>>>,
+
+pub async fn memories_block_until_vectorized_from_vectorizer(
+    vectorizer_service: Arc<AMutex<FileVectorizerService>>,
+    max_blocking_time_ms: usize
 ) -> Result<(), String> {
-    let vectorizer_service = {
-        let vec_db_guard = vec_db.lock().await;
-        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
-        vec_db.vectorizer_service.clone()
-    };
+    let max_blocking_duration = tokio::time::Duration::from_millis(max_blocking_time_ms as u64);
+    let start_time = std::time::Instant::now();
     let (vstatus, vstatus_notify) = {
         let service = vectorizer_service.lock().await;
         (service.vstatus.clone(), service.vstatus_notify.clone())
@@ -312,13 +306,38 @@ pub async fn memories_block_until_vectorized(
         let future: tokio::sync::futures::Notified = vstatus_notify.notified();
         {
             let vstatus_locked = vstatus.lock().await;
-            if vstatus_locked.state == "done" && !vstatus_locked.queue_additions {
+            if vstatus_locked.state == "done" && !vstatus_locked.queue_additions ||
+                start_time.elapsed() >= max_blocking_duration
+            {
                 break;
             }
         }
-        future.await;
+        let remaining_time = max_blocking_duration
+            .checked_sub(start_time.elapsed())
+            .unwrap_or_else(|| tokio::time::Duration::from_millis(0));
+        let sleep_duration = remaining_time
+            .checked_add(tokio::time::Duration::from_millis(50))
+            .unwrap_or_else(|| tokio::time::Duration::from_millis(50))
+            .max(tokio::time::Duration::from_millis(1));
+        tokio::select! {
+            _ = future => {},
+            _ = tokio::time::sleep(sleep_duration) => {},
+        }
     };
     Ok(())
+}
+
+pub async fn memories_block_until_vectorized(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    max_blocking_time_ms: usize
+) -> Result<(), String> {
+
+    let vectorizer_service = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.vectorizer_service.clone()
+    };
+    memories_block_until_vectorized_from_vectorizer(vectorizer_service, max_blocking_time_ms).await
 }
 
 pub async fn get_status(vec_db: Arc<AMutex<Option<VecDb>>>) -> Result<Option<VecDbStatus>, String> {
@@ -558,6 +577,9 @@ impl VecdbSearch for VecDb {
             return Err(embedding_mb.unwrap_err().to_string());
         }
         info!("search query {:?}, it took {:.3}s to vectorize the query", query, t0.elapsed().as_secs_f64());
+
+        memories_block_until_vectorized_from_vectorizer(self.vectorizer_service.clone(),
+                                                        5_000).await?;
 
         let mut handler_locked = self.vecdb_handler.lock().await;
         let t1 = std::time::Instant::now();

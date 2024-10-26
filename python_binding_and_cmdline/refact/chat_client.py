@@ -255,13 +255,16 @@ async def ask_using_http(
                     # print(">>>", line_str)
                     if callback is not None:
                         callback(j)
-                    if "choices" in j and j["choices"]:
-                        choice_collector.add_deltas(j["choices"])
+                    if "choices" in j:
+                        if j["choices"]:
+                            choice_collector.add_deltas(j["choices"])
                     elif "role" in j:
                         deterministic.append(Message(**j))
                     elif "subchat_id" in j:
                         map_key = j["tool_call_id"] + "__" + j["subchat_id"]
                         subchats[map_key].append(Message(**j["add_message"]))
+                    elif not j.get("choices") and j.get("usage"):
+                        pass
                     else:
                         print("unrecognized streaming data (2):", j)
                 end_str = buffer.decode('utf-8').strip()
