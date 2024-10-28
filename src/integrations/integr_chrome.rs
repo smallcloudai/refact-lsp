@@ -26,7 +26,12 @@ pub struct IntegrationChrome {
     pub chrome_path: Option<String>,
     pub window_size: Option<Vec<u32>>,
     pub idle_browser_timeout: Option<u32>,
+    #[serde(default = "default_headless")]
+    pub headless: bool,
 }
+
+fn default_headless() -> bool { true }
+
 pub struct ToolChrome {
     integration_chrome: IntegrationChrome,
 }
@@ -153,6 +158,7 @@ async fn start_chrome_session(
                 path,
                 window_size,
                 idle_browser_timeout,
+                headless: args.headless,
                 ..Default::default()
             };
             browser = Browser::new(launch_options).map_err(|e| e.to_string())?;
