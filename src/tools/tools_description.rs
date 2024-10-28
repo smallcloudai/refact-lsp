@@ -421,11 +421,47 @@ pub fn make_openai_tool_value(
     function_json
 }
 
+pub fn make_anthropic_tool_value(
+    name: String,
+    description: String,
+    parameters_required: Vec<String>,
+    parameters: Vec<ToolParam>,
+) -> Value {
+    let params_properties = parameters.iter().map(|param| {
+        (
+            param.name.clone(),
+            json!({
+                "type": param.param_type,
+                "description": param.description
+            })
+        )
+    }).collect::<serde_json::Map<_, _>>();
+    let function_json = json!({
+        "name": name,
+        "description": description,
+        "input_schema": {
+            "type": "object",
+            "properties": params_properties,
+            "required": parameters_required
+        }
+    });
+    function_json
+}
+
 impl ToolDesc {
     pub fn into_openai_style(self) -> Value {
         make_openai_tool_value(
             self.name,
             self.agentic,
+            self.description,
+            self.parameters_required,
+            self.parameters,
+        )
+    }
+
+    pub fn into_anthropic_style(self) -> Value {
+        make_anthropic_tool_value(
+            self.name,
             self.description,
             self.parameters_required,
             self.parameters,
