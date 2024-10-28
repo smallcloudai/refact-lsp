@@ -241,6 +241,20 @@ async fn interact_with_chrome(
         }
     } else if command_args[0] == "screenshot" {
         force_screenshot = true;
+    } else if command_args[0] == "html" {
+        let client = Client::builder()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let url = tab.get_url();
+        let response = client.get(url.clone()).send().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            tool_log.push(format!("Unable to fetch url: {}; status: {}", url, response.status()));
+        } else {
+            tool_log.push(response.text().await.map_err(|e| e.to_string())?);
+        }
+    } else if command_args[0] == "reload" {
+        tab.reload(false, None).map_err(|e| e.to_string())?;
+        tool_log.push(format!("Page {} reloaded", tab.get_url()));
     } else if command_args[0] == "click" {
         if command_args.len() < 3 {
             tool_log.push(format!("Missing one or both location arguments `x` and `y`: {:?}. Call this command another time using format `click x y`.", command_args));
@@ -260,20 +274,6 @@ async fn interact_with_chrome(
             )?;
             tool_log.push(content);
         }
-    } else if command_args[0] == "html" {
-        let client = Client::builder()
-            .build()
-            .map_err(|e| e.to_string())?;
-        let url = tab.get_url();
-        let response = client.get(url.clone()).send().await.map_err(|e| e.to_string())?;
-        if !response.status().is_success() {
-            tool_log.push(format!("Unable to fetch url: {}; status: {}", url, response.status()));
-        } else {
-            tool_log.push(response.text().await.map_err(|e| e.to_string())?);
-        }
-    } else if command_args[0] == "reload" {
-        tab.reload(false, None).map_err(|e| e.to_string())?;
-        tool_log.push(format!("Page {} reloaded", tab.get_url()));
     } else {
         return Err(format!("Unknown command: {:?}", command_args));
     }
