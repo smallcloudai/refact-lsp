@@ -29,6 +29,15 @@ struct CmdlineToolBackground {
 }
 
 #[derive(Deserialize)]
+struct CmdlineOutputFilter {
+    limit_lines: usize,
+    limit_chars: usize,
+    top_or_bottom: String,
+    look_for_keywords: Vec<String>,
+    lines_around_keywords: usize,
+}
+
+#[derive(Deserialize)]
 struct CmdlineToolConfig {
     description: String,
     parameters: Vec<ToolParam>,
@@ -38,6 +47,7 @@ struct CmdlineToolConfig {
     #[serde(default = "_default_timeout")]
     timeout: u64,
     background: Option<CmdlineToolBackground>,
+    output_filter: Option<CmdlineOutputFilter>,
 }
 
 fn _default_timeout() -> u64 {
@@ -92,6 +102,24 @@ fn _replace_args(x: &str, args_str: &HashMap<String, String>) -> String {
         result = result.replace(&format!("%{}%", key), value);
     }
     result
+}
+
+fn output_filter_apply(filter: &CmdlineOutputFilter, output: &str) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    let filtered_lines: Vec<&str>;
+
+    if filter.top_or_bottom == "top" {
+        filtered_lines = lines.iter().take(filter.limit_lines).cloned().collect();
+    } else {
+        filtered_lines = lines.iter().rev().take(filter.limit_lines).cloned().collect();
+    }
+
+    let result = filtered_lines.join("\n");
+    if !result.is_empty() {
+        format!("{}\n", result) // Append a newline if the result is not empty
+    } else {
+        result
+    }
 }
 
 async fn execute_blocking_command(
@@ -357,3 +385,32 @@ impl Tool for ToolCmdline {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cmdline_output_filter() {
+        let output_to_filter = r#"line1
+line2
+line3
+line4
+line5
+line6
+"#;
+
+        let filter = CmdlineOutputFilter {
+            limit_lines: 2,
+            limit_chars: 1000,
+            top_or_bottom: "top".to_string(),
+            look_for_keywords: vec![],
+            lines_around_keywords: 1,
+        };
+
+        let result = output_filter_apply(&filter, output_to_filter);
+        assert_eq!(result, "line1\nline2\n");
+    }
+}
+

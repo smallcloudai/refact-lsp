@@ -61,7 +61,7 @@ chrome:
 //     command_workdir: "%project_path%"
 //     timeout: 600
 //     description: "Run `make` inside a C/C++ project, or a similar project with a Makefile."
-//     parameters:
+//     parameters:    # this is what the model needs to produce, you can use %parameter% in command and workdir
 //       - name: "project_path"
 //         description: "absolute path to the project"
 
