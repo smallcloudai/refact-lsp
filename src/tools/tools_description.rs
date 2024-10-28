@@ -293,7 +293,7 @@ tools:
   - name: "chrome"
     agentic: true
     experimental: true
-    description: "Web browser. Operates in given tab."
+    description: "Web browser. Operates on given tab."
     parameters:
       - name: "command"
         type: "string"
@@ -301,6 +301,9 @@ tools:
       - name: "tab"
         type: "string"
         description: "Tab where command will be executed."
+      - name: "screenshot"
+        type: "boolean"
+        description: "Optionally make a screenshot of a tab."
     parameters_required:
       - "command"
       - "tab"
