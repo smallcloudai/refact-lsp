@@ -70,9 +70,9 @@ chrome:
 #    output_filter:                   # output filter is optional, can help if the output is very long to reduce it, preserving valuable information
 #      limit_lines: 50
 #      limit_chars: 10000
-#      valuable_top_or_bottom: "top"  # the useful infomation more likely to be at the top or bottom?
-#      grep: "(?i)error|warning"      # in contrast to regular grep this doesn't remove other lines from output, just prefers matching lines in output when approaching limit_lines or limit_chars
-#      grep_context_lines: 5          # leave that many lines around a grep match
-#      remove_from_output: "process didn't exit"    # some lines and very long and unwanted, this is also a regexp
+#      valuable_top_or_bottom: "top"  # the useful infomation more likely to be at the top or bottom? (default "top")
+#      grep: "(?i)error|warning"      # in contrast to regular grep this doesn't remove other lines from output, just prefers matching when approaching limit_lines or limit_chars (default "(?i)error")
+#      grep_context_lines: 5          # leave that many lines around a grep match (default 5)
+#      remove_from_output: "process didn't exit"    # some lines and very long and unwanted, this is also a regular expression (default "")
 
 "#;
