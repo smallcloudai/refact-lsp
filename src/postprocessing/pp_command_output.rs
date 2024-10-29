@@ -30,32 +30,32 @@ pub fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) ->
     let mut ratings: Vec<f64> = vec![0.0; lines.len()];
     let mut approve: Vec<bool> = vec![false; lines.len()];
 
+    if filter.top_or_bottom == "top" {
+        for i in 0..lines.len() {
+            ratings[i] += 0.9 * (lines.len() - i) as f64 / lines.len() as f64;
+        }
+    } else if filter.top_or_bottom == "bottom" {
+        for i in 0..lines.len() {
+            ratings[i] += 0.9 * (i as f64) / lines.len() as f64;
+        }
+    }
+
     if !filter.grep.is_empty() {
         let re = Regex::new(&filter.grep).unwrap();
         for (i, line) in lines.iter().enumerate() {
             if re.is_match(line) {
-                ratings[i] += 1.0;
+                ratings[i] = 1.0;
                 for j in 1..=filter.grep_context_lines {
                     let lower_bound = i.saturating_sub(j);
                     let upper_bound = i + j;
                     if lower_bound < lines.len() {
-                        ratings[lower_bound] += 0.9;
+                        ratings[lower_bound] = 1.0;
                     }
                     if upper_bound < lines.len() {
-                        ratings[upper_bound] += 0.9;
+                        ratings[upper_bound] = 1.0;
                     }
                 }
             }
-        }
-    }
-
-    if filter.top_or_bottom == "top" {
-        for i in 0..lines.len() {
-            ratings[i] += (lines.len() - i) as f64 / lines.len() as f64;
-        }
-    } else if filter.top_or_bottom == "bottom" {
-        for i in 0..lines.len() {
-            ratings[i] += i as f64 / lines.len() as f64;
         }
     }
 
