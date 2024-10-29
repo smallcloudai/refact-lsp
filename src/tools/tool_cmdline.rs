@@ -104,22 +104,78 @@ fn _replace_args(x: &str, args_str: &HashMap<String, String>) -> String {
     result
 }
 
-fn output_filter_apply(filter: &CmdlineOutputFilter, output: &str) -> String {
+fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) -> String {
     let lines: Vec<&str> = output.lines().collect();
-    let filtered_lines: Vec<&str>;
+    let mut ratings: Vec<f64> = vec![0.0; lines.len()];
+    let mut approve: Vec<bool> = vec![false; lines.len()];
+
+    for (i, line) in lines.iter().enumerate() {
+        for keyword in &filter.look_for_keywords {
+            if line.contains(keyword) {
+                ratings[i] += 1.0;
+                for j in 1..=filter.lines_around_keywords {
+                    let lower_bound = i.saturating_sub(j);
+                    let upper_bound = i + j;
+                    if lower_bound < lines.len() {
+                        ratings[lower_bound] += 0.9;
+                    }
+                    if upper_bound < lines.len() {
+                        ratings[upper_bound] += 0.9;
+                    }
+                }
+            }
+        }
+    }
 
     if filter.top_or_bottom == "top" {
-        filtered_lines = lines.iter().take(filter.limit_lines).cloned().collect();
-    } else {
-        filtered_lines = lines.iter().rev().take(filter.limit_lines).cloned().collect();
+        for i in 0..lines.len() {
+            ratings[i] += (lines.len() - i) as f64 / lines.len() as f64;
+        }
+    } else if filter.top_or_bottom == "bottom" {
+        for i in 0..lines.len() {
+            ratings[i] += i as f64 / lines.len() as f64;
+        }
     }
 
-    let result = filtered_lines.join("\n");
-    if !result.is_empty() {
-        format!("{}\n", result) // Append a newline if the result is not empty
-    } else {
-        result
+    let mut line_indices: Vec<usize> = (0..lines.len()).collect();
+    line_indices.sort_by(|&a, &b| ratings[b].partial_cmp(&ratings[a]).unwrap());
+
+    let mut current_lines = 0;
+    let mut current_chars = 0;
+
+    for &index in &line_indices {
+        if current_lines > filter.limit_lines || current_chars + lines[index].len() > filter.limit_chars {
+            break;
+        }
+        if ratings[index] == 0.0 {
+            break;
+        }
+        approve[index] = true;
+        current_lines += 1;
+        current_chars += lines[index].len();
     }
+    println!("{:#?}", lines);
+    println!("{:#?}", ratings);
+    println!("{:#?}", approve);
+
+    let mut result = String::new();
+    let mut skipped_lines = 0;
+    for (i, &line) in lines.iter().enumerate() {
+        if approve[i] {
+            if skipped_lines > 0 {
+                result.push_str(&format!("...{} lines skipped...\n", skipped_lines));
+                skipped_lines = 0;
+            }
+            result.push_str(line);
+            result.push('\n');
+        } else {
+            skipped_lines += 1;
+        }
+    }
+    if skipped_lines > 0 {
+        result.push_str(&format!("...{} lines skipped...\n", skipped_lines));
+    }
+    result
 }
 
 async fn execute_blocking_command(
@@ -401,16 +457,32 @@ line5
 line6
 "#;
 
-        let filter = CmdlineOutputFilter {
+        let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
             top_or_bottom: "top".to_string(),
             look_for_keywords: vec![],
             lines_around_keywords: 1,
-        };
+        }, output_to_filter);
+        assert_eq!(result, "line1\nline2\nline3\n...3 lines skipped...\n");
 
-        let result = output_filter_apply(&filter, output_to_filter);
-        assert_eq!(result, "line1\nline2\n");
+        let result = output_mini_postprocessing(&CmdlineOutputFilter {
+            limit_lines: 2,
+            limit_chars: 1000,
+            top_or_bottom: "bottom".to_string(),
+            look_for_keywords: vec![],
+            lines_around_keywords: 1,
+        }, output_to_filter);
+        assert_eq!(result, "...3 lines skipped...\nline4\nline5\nline6\n");
+
+        let result = output_mini_postprocessing(&CmdlineOutputFilter {
+            limit_lines: 3,
+            limit_chars: 1000,
+            top_or_bottom: "".to_string(),
+            look_for_keywords: vec!["line4".to_string()],
+            lines_around_keywords: 1,
+        }, output_to_filter);
+        assert_eq!(result, "...2 lines skipped...\nline3\nline4\nline5\n...1 lines skipped...\n");
     }
 }
 
