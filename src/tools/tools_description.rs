@@ -305,6 +305,8 @@ tools:
           html <tab_id>
           reload <tab_id>
           device <desktop|mobile> <tab_id>
+          click <x> <y> <tab_id>
+          insert_text <text> <tab_id>
     parameters_required:
       - "command"
 
@@ -409,7 +411,7 @@ pub fn make_openai_tool_value(
             "type": "function",
             "function": {
                 "name": name,
-                "agentic": agentic,
+                "agentic": agentic, // this field is not OpenAI's
                 "description": description,
                 "parameters": {
                     "type": "object",

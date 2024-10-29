@@ -17,6 +17,7 @@ use crate::tools::tools_description::Tool;
 use reqwest::Client;
 use std::path::PathBuf;
 use headless_chrome::{Browser, LaunchOptions, Tab};
+use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,7 @@ pub struct ToolChrome {
     integration_chrome: IntegrationChrome,
 }
 
-pub struct ChromeSession {
+struct ChromeSession {
     browser: Browser,
     tabs: HashMap<String, Arc<Tab>>,
 }
@@ -178,6 +179,17 @@ async fn navigate_to(tab: &Arc<Tab>, url: &String) -> Result<String, String> {
     Ok(format!("Chrome tab navigated to {}", tab.get_url()))
 }
 
+async fn click_on_point(tab: &Arc<Tab>, point: &Point) -> Result<String, String> {
+    tab.click_point(point.clone()).map_err(|e| e.to_string())?;
+    tab.wait_until_navigated().map_err(|e| e.to_string())?;
+    Ok(format!("clicked on `{} {}`", point.x, point.y))
+}
+
+async fn insert_text(tab: &Arc<Tab>, text: &String) -> Result<String, String> {
+    tab.type_str(text.as_str()).map_err(|e| e.to_string())?;
+    Ok(format!("inserted text `{}`", text.clone()))
+}
+
 async fn session_open_tab(
     chrome_session: &mut ChromeSession,
     tab_name: &String,
@@ -195,7 +207,7 @@ async fn session_open_tab(
 }
 
 #[derive(Debug)]
-pub enum Command {
+enum Command {
     // TODO: probably we need connect command
     // if we're tying to operate on non-existing tab (no connection or something like this)
     // we should not auto-open connection again
@@ -204,6 +216,8 @@ pub enum Command {
     Html(HtmlArgs),
     Reload(ReloadArgs),
     Device(DeviceArgs),
+    Click(ClickArgs),
+    InsertText(InsertTextArgs),
 }
 
 impl Command {
@@ -278,6 +292,18 @@ impl Command {
                     }
                 }
             },
+            Command::Click(args) => {
+                let (tab, open_tab_log) = session_open_tab(chrome_session, &args.tab_id).await?;
+                tool_log.push(open_tab_log);
+                let content = click_on_point(&tab, &args.point).await?;
+                tool_log.push(content);
+            },
+            Command::InsertText(args) => {
+                let (tab, open_tab_log) = session_open_tab(chrome_session, &args.tab_id).await?;
+                tool_log.push(open_tab_log);
+                let content = insert_text(&tab, &args.text).await?;
+                tool_log.push(content);
+            },
         }
 
         Ok((tool_log, multimodal_els))
@@ -285,36 +311,49 @@ impl Command {
 }
 
 #[derive(Debug)]
-pub struct NavigateToArgs {
-    pub uri: String,
-    pub tab_id: String,
+struct NavigateToArgs {
+    uri: String,
+    tab_id: String,
 }
 
 #[derive(Debug)]
-pub struct ScreenshotArgs {
-    pub tab_id: String,
+struct ScreenshotArgs {
+    tab_id: String,
 }
 
 #[derive(Debug)]
-pub struct HtmlArgs {
-    pub tab_id: String,
+struct HtmlArgs {
+    tab_id: String,
 }
 
 #[derive(Debug)]
-pub struct ReloadArgs {
-    pub tab_id: String,
+struct ReloadArgs {
+    tab_id: String,
 }
 
 #[derive(Debug)]
-pub enum DeviceType {
+struct ClickArgs {
+    point: Point,
+    tab_id: String,
+}
+
+#[derive(Debug)]
+struct InsertTextArgs {
+    text: String,
+    tab_id: String,
+}
+
+
+#[derive(Debug)]
+enum DeviceType {
     DESKTOP,
     MOBILE,
 }
 
 #[derive(Debug)]
-pub struct DeviceArgs {
-    pub device: DeviceType,
-    pub tab_id: String,
+struct DeviceArgs {
+    device: DeviceType,
+    tab_id: String,
 }
 
 fn parse_command(command: &String) -> Result<Command, String> {
@@ -371,6 +410,35 @@ fn parse_command(command: &String) -> Result<Command, String> {
                 },
                 tab_id: parsed_args[1].clone(),
             }))
+        },
+        "click" => {
+            match parsed_args.as_slice() {
+                [x_str, y_str, tab_id] => {
+                    let x = x_str.parse::<f64>().map_err(|e| format!("Failed to parse x: {}", e))?;
+                    let y = y_str.parse::<f64>().map_err(|e| format!("Failed to parse y: {}", e))?;
+                    let point = Point { x, y };
+                    Ok(Command::Click(ClickArgs {
+                        point,
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments 'x', 'y', 'tab_id'".to_string())
+                }
+            }
+        },
+        "insert_text" => {
+            match parsed_args.as_slice() {
+                [text, tab_id] => {
+                    Ok(Command::InsertText(InsertTextArgs {
+                        text: text.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments 'text', 'tab_id'".to_string())
+                }
+            }
         },
         _ => Err(format!("Unknown command: {:?}.", command_name)),
     }
