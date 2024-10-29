@@ -80,6 +80,15 @@ async fn chat(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let mut messages = deserialize_messages_from_post(&chat_post.messages)?;
+    
+    // converts tools into openai style
+    if let Some(tools) = &mut chat_post.tools {
+        for tool in tools {
+            if let Some(function) = tool.get_mut("function") {
+                function.as_object_mut().unwrap().remove("agentic");
+            }
+        }
+    }
 
     let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, supports_multimodality) = lookup_chat_scratchpad(

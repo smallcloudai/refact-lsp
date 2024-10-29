@@ -17,6 +17,7 @@ use crate::tools::tools_description::Tool;
 use reqwest::Client;
 use std::path::PathBuf;
 use headless_chrome::{Browser, LaunchOptions, Tab};
+use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use serde::{Deserialize, Serialize};
@@ -188,6 +189,17 @@ async fn navigate_to(tab: &Arc<Tab>, url: &String) -> Result<String, String> {
     Ok(format!("Chrome tab navigated to {}", tab.get_url()))
 }
 
+async fn click_on_point(tab: &Arc<Tab>, point: &Point) -> Result<String, String> {
+    tab.click_point(point.clone()).map_err(|e| e.to_string())?;
+    tab.wait_until_navigated().map_err(|e| e.to_string())?;
+    Ok(format!("clicked on `{} {}`", point.x, point.y))
+}
+
+async fn insert_text(tab: &Arc<Tab>, text: &String) -> Result<String, String> {
+    tab.type_str(text.as_str()).map_err(|e| e.to_string())?;
+    Ok(format!("inserted text `{}`", text.clone()))
+}
+
 async fn session_open_tab(
     chrome_session: &mut ChromeSession,
     tab_name: &String,
@@ -214,6 +226,8 @@ pub enum Command {
     Html(HtmlArgs),
     Reload(ReloadArgs),
     Device(DeviceArgs),
+    Click(ClickArgs),
+    InsertText(InsertTextArgs),
 }
 
 impl Command {
@@ -288,7 +302,7 @@ impl Command {
                     }
                 }
             },
-        }
+        },
 
         Ok((tool_log, multimodal_els))
     }
@@ -314,6 +328,17 @@ pub struct HtmlArgs {
 pub struct ReloadArgs {
     pub tab_id: String,
 }
+
+#[derive(Debug)]
+struct ClickArgs {
+    point: Point,
+}
+
+#[derive(Debug)]
+struct InsertTextArgs {
+    text: String,
+}
+
 
 #[derive(Debug)]
 pub enum DeviceType {
@@ -381,6 +406,24 @@ fn parse_command(command: &String) -> Result<Command, String> {
                 },
                 tab_id: parsed_args[1].clone(),
             }))
+        },
+        "click" => {
+            match command_args.as_slice() {
+                [_, x_str, y_str] => {
+                    let x = x_str.parse::<f64>().map_err(|e| format!("Failed to parse x: {}", e))?;
+                    let y = y_str.parse::<f64>().map_err(|e| format!("Failed to parse y: {}", e))?;
+                    let point = Point { x, y };
+                    Ok(Command:Click(ClickArgs {
+                        point: point
+                    })
+                },
+                _ => {
+                    Err("Missing one or both arguments 'x', 'y'".to_string())
+                }
+            }
+        },
+        "insert_text" => {
+
         },
         _ => Err(format!("Unknown command: {:?}.", command_name)),
     }

@@ -108,7 +108,7 @@ def process_streaming_data(data):
                 # {'index': 0, 'id': 'call_RwbNYLiACAgUXzFR9967dWmf', 'type': 'function', 'function': {'name': 'cargo_check', 'arguments': ''}}
                 # {'index': 0, 'function': {'arguments': '{"'}}
                 # need to collect deltas properly
-                id = tool_call["id"]
+                id = tool_call.get("id")
                 index = tool_call["index"]
                 if id is not None:
                     streaming_toolcall.append(tool_call)
