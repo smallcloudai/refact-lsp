@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 
 use similar::DiffableStr;
 use tree_sitter::{Node, Parser, Range};
-use tree_sitter_typescript::language_typescript as language;
+use tree_sitter_typescript::LANGUAGE_TYPESCRIPT as LANGUAGE;
 use uuid::Uuid;
 
 use crate::ast::treesitter::ast_instance_structs::{AstSymbolFields, AstSymbolInstanceArc, ClassFieldDeclaration, CommentDefinition, FunctionArg, FunctionCall, FunctionDeclaration, ImportDeclaration, ImportType, StructDeclaration, TypeDef, VariableDefinition, VariableUsage};
@@ -134,7 +134,7 @@ impl TSParser {
     pub fn new() -> Result<Self, ParserError> {
         let mut parser = Parser::new();
         parser
-            .set_language(&language())
+            .set_language(&LANGUAGE.into())
             .map_err(internal_error)?;
         Ok(Self { parser })
     }
@@ -244,7 +244,7 @@ impl TSParser {
                 end_point: child.end_position(),
             };
         }
-        
+
         symbols.push(Arc::new(RwLock::new(Box::new(decl))));
         symbols
     }

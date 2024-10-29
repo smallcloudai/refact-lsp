@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 
 use similar::DiffableStr;
 use tree_sitter::{Node, Parser, Point, Range};
-use tree_sitter_rust::language;
+use tree_sitter_rust::LANGUAGE;
 use uuid::Uuid;
 
 use crate::ast::treesitter::ast_instance_structs::{AstSymbolInstance, AstSymbolInstanceArc, ClassFieldDeclaration, CommentDefinition, FunctionArg, FunctionCall, FunctionDeclaration, ImportDeclaration, ImportType, StructDeclaration, TypeAlias, TypeDef, VariableDefinition, VariableUsage};
@@ -29,7 +29,7 @@ impl RustParser {
     pub fn new() -> Result<RustParser, ParserError> {
         let mut parser = Parser::new();
         parser
-            .set_language(&language())
+            .set_language(&LANGUAGE.into())
             .map_err(internal_error)?;
         Ok(RustParser { parser })
     }
@@ -718,7 +718,7 @@ impl RustParser {
 
         symbols
     }
-    
+
     fn parse_use_declaration(&mut self, parent: &Node, code: &str, path: &PathBuf, parent_guid: &Uuid, is_error: bool) -> Vec<AstSymbolInstanceArc> {
         let mut symbols: Vec<AstSymbolInstanceArc> = vec![];
         let argument_node = parent.child_by_field_name("argument").unwrap();
@@ -927,7 +927,7 @@ impl RustParser {
         }
         symbols
     }
-    
+
     pub fn parse_block(&mut self, parent: &Node, code: &str, path: &PathBuf, parent_guid: &Uuid, is_error: bool) -> Vec<AstSymbolInstanceArc> {
         let mut symbols: Vec<AstSymbolInstanceArc> = vec![];
         for i in 0..parent.child_count() {
