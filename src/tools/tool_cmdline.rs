@@ -29,27 +29,6 @@ struct CmdlineToolBackground {
 }
 
 #[derive(Deserialize)]
-struct CmdlineOutputFilter {
-    limit_lines: usize,
-    limit_chars: usize,
-    top_or_bottom: String,
-    look_for_keywords: Vec<String>,
-    lines_around_keywords: usize,
-}
-
-impl Default for CmdlineOutputFilter {
-    fn default() -> Self {
-        CmdlineOutputFilter {
-            limit_lines: 100,
-            limit_chars: 10000,
-            top_or_bottom: "top".to_string(),
-            look_for_keywords: vec![],
-            lines_around_keywords: 5,
-        }
-    }
-}
-
-#[derive(Deserialize)]
 struct CmdlineToolConfig {
     description: String,
     parameters: Vec<ToolParam>,
@@ -59,7 +38,7 @@ struct CmdlineToolConfig {
     #[serde(default = "_default_timeout")]
     timeout: u64,
     background: Option<CmdlineToolBackground>,
-    output_filter: Option<CmdlineOutputFilter>,
+    output_filter: Option<crate::postprocessing::pp_command_output::CmdlineOutputFilter>,
 }
 
 fn _default_timeout() -> u64 {
@@ -116,84 +95,11 @@ fn _replace_args(x: &str, args_str: &HashMap<String, String>) -> String {
     result
 }
 
-fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) -> String {
-    let lines: Vec<&str> = output.lines().collect();
-    let mut ratings: Vec<f64> = vec![0.0; lines.len()];
-    let mut approve: Vec<bool> = vec![false; lines.len()];
-
-    for (i, line) in lines.iter().enumerate() {
-        for keyword in &filter.look_for_keywords {
-            if line.contains(keyword) {
-                ratings[i] += 1.0;
-                for j in 1..=filter.lines_around_keywords {
-                    let lower_bound = i.saturating_sub(j);
-                    let upper_bound = i + j;
-                    if lower_bound < lines.len() {
-                        ratings[lower_bound] += 0.9;
-                    }
-                    if upper_bound < lines.len() {
-                        ratings[upper_bound] += 0.9;
-                    }
-                }
-            }
-        }
-    }
-
-    if filter.top_or_bottom == "top" {
-        for i in 0..lines.len() {
-            ratings[i] += (lines.len() - i) as f64 / lines.len() as f64;
-        }
-    } else if filter.top_or_bottom == "bottom" {
-        for i in 0..lines.len() {
-            ratings[i] += i as f64 / lines.len() as f64;
-        }
-    }
-
-    let mut line_indices: Vec<usize> = (0..lines.len()).collect();
-    line_indices.sort_by(|&a, &b| ratings[b].partial_cmp(&ratings[a]).unwrap());
-
-    let mut current_lines = 0;
-    let mut current_chars = 0;
-
-    for &index in &line_indices {
-        if current_lines > filter.limit_lines || current_chars > filter.limit_chars {
-            break;
-        }
-        if ratings[index] > 0.0 {
-            approve[index] = true;
-        }
-        current_lines += 1;
-        current_chars += lines[index].len();
-    }
-    println!("{:#?}", lines);
-    println!("{:#?}", ratings);
-    println!("{:#?}", approve);
-
-    let mut result = String::new();
-    let mut skipped_lines = 0;
-    for (i, &line) in lines.iter().enumerate() {
-        if approve[i] {
-            if skipped_lines > 0 {
-                result.push_str(&format!("...{} lines skipped...\n", skipped_lines));
-                skipped_lines = 0;
-            }
-            result.push_str(line);
-            result.push('\n');
-        } else {
-            skipped_lines += 1;
-        }
-    }
-    if skipped_lines > 0 {
-        result.push_str(&format!("...{} lines skipped...\n", skipped_lines));
-    }
-    result
-}
-
 async fn execute_blocking_command(
     command: &str,
     timeout: u64,
     command_workdir: &String,
-    output_filter: &CmdlineOutputFilter,
+    output_filter: &crate::postprocessing::pp_command_output::CmdlineOutputFilter,
 ) -> Result<String, String> {
     info!("EXEC: {command}");
     let command_args = shell_words::split(command)
@@ -229,9 +135,9 @@ async fn execute_blocking_command(
         let mut res = "".to_string();
         let exit_code = output.status.code().unwrap_or_default();
         res.push_str(&format!("command was running {:.3}s, finished with exit code {exit_code}\n", duration.as_secs_f64()));
-        res.push_str(&format!("STDOUT:\n{}", output_mini_postprocessing(output_filter, stdout.as_str())));
+        res.push_str(&format!("STDOUT:\n{}", crate::postprocessing::pp_command_output::output_mini_postprocessing(output_filter, stdout.as_str())));
         if !stderr.is_empty() {
-            res.push_str(&format!("\nSTDERR:\n{}", output_mini_postprocessing(output_filter, stderr.as_str())));
+            res.push_str(&format!("\nSTDERR:\n{}", crate::postprocessing::pp_command_output::output_mini_postprocessing(output_filter, stderr.as_str())));
         }
         Ok(res)
     };
@@ -421,7 +327,7 @@ impl Tool for ToolCmdline {
             execute_background_command(gcx, &self.name, &command, background_cfg.clone(), action.as_str()).await
 
         } else {
-            let default_filter = CmdlineOutputFilter::default();
+            let default_filter = crate::postprocessing::pp_command_output::CmdlineOutputFilter::default();
             let output_filter = self.cfg.output_filter.as_ref().unwrap_or(&default_filter);
             execute_blocking_command(&command, self.cfg.timeout, &workdir, output_filter).await
         }?;
@@ -453,50 +359,6 @@ impl Tool for ToolCmdline {
             parameters: self.cfg.parameters.clone(),
             parameters_required,
         }
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cmdline_output_filter() {
-        let output_to_filter = r#"line1
-line2
-line3
-line4
-line5
-line6
-"#;
-
-        let result = output_mini_postprocessing(&CmdlineOutputFilter {
-            limit_lines: 2,
-            limit_chars: 1000,
-            top_or_bottom: "top".to_string(),
-            look_for_keywords: vec![],
-            lines_around_keywords: 1,
-        }, output_to_filter);
-        assert_eq!(result, "line1\nline2\nline3\n...3 lines skipped...\n");
-
-        let result = output_mini_postprocessing(&CmdlineOutputFilter {
-            limit_lines: 2,
-            limit_chars: 1000,
-            top_or_bottom: "bottom".to_string(),
-            look_for_keywords: vec![],
-            lines_around_keywords: 1,
-        }, output_to_filter);
-        assert_eq!(result, "...3 lines skipped...\nline4\nline5\nline6\n");
-
-        let result = output_mini_postprocessing(&CmdlineOutputFilter {
-            limit_lines: 3,
-            limit_chars: 1000,
-            top_or_bottom: "".to_string(),
-            look_for_keywords: vec!["line4".to_string()],
-            lines_around_keywords: 1,
-        }, output_to_filter);
-        assert_eq!(result, "...2 lines skipped...\nline3\nline4\nline5\n...1 lines skipped...\n");
     }
 }
 
