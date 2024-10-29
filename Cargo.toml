@@ -60,15 +60,15 @@ textwrap = "0.14"
 
 regex-automata = { version = "0.1.10", features = ["transducer"] }
 sorted-vec = "0.8.3"
-tree-sitter = "0.22"
-tree-sitter-cpp = "0.22"
+tree-sitter = "0.23"
+tree-sitter-cpp = "0.23"
 #tree-sitter-c-sharp = "0.20"
-tree-sitter-java = "0.21"
-tree-sitter-javascript = "0.21"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.23"
 #tree-sitter-kotlin = "0.3.1"
-tree-sitter-python = "0.21"
-tree-sitter-rust = "0.21"
-tree-sitter-typescript = "0.21"
+tree-sitter-python = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
 
 arrow = { version = "47.0.0", optional = true }
 arrow-array  = { version = "47.0.0", optional = true }
@@ -85,10 +85,8 @@ md5 = "0.7"
 mockito = "0.28.0"
 notify = { version = "6.1.1", features = ["serde"] }
 parking_lot = { version = "0.12.1", features = ["serde"] }
-rusqlite = { version = "0.30.0", features = ["bundled"] }
 tempfile = "3.8.1"
 time = "0.3.20"            # "0.3.30" conflicts for some reason
-tokio-rusqlite = "0.5.0"
 walkdir = "2.3"
 which = "5.0.0"
 strsim = "0.8.0"
@@ -106,3 +104,12 @@ image = "0.25.2"
 headless_chrome = "1.0.15"
 nix = { version = "0.29.0", features = ["signal"] }
 serde_urlencoded = "0.7.1"
+
+libsqlite3-sys = "0.27.0"
+sqlx = "0.7.4"
+sqlx-sqlite = "0.7.4"
+rusqlite = { version = "0.30.0", features = ["bundled"] }
+tokio-rusqlite = "0.5.0"
+sea-orm = "1.0.0"
+
+#rusqlite = { version = "0.30.0", features = ["bundled"] }
