@@ -15,8 +15,8 @@ pub struct Chore {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChoreEvent {
     pub chore_event_id: String,
-    pub chore_event_summary: String,
     pub chore_event_ts: f64,
+    pub chore_event_summary: String,
     pub chore_event_link: String,
     pub chore_event_cthread_id: String,
 }
@@ -39,3 +39,9 @@ pub struct ChatThread {
 pub struct ChoreDB {
     pub sleddb: Arc<sled::Db>,
 }
+
+// More potential data:
+// - memory
+//   - compreseed trajectories
+//   - facts
+// - coding convention
