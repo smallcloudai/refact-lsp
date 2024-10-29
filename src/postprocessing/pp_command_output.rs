@@ -109,10 +109,6 @@ pub fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) ->
         }
     }
 
-    println!("{:#?}", lines);
-    println!("{:#?}", ratings);
-    println!("{:#?}", approve);
-
     let mut result = String::new();
     let mut skipped_lines = 0;
     for (i, &line) in lines.iter().enumerate() {
