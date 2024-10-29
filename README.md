@@ -48,8 +48,8 @@ check out the [Text UI](#cli) below, you can talk about your project in the comm
 - [x] pdb python debugger integration (--experimental)
 - [ ] More debuggers
 - [x] Github integration (--experimental)
-- [ ] Gitlab integration
-- [ ] Jira integration
+- [x] Gitlab integration
+- [x] Jira integration
 
 
 ## Refact Agent

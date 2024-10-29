@@ -15,27 +15,28 @@ use serde_json::Value;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[allow(non_snake_case)]
-pub struct IntegrationGitLab {
-    pub glab_binary_path: Option<String>,
-    pub GITLAB_TOKEN: String,
+pub struct IntegrationJira {
+    pub jira_binary_path: Option<String>,
+    pub JIRA_TOKEN: String,
 }
 
-pub struct ToolGitlab {
-    integration_gitlab: IntegrationGitLab,
+pub struct ToolJira {
+    integration_jira: IntegrationJira,
 }
 
-impl ToolGitlab {
-    pub fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
-        let integration_gitlab = serde_yaml::from_value::<IntegrationGitLab>(v.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        Ok(Self { integration_gitlab })
+impl ToolJira {
+    pub fn new_from_yaml(jira_config: &serde_yaml::Value) -> Result<Self, String> {
+        let integration_jira = serde_yaml::from_value::<IntegrationJira>(jira_config.clone())
+            .map_err(|e| {
+                let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
+                format!("{}{}", e.to_string(), location)
+            })?;
+        Ok(Self { integration_jira })
     }
 }
 
 #[async_trait]
-impl Tool for ToolGitlab {
+impl Tool for ToolJira {
     async fn tool_execute(
         &mut self,
         _ccx: Arc<AMutex<AtCommandsContext>>,
@@ -49,11 +50,11 @@ impl Tool for ToolGitlab {
         };
         let command_args = parse_command_args(args)?;
 
-        let glab_command = self.integration_gitlab.glab_binary_path.as_deref().unwrap_or("glab");
-        let output = Command::new(glab_command)
+        let jira_command = self.integration_jira.jira_binary_path.as_deref().unwrap_or("jira");
+        let output = Command::new(jira_command)
             .args(&command_args)
             .current_dir(&project_dir)
-            .env("GITLAB_TOKEN", &self.integration_gitlab.GITLAB_TOKEN)
+            .env("JIRA_TOKEN", &self.integration_jira.JIRA_TOKEN)
             .output()
             .await
             .map_err(|e| e.to_string())?;
@@ -96,7 +97,7 @@ impl Tool for ToolGitlab {
         args: &HashMap<String, Value>,
     ) -> Result<String, String> {
         let mut command_args = parse_command_args(args)?;
-        command_args.insert(0, "glab".to_string());
+        command_args.insert(0, "jira".to_string());
         Ok(command_args.join(" "))
     }
 }
@@ -115,7 +116,7 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
     for (i, arg) in parsed_args.iter().enumerate() {
         info!("argument[{}]: {}", i, arg);
     }
-    if parsed_args[0] == "glab" {
+    if parsed_args[0] == "jira" {
         parsed_args.remove(0);
     }
 
