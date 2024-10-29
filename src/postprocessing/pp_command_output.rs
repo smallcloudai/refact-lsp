@@ -4,25 +4,55 @@ use regex::Regex;
 
 #[derive(Deserialize)]
 pub struct CmdlineOutputFilter {
+    #[serde(default = "default_limit_lines")]
     pub limit_lines: usize,
+    #[serde(default = "default_limit_chars")]
     pub limit_chars: usize,
-    pub top_or_bottom: String,
+    #[serde(default = "default_valuable_top_or_bottom")]
+    pub valuable_top_or_bottom: String,
+    #[serde(default = "default_grep")]
     pub grep: String,
+    #[serde(default = "default_grep_context_lines")]
     pub grep_context_lines: usize,
+    #[serde(default = "default_remove_from_output")]
     pub remove_from_output: String,
 }
 
 impl Default for CmdlineOutputFilter {
     fn default() -> Self {
         CmdlineOutputFilter {
-            limit_lines: 100,
-            limit_chars: 10000,
-            top_or_bottom: "top".to_string(),
-            grep: "error|warning".to_string(),
-            grep_context_lines: 5,
-            remove_from_output: "".to_string(),
+            limit_lines: default_limit_lines(),
+            limit_chars: default_limit_chars(),
+            valuable_top_or_bottom: default_valuable_top_or_bottom(),
+            grep: default_grep(),
+            grep_context_lines: default_grep_context_lines(),
+            remove_from_output: default_remove_from_output(),
         }
     }
+}
+
+fn default_limit_lines() -> usize {
+    100
+}
+
+fn default_limit_chars() -> usize {
+    10000
+}
+
+fn default_valuable_top_or_bottom() -> String {
+    "top".to_string()
+}
+
+fn default_grep() -> String {
+    "(?i)error".to_string()
+}
+
+fn default_grep_context_lines() -> usize {
+    5
+}
+
+fn default_remove_from_output() -> String {
+    "".to_string()
 }
 
 pub fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) -> String {
@@ -30,13 +60,13 @@ pub fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) ->
     let mut ratings: Vec<f64> = vec![0.0; lines.len()];
     let mut approve: Vec<bool> = vec![false; lines.len()];
 
-    if filter.top_or_bottom == "top" {
-        for i in 0..lines.len() {
-            ratings[i] += 0.9 * (lines.len() - i) as f64 / lines.len() as f64;
-        }
-    } else if filter.top_or_bottom == "bottom" {
+    if filter.valuable_top_or_bottom == "bottom" {
         for i in 0..lines.len() {
             ratings[i] += 0.9 * (i as f64) / lines.len() as f64;
+        }
+    } else {
+        for i in 0..lines.len() {
+            ratings[i] += 0.9 * (lines.len() - i) as f64 / lines.len() as f64;
         }
     }
 
@@ -121,7 +151,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
-            top_or_bottom: "top".to_string(),
+            valuable_top_or_bottom: "top".to_string(),
             grep: "".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
@@ -131,7 +161,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
-            top_or_bottom: "bottom".to_string(),
+            valuable_top_or_bottom: "bottom".to_string(),
             grep: "".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
@@ -141,7 +171,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 3,
             limit_chars: 1000,
-            top_or_bottom: "".to_string(),
+            valuable_top_or_bottom: "".to_string(),
             grep: "line4".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
