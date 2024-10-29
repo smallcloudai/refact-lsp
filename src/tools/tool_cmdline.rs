@@ -156,13 +156,12 @@ fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) -> Str
     let mut current_chars = 0;
 
     for &index in &line_indices {
-        if current_lines > filter.limit_lines || current_chars + lines[index].len() > filter.limit_chars {
+        if current_lines > filter.limit_lines || current_chars > filter.limit_chars {
             break;
         }
-        if ratings[index] == 0.0 {
-            break;
+        if ratings[index] > 0.0 {
+            approve[index] = true;
         }
-        approve[index] = true;
         current_lines += 1;
         current_chars += lines[index].len();
     }
