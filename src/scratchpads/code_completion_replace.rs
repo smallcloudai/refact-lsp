@@ -25,7 +25,7 @@ const DEBUG: bool = true;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
 An unfinished line in this block is marked with <CURSOR>. 
 Complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE>. 
-Produce a single <REWROTE_BLOCK_OF_CODE> containing all changes.
+Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes.
 Copy additional lines before and after the <CURSOR> line exactly as they are"#;
 const SYSTEM_PROMPT_COMMENTS: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
 Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
@@ -125,7 +125,7 @@ impl SubBlock {
         };
         code.push_str(&new_cursor_line);
         self.cut_part = Some(cut_part);
-        Ok(format!("<REWROTE_BLOCK_OF_CODE>:\n```\n{code}"))
+        Ok(format!("<REWRITTEN_BLOCK_OF_CODE>:\n```\n{code}"))
     }
     
     fn after_lines_str(&self) -> String {
