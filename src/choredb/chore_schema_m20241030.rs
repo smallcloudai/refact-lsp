@@ -12,19 +12,19 @@ impl MigrationTrait for Migration {
                     .table(ChatThreads::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(ChatThreads::CThreadId)
+                        ColumnDef::new(ChatThreads::CthreadId)
                             .string()
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(ChatThreads::CThreadTitle).string().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadToolset).string().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadModelUsed).string().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadError).string().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadAnythingNew).boolean().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadCreatedTs).double().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadUpdatedTs).double().not_null())
-                    .col(ColumnDef::new(ChatThreads::CThreadArchivedTs).double().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadTitle).string().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadToolset).string().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadModelUsed).string().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadError).string().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadAnythingNew).boolean().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadCreatedTs).double().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadUpdatedTs).double().not_null())
+                    .col(ColumnDef::new(ChatThreads::CthreadArchivedTs).double().not_null())
                     .to_owned(),
             )
             .await
@@ -40,13 +40,13 @@ impl MigrationTrait for Migration {
 #[derive(Iden)]
 enum ChatThreads {
     Table,
-    CThreadId,
-    CThreadTitle,
-    CThreadToolset,
-    CThreadModelUsed,
-    CThreadError,
-    CThreadAnythingNew,
-    CThreadCreatedTs,
-    CThreadUpdatedTs,
-    CThreadArchivedTs,
+    CthreadId,
+    CthreadTitle,
+    CthreadToolset,
+    CthreadModelUsed,
+    CthreadError,
+    CthreadAnythingNew,
+    CthreadCreatedTs,
+    CthreadUpdatedTs,
+    CthreadArchivedTs,
 }

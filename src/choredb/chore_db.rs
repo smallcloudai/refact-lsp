@@ -107,15 +107,56 @@ pub async fn chore_db_init(database_path: String) -> Arc<AMutex<ChoreDB>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{Database, EntityTrait, ActiveModelTrait, Set};
+    use sea_orm::{Database, EntityTrait, ActiveModelTrait, Set, Statement};
+    use sea_orm_migration::prelude::*;
     use crate::choredb::chore_schema::chat_threads;
+
+    async fn sqlite_print_db_structure(db: &DatabaseConnection) {
+        let stmt = Statement::from_string(db.get_database_backend(), "SELECT name FROM sqlite_master WHERE type='table';".to_owned());
+        let tables: Vec<(String,)> = db.query_all(stmt)
+            .await.unwrap()
+            .into_iter()
+            .map(|row| (row.try_get::<String>("", "name").unwrap(),))
+            .collect();
+
+        for (table,) in tables {
+            println!("Table: {}", table);
+            let stmt = Statement::from_string(db.get_database_backend(), format!("PRAGMA table_info({});", table));
+            let columns: Vec<(String, String)> = db.query_all(stmt)
+                .await.unwrap()
+                .into_iter()
+                .map(|row| (row.try_get("", "name").unwrap(), row.try_get("", "type").unwrap()))
+                .collect();
+
+            for (name, type_) in columns {
+                println!("  Column: {} {}", name, type_);
+            }
+        }
+    }
+
+    async fn sqlite_print_table_records(db: &DatabaseConnection, table_name: String, limit: usize) {
+        println!("Table: {}", table_name);
+        let stmt = Statement::from_string(db.get_database_backend(), format!("SELECT * FROM {} LIMIT {};", table_name, limit));
+        let rows = db.query_all(stmt).await.unwrap();
+
+        for row in rows {
+            let columns = row.column_names();
+            for column in columns {
+                // let value: String = row.try_get("", column.as_str()).unwrap_or("NULL".to_string());
+                println!("  {}: {:?}", column, row.try_get::<String>("", column.as_str()));
+            }
+            println!("--------");
+        }
+    }
 
     #[tokio::test]
     async fn test_chat_threads_crud() {
         let db_url = "sqlite::memory:";
         let db = Database::connect(db_url).await.unwrap();
         let schema_manager = SchemaManager::new(&db);
-        sea_orm_migration::Migrator::up(&schema_manager, None).await.unwrap();
+        let migration = crate::choredb::chore_schema_m20241030::Migration;
+        migration.up(&schema_manager).await.unwrap();
+        sqlite_print_db_structure(&db).await;
 
         let chore_db = ChoreDB {
             connection: Arc::new(db),
@@ -145,7 +186,17 @@ mod tests {
             cthread_archived_ts: Set(0.0),
         };
 
-        chat_thread1.insert(&*chore_db.connection).await.unwrap();
+        let aa = chat_thread1.insert(&*chore_db.connection).await;
+        sqlite_print_table_records(&*chore_db.connection, "chat_threads".to_string(), 2).await;
+        let threads: Vec<chat_threads::Model> = chat_threads::Entity::find().all(&*chore_db.connection).await.unwrap();
+        if threads.is_empty() {
+            println!("No chat threads found");
+        } else {
+            for thread in threads {
+                println!("Retrieved thread: {:?}", thread);
+            }
+        }
+        aa.unwrap();
         chat_thread2.insert(&*chore_db.connection).await.unwrap();
 
         let threads: Vec<chat_threads::Model> = chat_threads::Entity::find().all(&*chore_db.connection).await.unwrap();

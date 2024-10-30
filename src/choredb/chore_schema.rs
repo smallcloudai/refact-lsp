@@ -67,10 +67,8 @@ use sea_orm::{
 // }
 
 pub mod chat_threads {
-    // use super::*;
     use sea_orm::entity::prelude::*;
-    // use crate::call_validation::ChatMessage; // Adjust the path as necessary
-    // use sea_orm::{DerivePrimaryKey, PrimaryKeyTrait, DeriveEntityModel, ColumnTrait, EntityTrait, Set, RelationTrait, Linked, RelationDef, EnumIter, DeriveRelation, ActiveModelBehavior};
+    // use crate::call_validation::ChatMessage;
 
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
     #[sea_orm(table_name = "chat_threads")]
