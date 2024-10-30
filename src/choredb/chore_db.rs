@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex as AMutex;
 use sea_orm::{Database, DatabaseConnection};
-use crate::chore_schema::ChoreDB;
+use crate::choredb::chore_schema::ChoreDB;
 // use sea_orm::{Database, DatabaseConnection, EntityTrait};
 // use crate::chore_schema::{ChoreDB, Chore, ChoreEvent, ChatThread};
 // use crate::call_validation::ChatMessage;
@@ -101,3 +101,56 @@ pub async fn chore_db_init(database_path: String) -> Arc<AMutex<ChoreDB>> {
 //     // Implement this based on your ChatMessage schema and SeaORM setup
 //     unimplemented!()
 // }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{Database, EntityTrait, ActiveModelTrait, Set};
+    use crate::choredb::chore_schema::chat_threads;
+
+    #[tokio::test]
+    async fn test_chat_threads_crud() {
+        let db_url = "sqlite::memory:";
+        let db = Database::connect(db_url).await.unwrap();
+        let schema_manager = SchemaManager::new(&db);
+        sea_orm_migration::Migrator::up(&schema_manager, None).await.unwrap();
+
+        let chore_db = ChoreDB {
+            connection: Arc::new(db),
+        };
+
+        let chat_thread1 = chat_threads::ActiveModel {
+            cthread_id: Set("thread1".to_owned()),
+            cthread_title: Set("First Thread".to_owned()),
+            cthread_toolset: Set("quick".to_owned()),
+            cthread_model_used: Set("model1".to_owned()),
+            cthread_error: Set("".to_owned()),
+            cthread_anything_new: Set(false),
+            cthread_created_ts: Set(1627847267.0),
+            cthread_updated_ts: Set(1627847267.0),
+            cthread_archived_ts: Set(0.0),
+        };
+
+        let chat_thread2 = chat_threads::ActiveModel {
+            cthread_id: Set("thread2".to_owned()),
+            cthread_title: Set("Second Thread".to_owned()),
+            cthread_toolset: Set("explore".to_owned()),
+            cthread_model_used: Set("model2".to_owned()),
+            cthread_error: Set("".to_owned()),
+            cthread_anything_new: Set(true),
+            cthread_created_ts: Set(1627847268.0),
+            cthread_updated_ts: Set(1627847268.0),
+            cthread_archived_ts: Set(0.0),
+        };
+
+        chat_thread1.insert(&*chore_db.connection).await.unwrap();
+        chat_thread2.insert(&*chore_db.connection).await.unwrap();
+
+        let threads: Vec<chat_threads::Model> = chat_threads::Entity::find().all(&*chore_db.connection).await.unwrap();
+        for thread in threads {
+            println!("{:?}", thread);
+        }
+    }
+}

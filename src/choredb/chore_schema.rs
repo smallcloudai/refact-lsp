@@ -23,9 +23,9 @@ use sea_orm::{
 
 //     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 //     pub enum Relation {
-//         #[sea_orm(has_many = "crate::chore_schema::chore_events::Model")]
+//         #[sea_orm(has_many = "crate::choredb::chore_schema::chore_events::Model")]
 //         ChoreEvent,
-//         #[sea_orm(has_many = "crate::chore_schema::chat_threads::Model", on_delete = "Cascade")]
+//         #[sea_orm(has_many = "crate::choredb::chore_schema::chat_threads::Model", on_delete = "Cascade")]
 //         ChatThread,
 //     }
 
@@ -66,7 +66,7 @@ use sea_orm::{
 //     }
 // }
 
-mod chat_threads {
+pub mod chat_threads {
     // use super::*;
     use sea_orm::entity::prelude::*;
     // use crate::call_validation::ChatMessage; // Adjust the path as necessary
@@ -77,7 +77,7 @@ mod chat_threads {
     pub struct Model {
         #[sea_orm(primary_key)]
         pub cthread_id: String,
-        #[serde(default)]
+        // #[serde(default)]
         // pub cthread_messages: Vec<ChatMessage>,
         pub cthread_title: String,
         pub cthread_toolset: String,      // quick/explore/agent
@@ -94,9 +94,9 @@ mod chat_threads {
         // Define relationships here if needed
     }
 
-    // impl ActiveModelBehavior for ActiveModel {
+    impl ActiveModelBehavior for ActiveModel {
 
-    // }
+    }
 }
 
 pub struct ChoreDB {
