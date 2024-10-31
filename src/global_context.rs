@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 use std::sync::RwLock as StdRwLock;
+use parking_lot::Mutex as ParkMutex;
 use hyper::StatusCode;
 use structopt::StructOpt;
 use tokenizers::Tokenizer;
@@ -153,7 +154,7 @@ pub struct GlobalContext {
     pub privacy_settings: Arc<PrivacySettings>,
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
     pub codelens_cache: Arc<AMutex<crate::http::routers::v1::code_lens::CodeLensCache>>,
-    pub chore_db: Arc<AMutex<crate::chore_schema::ChoreDB>>,
+    pub chore_db: Arc<ParkMutex<crate::chore_schema::ChoreDB>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing

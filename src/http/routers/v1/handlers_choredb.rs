@@ -15,54 +15,16 @@ use crate::chore_schema::{ChatThread, ChoreEvent, Chore};
 use crate::call_validation::ChatMessage;
 
 
-#[derive(Deserialize)]
-struct ChatMessageGetQuery {
-    cthread_id: String,
-    i: usize,
-}
-
-#[derive(Deserialize)]
-struct ChatMessageSetRequest {
-    cthread_id: String,
-    i: usize,
-    message: ChatMessage,
-}
-
 // db_v1/cthread_sub     { quicksearch, limit } -> SSE
 // db_v1/cthread_update  { Option<cthread_id>, fields } -> cthread_id (and SSE in other channel)
 // db_v1/cthread_delete  { cthread_id } -> ok or detail
 // db_v1/cmessages_sub     { cthread_id } -> SSE
 // db_v1/cmessages_update  { cthread_id, n_onwards } -> ok or detail
 
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct ChatThread {
-//     pub cthread_id: String,
-//     pub cthread_belongs_to_chore_event_id: String,
-//     #[serde(default)]
-//     pub cthread_messages: Vec<ChatMessage>,
-//     pub cthread_title: String,
-//     pub cthread_toolset: String,      // quick/explore/agent
-//     pub cthread_model_used: String,
-//     pub cthread_error: String,        // assign to special value "pause" to avoid auto repost to the model
-//     pub cthread_anything_new: bool,   // the ⚪
-//     pub cthread_created_ts: f64,
-//     pub cthread_updated_ts: f64,
-//     pub cthread_archived_ts: f64,     // associated container died, cannot continue
-// }
-
 pub async fn handle_db_v1_cthread_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    // check if post has cthread_id {
-    //   load ChatThread using chore_db::cthread_get
-    // } else {
-    //   start with ::default()
-    // }
-    // export to Value that is json dict
-    // merge json dict and json incoming
-    // parse ChatThread back
-    // use chore_db::cthread_set to save joined dict
     let cdb = gcx.read().await.chore_db.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {

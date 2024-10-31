@@ -25,9 +25,7 @@ pub struct ChoreEvent {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ChatThread {
     pub cthread_id: String,
-    pub cthread_belongs_to_chore_event_id: String,
-    #[serde(default)]
-    pub cthread_messages: Vec<ChatMessage>,
+    pub cthread_belongs_to_chore_event_id: Option<String>,
     pub cthread_title: String,
     pub cthread_toolset: String,      // quick/explore/agent
     pub cthread_model_used: String,

@@ -130,9 +130,9 @@ pub fn make_v1_router() -> Router {
     builder.layer(CorsLayer::very_permissive())
 }
 
-pub fn make_vmake_db_v1_router1_router() -> Router {
+pub fn make_db_v1_router() -> Router {
     let builder = Router::new()
-        .route("/cthread_update", telemetry_get!(handle_db_v1_cthread_update))
+        .route("/cthread_update", telemetry_post!(handle_db_v1_cthread_update))
         ;
     builder.layer(CorsLayer::very_permissive())
 }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 use indexmap::IndexMap;
-use tokio::sync::Mutex as AMutex;
 use parking_lot::Mutex as ParkMutex;
 use tokio::task;
 use serde::de::DeserializeOwned;
@@ -14,9 +13,9 @@ use crate::call_validation::ChatMessage;
 
 fn _chore_db_init(
     chore_db_fn: String,
-) -> Result<Arc<AMutex<ChoreDB>>, String> {
+) -> Result<Arc<ParkMutex<ChoreDB>>, String> {
     let db = Connection::open_with_flags(
-        chore_db_fn,
+        "experimental_db.sqlite",
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
         | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
         | rusqlite::OpenFlags::SQLITE_OPEN_FULL_MUTEX
@@ -33,60 +32,124 @@ fn _chore_db_init(
         lite: Arc::new(ParkMutex::new(db)),
     };
     // db._permdb_create_table(reset_memory)?;
-    Ok(Arc::new(AMutex::new(db)))
+    Ok(Arc::new(ParkMutex::new(db)))
 }
 
 pub async fn chore_db_init(
     chore_db_fn: String,
-) -> Arc<AMutex<ChoreDB>> {
-    match _chore_db_init(chore_db_fn) {
+) -> Arc<ParkMutex<ChoreDB>> {
+    let db = match _chore_db_init(chore_db_fn) {
         Ok(db) => db,
         Err(err) => panic!("Failed to initialize chore database: {}", err),
+    };
+    let lite_arc = {
+        db.lock().lite.clone()
+    };
+    _create_tables(&*lite_arc.lock(), false).expect("Failed to create tables");
+    db
+}
+
+fn _create_tables(conn: &rusqlite::Connection, reset_memory: bool) -> Result<(), String> {
+    if reset_memory {
+        conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
+        conn.execute("DROP TABLE IF EXISTS cmessage", []).map_err(|e| e.to_string())?;
     }
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS cthreads (
+            cthread_id TEXT PRIMARY KEY,
+            cthread_belongs_to_chore_event_id TEXT DEFAULT NULL,
+            cthread_title TEXT NOT NULL,
+            cthread_toolset TEXT NOT NULL,
+            cthread_model_used TEXT NOT NULL,
+            cthread_error TEXT NOT NULL,
+            cthread_anything_new BOOLEAN NOT NULL,
+            cthread_created_ts REAL NOT NULL,
+            cthread_updated_ts REAL NOT NULL,
+            cthread_archived_ts REAL NOT NULL
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS cmessage (
+            cmessage_belongs_to_cthread_id TEXT NOT NULL,
+            cmessage_n INT NOT NULL,
+            cmessage_json TEXT NOT NULL,
+            PRIMARY KEY (cmessage_belongs_to_cthread_id, cmessage_n)
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub async fn cthread_get(
-    cdb: Arc<AMutex<ChoreDB>>,
+    cdb: Arc<ParkMutex<ChoreDB>>,
     cthread_id: String,
 ) -> Option<ChatThread> {
-    // let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
-    // let chat_message_key = format!("chat-thread-messages|{}/{:03}", cthread_id, i);
-    // _deserialize_json_from_sled::<ChatMessage>(db, &chat_message_key).await
-    return Some(ChatThread::default());
+    let db = cdb.lock();
+    let conn = db.lite.lock();
+    let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_id = ?1").unwrap();
+    let mut rows = match stmt.query(params![cthread_id]) {
+        Ok(rows) => rows,
+        Err(_) => return None,
+    };
+    if let Some(row) = rows.next().unwrap_or(None) {
+        Some(ChatThread {
+            cthread_id: row.get("cthread_id").unwrap(),
+            cthread_belongs_to_chore_event_id: row.get::<_, Option<String>>("cthread_belongs_to_chore_event_id").unwrap(),
+            cthread_title: row.get("cthread_title").unwrap(),
+            cthread_toolset: row.get("cthread_toolset").unwrap(),
+            cthread_model_used: row.get("cthread_model_used").unwrap(),
+            cthread_error: row.get("cthread_error").unwrap(),
+            cthread_anything_new: row.get("cthread_anything_new").unwrap(),
+            cthread_created_ts: row.get("cthread_created_ts").unwrap(),
+            cthread_updated_ts: row.get("cthread_updated_ts").unwrap(),
+            cthread_archived_ts: row.get("cthread_archived_ts").unwrap(),
+        })
+    } else {
+        None
+    }
 }
 
 pub async fn cthread_set(
-    cdb: Arc<AMutex<ChoreDB>>,
+    cdb: Arc<ParkMutex<ChoreDB>>,
     cthread: ChatThread,
 ) {
-    // let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
-    // let chat_message_key = format!("chat-thread-messages|{}/{:03}", cthread_id, i);
-    // _serialize_json_to_sled(db, &chat_message_key, &message).await;
+    let db = cdb.lock();
+    let conn = db.lite.lock();
+    // sqlite dialect "INSERT OR REPLACE INTO"
+    // mysql has INSERT INTO .. ON DUPLICATE KEY UPDATE ..
+    // postgres has INSERT INTO .. ON CONFLICT .. DO UPDATE SET
+    conn.execute(
+        "INSERT OR REPLACE INTO cthreads (
+            cthread_id,
+            cthread_belongs_to_chore_event_id,
+            cthread_title,
+            cthread_toolset,
+            cthread_model_used,
+            cthread_error,
+            cthread_anything_new,
+            cthread_created_ts,
+            cthread_updated_ts,
+            cthread_archived_ts
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            cthread.cthread_id,
+            cthread.cthread_belongs_to_chore_event_id,
+            cthread.cthread_title,
+            cthread.cthread_toolset,
+            cthread.cthread_model_used,
+            cthread.cthread_error,
+            cthread.cthread_anything_new,
+            cthread.cthread_created_ts,
+            cthread.cthread_updated_ts,
+            cthread.cthread_archived_ts,
+        ],
+    ).expect("Failed to insert or replace chat thread");
 }
 
 
-// fn _permdb_create_table(&self, reset_memory: bool) -> Result<(), String> {
-//     let conn = self.conn.lock();
-//     if reset_memory {
-//         conn.execute("DROP TABLE IF EXISTS memories", []).map_err(|e| e.to_string())?;
-//     }
-//     conn.execute(
-//         "CREATE TABLE IF NOT EXISTS memories (
-//             memid TEXT PRIMARY KEY,
-//             m_type TEXT NOT NULL,
-//             m_goal TEXT NOT NULL,
-//             m_project TEXT NOT NULL,
-//             m_payload TEXT NOT NULL,
-//             mstat_correct REAL NOT NULL DEFAULT 0,
-//             mstat_relevant REAL NOT NULL DEFAULT 0,
-//             mstat_times_used INTEGER NOT NULL DEFAULT 0
-//         )",
-//         [],
-//     ).map_err(|e| e.to_string())?;
-//     Ok(())
-// }
 
-// pub async fn chore_db_init(chore_db_fn: String) -> Arc<AMutex<ChoreDB>>
+// pub async fn chore_db_init(chore_db_fn: String) -> Arc<ParkMutex<ChoreDB>>
 // {
 //     let config = sled::Config::default()
 //         .cache_capacity(2_000_000)
@@ -101,7 +164,7 @@ pub async fn cthread_set(
 //     ).await.unwrap());
 //     tracing::info!("/starting Chore DB");
 
-//     Arc::new(AMutex::new(ChoreDB {
+//     Arc::new(ParkMutex::new(ChoreDB {
 //         sleddb: db,
 //     }))
 // }
@@ -135,7 +198,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chore_get(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     chore_id: String,
 // ) -> Option<Chore> {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -144,7 +207,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chore_event_get(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     chore_event_id: String,
 // ) -> Option<ChoreEvent> {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -153,7 +216,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chat_thread_get(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     cthread_id: String,
 // ) -> Option<ChatThread> {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -162,7 +225,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chat_messages_load(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     cthread: &mut ChatThread
 // ) {
 //     let mut messages = Vec::new();
@@ -200,7 +263,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chore_set(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     chore: Chore,
 // ) {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -209,7 +272,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chore_event_set(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     chore_event: ChoreEvent,
 // ) {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -219,7 +282,7 @@ pub async fn cthread_set(
 
 
 // pub async fn chat_thread_set(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     chat_thread: ChatThread,
 // ) {
 //     let db: Arc<sled::Db> = cdb.lock().await.sleddb.clone();
@@ -228,7 +291,7 @@ pub async fn cthread_set(
 // }
 
 // pub async fn chat_messages_save(
-//     cdb: Arc<AMutex<ChoreDB>>,
+//     cdb: Arc<ParkMutex<ChoreDB>>,
 //     cthread: &ChatThread,
 // ) {
 //     for (i, message) in cthread.cthread_messages.iter().enumerate() {
@@ -239,7 +302,7 @@ pub async fn cthread_set(
 
 
 // pub fn chore_new(
-//     cdb: Arc<AMutex<ChoreStuff>>,
+//     cdb: Arc<ParkMutex<ChoreStuff>>,
 //     chore_id: String,  // generate random guid if empty
 //     chore_title: String,
 //     chore_spontaneous_work_enable: bool,
