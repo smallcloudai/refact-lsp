@@ -35,7 +35,7 @@ use crate::http::routers::v1::subchat::{handle_v1_subchat, handle_v1_subchat_sin
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list, handle_ongoing_update_or_create, handle_ongoing_dump};
-use crate::http::routers::v1::handlers_choredb::{handle_db_v1_cthread_update};
+use crate::http::routers::v1::handlers_choredb::{handle_db_v1_cthread_update, handle_db_v1_cthread_sub};
 
 use crate::http::utils::telemetry_wrapper;
 
@@ -132,7 +132,8 @@ pub fn make_v1_router() -> Router {
 
 pub fn make_db_v1_router() -> Router {
     let builder = Router::new()
-        .route("/cthread_update", telemetry_post!(handle_db_v1_cthread_update))
+        .route("/cthread-update", telemetry_post!(handle_db_v1_cthread_update))
+        .route("/cthread-sub", telemetry_post!(handle_db_v1_cthread_sub))
         ;
     builder.layer(CorsLayer::very_permissive())
 }

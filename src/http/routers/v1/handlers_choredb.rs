@@ -7,10 +7,12 @@ use axum::response::Result;
 use axum::extract::Query;
 use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
+use async_stream::stream;
+use rusqlite::{params, Connection};
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::chore_db::{cthread_get, cthread_set};
+use crate::chore_db::{cthread_get, cthreads_from_rows, cthread_set};
 use crate::chore_schema::{ChatThread, ChoreEvent, Chore};
 use crate::call_validation::ChatMessage;
 
@@ -34,7 +36,7 @@ pub async fn handle_db_v1_cthread_update(
 
     let cthread_id = incoming_json.get("cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let mut cthread_rec = if !cthread_id.is_empty() {
-        cthread_get(cdb.clone(), cthread_id.clone()).await.unwrap_or_default()
+        cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default()
     } else {
         ChatThread::default()
     };
@@ -45,7 +47,7 @@ pub async fn handle_db_v1_cthread_update(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
     })?;
 
-    cthread_set(cdb, cthread_rec).await;
+    cthread_set(cdb, cthread_rec);
 
     let response = Response::builder()
         .status(StatusCode::OK)
@@ -68,6 +70,70 @@ fn _merge_json(a: &mut serde_json::Value, b: &serde_json::Value) {
             *a = b.clone();
         }
     }
+}
+
+#[derive(Deserialize)]
+struct CThreadSubscription {
+    #[serde(default)]
+    quicksearch: String,
+    #[serde(default)]
+    limit: usize,
+}
+
+pub async fn handle_db_v1_cthread_sub(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let mut subscription: CThreadSubscription = serde_json::from_slice(&body_bytes).map_err(|e| {
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+    })?;
+    if subscription.limit == 0 {
+        subscription.limit = 100;
+    }
+
+    let cdb = gcx.read().await.chore_db.clone();
+    let lite_arc = cdb.lock().lite.clone();
+
+    let cthreads = if subscription.quicksearch.is_empty() {
+        let conn = lite_arc.lock();
+        let mut stmt = conn.prepare("SELECT * FROM cthreads LIMIT ?1").map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
+        })?;
+        let rows = stmt.query(params![subscription.limit]).map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
+        })?;
+        cthreads_from_rows(rows)
+    } else {
+        let conn = lite_arc.lock();
+        let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_title LIKE ?1 LIMIT ?2").map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
+        })?;
+        let rows = stmt.query(params![format!("%{}%", subscription.quicksearch), subscription.limit]).map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
+        })?;
+        cthreads_from_rows(rows)
+    };
+
+    let sse = stream! {
+        for cthread in cthreads {
+            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&cthread).unwrap()));
+        }
+
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&serde_json::json!("")).unwrap()));
+        }
+    };
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        // .header("Content-Type", "text/event-stream")
+        // .header("Cache-Control", "no-cache")
+        .body(Body::wrap_stream(sse))
+        .unwrap();
+
+    Ok(response)
 }
 
 

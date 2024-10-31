@@ -81,19 +81,27 @@ fn _create_tables(conn: &rusqlite::Connection, reset_memory: bool) -> Result<(),
     Ok(())
 }
 
-pub async fn cthread_get(
+pub fn cthread_get(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread_id: String,
 ) -> Option<ChatThread> {
     let db = cdb.lock();
     let conn = db.lite.lock();
     let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_id = ?1").unwrap();
-    let mut rows = match stmt.query(params![cthread_id]) {
+    let rows = match stmt.query(params![cthread_id]) {
         Ok(rows) => rows,
         Err(_) => return None,
     };
-    if let Some(row) = rows.next().unwrap_or(None) {
-        Some(ChatThread {
+    let mut cthreads = cthreads_from_rows(rows);
+    cthreads.pop()
+}
+
+pub fn cthreads_from_rows(
+    mut rows: rusqlite::Rows,
+) -> Vec<ChatThread> {
+    let mut cthreads = Vec::new();
+    while let Some(row) = rows.next().unwrap_or(None) {
+        cthreads.push(ChatThread {
             cthread_id: row.get("cthread_id").unwrap(),
             cthread_belongs_to_chore_event_id: row.get::<_, Option<String>>("cthread_belongs_to_chore_event_id").unwrap(),
             cthread_title: row.get("cthread_title").unwrap(),
@@ -104,13 +112,12 @@ pub async fn cthread_get(
             cthread_created_ts: row.get("cthread_created_ts").unwrap(),
             cthread_updated_ts: row.get("cthread_updated_ts").unwrap(),
             cthread_archived_ts: row.get("cthread_archived_ts").unwrap(),
-        })
-    } else {
-        None
+        });
     }
+    cthreads
 }
 
-pub async fn cthread_set(
+pub fn cthread_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread: ChatThread,
 ) {
@@ -146,6 +153,8 @@ pub async fn cthread_set(
         ],
     ).expect("Failed to insert or replace chat thread");
 }
+
+
 
 
 
