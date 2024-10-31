@@ -69,6 +69,7 @@ class CmdlineArgs:
         self.model = args.model or caps.code_chat_default_model
         self.project_path = args.path_to_project
         self.always_pause = args.always_pause
+        self.chat_id = args.chat_id
 
     def n_ctx(self):
         return self.caps.code_chat_models[self.model].n_ctx
