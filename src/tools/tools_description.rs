@@ -315,7 +315,15 @@ tools:
         description: "Look at system prompt for location of version control (.git folder) of the active file."
       - name: "command"
         type: "string"
-        description: 'Examples:\njira issue create -tBug -s"New Bug" -yHigh -lbug -lurgent -b"Bug description" --fix-version v2.0\njira issue list --created -7d\njira issue assign ISSUE-1 $(jira me)\n'
+        description: |
+            Don't forget --no-input flag at the end of "issue create" and "issue edit" commands. Examples:
+            jira issue create --type "Task" --summary "Test task by refact" --label backlog --body "this is a test task created by refact" --no-input
+            jira issue list --created -7d
+            jira issue assign ISSUE-1 $(jira me)
+            jira issue edit ISSUE-1 -s"New updated summary" --no-input
+            jira issue move ISSUE-1 "In Progress"
+            jira issue comment add ISSUE-1 "My comment body"
+            jira sprint add SPRINT_ID ISSUE-1
     parameters_required:
       - "project_dir"
       - "command"
