@@ -200,7 +200,7 @@ pub async fn handle_db_v1_cmessages_sub(
             let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_event_id) {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::error!("Error polling cmessages: {:?}", e);
+                    tracing::error!("handle_db_v1_cmessages_sub(1): {:?}", e);
                     break;
                 }
             };
@@ -227,7 +227,8 @@ pub async fn handle_db_v1_cmessages_sub(
                         }
                     },
                     Err(e) => {
-                        tracing::error!("handle_db_v1_cmessages_sub: {}", e);
+                        tracing::error!("handle_db_v1_cmessages_sub(2): {}", e);
+                        break;
                     }
                 }
             }

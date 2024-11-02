@@ -199,7 +199,7 @@ pub async fn handle_db_v1_cthreads_sub(
             let (deleted_cthread_ids, updated_cthread_ids) = match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::error!("Error polling cthreads: {:?}", e);
+                    tracing::error!("handle_db_v1_cthreads_sub(1): {:?}", e);
                     break;
                 }
             };
@@ -212,12 +212,20 @@ pub async fn handle_db_v1_cthreads_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_id in updated_cthread_ids {
-                if let Ok(updated_cthread) = cthread_get(cdb.clone(), updated_id) {
-                    let update_event = json!({
-                        "sub_event": "cthread_update",
-                        "cthread_rec": updated_cthread
-                    });
-                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
+                match _cthread_get_with_quicksearch(cdb.clone(), &updated_id, &post) {
+                    Ok(updated_cthreads) => {
+                        for updated_cthread in updated_cthreads {
+                            let update_event = json!({
+                                "sub_event": "cthread_update",
+                                "cthread_rec": updated_cthread
+                            });
+                            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("handle_db_v1_cthreads_sub(2): {}", e);
+                        break;
+                    }
                 }
             }
         }
@@ -231,6 +239,27 @@ pub async fn handle_db_v1_cthreads_sub(
         .unwrap();
 
     Ok(response)
+}
+
+fn _cthread_get_with_quicksearch(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    cthread_id: &String,
+    post: &CThreadSubscription,
+) -> Result<Vec<CThread>, String> {
+    let db = cdb.lock();
+    let conn = db.lite.lock();
+    let query = if post.quicksearch.is_empty() {
+        "SELECT * FROM cthreads WHERE cthread_id = ?1 ORDER BY cthread_id LIMIT ?2"
+    } else {
+        "SELECT * FROM cthreads WHERE cthread_id = ?1 AND cthread_title LIKE ?2 ORDER BY cthread_id LIMIT ?3"
+    };
+    let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
+    let rows = if post.quicksearch.is_empty() {
+        stmt.query(rusqlite::params![cthread_id, post.limit])
+    } else {
+        stmt.query(rusqlite::params![cthread_id, format!("%{}%", post.quicksearch), post.limit])
+    }.map_err(|e| e.to_string())?;
+    Ok(cthreads_from_rows(rows))
 }
 
 fn _cthread_subsription_poll(

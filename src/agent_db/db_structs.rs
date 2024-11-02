@@ -4,7 +4,7 @@ use tokio::sync::Notify as ANotify;
 use parking_lot::Mutex as ParkMutex;
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Chore {
     pub chore_id: String,
     pub chore_title: String,
@@ -13,7 +13,7 @@ pub struct Chore {
     pub chore_archived_ts: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct ChoreEvent {
     pub chore_event_id: String,
     pub chore_event_belongs_to_chore_id: String,
