@@ -130,6 +130,7 @@ impl AtCommandsPreviewCache {
 }
 
 pub struct GlobalContext {
+    pub shutdown_flag: Arc<AtomicBool>,
     pub cmdline: CommandLine,
     pub http_client: reqwest::Client,
     pub http_client_slowdown: Arc<Semaphore>,
@@ -297,10 +298,9 @@ pub async fn block_until_signal(
 
 pub async fn create_global_context(
     cache_dir: PathBuf,
-) -> (Arc<ARwLock<GlobalContext>>, std::sync::mpsc::Receiver<String>, Arc<AtomicBool>, CommandLine) {
+) -> (Arc<ARwLock<GlobalContext>>, std::sync::mpsc::Receiver<String>, CommandLine) {
     let cmdline = CommandLine::from_args();
     let (ask_shutdown_sender, ask_shutdown_receiver) = std::sync::mpsc::channel::<String>();
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
     let mut http_client_builder = reqwest::Client::builder();
     if cmdline.insecure {
         http_client_builder = http_client_builder.danger_accept_invalid_certs(true)
@@ -313,6 +313,7 @@ pub async fn create_global_context(
         workspace_dirs = vec![path];
     }
     let cx = GlobalContext {
+        shutdown_flag: Arc::new(AtomicBool::new(false)),
         cmdline: cmdline.clone(),
         http_client,
         http_client_slowdown: Arc::new(Semaphore::new(2)),
@@ -344,5 +345,5 @@ pub async fn create_global_context(
         let gcx_weak = Arc::downgrade(&gcx);
         gcx.write().await.documents_state.init_watcher(gcx_weak);
     }
-    (gcx, ask_shutdown_receiver, shutdown_flag, cmdline)
+    (gcx, ask_shutdown_receiver, cmdline)
 }

@@ -21,14 +21,14 @@ async fn handler_404(path: Uri) -> impl IntoResponse {
 
 
 pub async fn start_server(
-    global_context: Arc<ARwLock<GlobalContext>>,
+    gcx: Arc<ARwLock<GlobalContext>>,
     ask_shutdown_receiver: std::sync::mpsc::Receiver<String>,
-    shutdown_flag: Arc<AtomicBool>
 ) -> Option<JoinHandle<()>> {
-    let port = global_context.read().await.cmdline.http_port;
+    let port = gcx.read().await.cmdline.http_port;
     if port == 0 {
         return None
     }
+    let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();
     return Some(tokio::spawn(async move {
         let addr = ([127, 0, 0, 1], port).into();
         let builder = Server::try_bind(&addr).map_err(|e| {
@@ -38,7 +38,7 @@ pub async fn start_server(
         match builder {
             Ok(builder) => {
                 info!("HTTP server listening on {}", addr);
-                let router = make_refact_http_server().layer(Extension(global_context.clone()));
+                let router = make_refact_http_server().layer(Extension(gcx.clone()));
                 let server = builder
                     .serve(router.into_make_service())
                     .with_graceful_shutdown(crate::global_context::block_until_signal(ask_shutdown_receiver, shutdown_flag));

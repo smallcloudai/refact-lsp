@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
 use parking_lot::Mutex as ParkMutex;
-use tokio::time::{interval, Duration};
 use serde_json::json;
 use axum::Extension;
 use axum::response::Result;
@@ -12,6 +11,7 @@ use async_stream::stream;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::agent_db::db_structs::{ChoreDB, CThread};
+use crate::agent_db::db_init::pubsub_sleeping_procedure;
 
 
 pub fn cthread_get(
@@ -94,6 +94,7 @@ pub fn cthread_set(
          VALUES ('cthread', 'update', ?1)",
         rusqlite::params![event_json.to_string()],
     ).expect("Failed to insert pubsub event for chat thread update");
+    db.chore_sleeping_point.notify_waiters();
 }
 
 // HTTP handler
@@ -193,9 +194,10 @@ pub async fn handle_db_v1_cthreads_sub(
             });
             yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
-        let mut interval = interval(Duration::from_secs(1));
         loop {
-            interval.tick().await;
+            if !pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
+                break;
+            }
             match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
                 Ok((deleted_cthread_ids, updated_cthread_ids)) => {
                     for deleted_id in deleted_cthread_ids {
@@ -277,4 +279,3 @@ fn _cthread_subsription_poll(
     }
     Ok((deleted_cthread_ids, updated_cthread_ids))
 }
-

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify as ANotify;
 use parking_lot::Mutex as ParkMutex;
 
 
@@ -57,4 +58,5 @@ pub struct CMessage {
 
 pub struct ChoreDB {
     pub lite: Arc<ParkMutex<rusqlite::Connection>>,
+    pub chore_sleeping_point: Arc<ANotify>,
 }
