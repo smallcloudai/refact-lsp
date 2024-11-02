@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
+use tokio::time::{interval, Duration};
+use parking_lot::Mutex as ParkMutex;
 use serde_json::json;
 use axum::Extension;
 use axum::response::Result;
@@ -75,56 +77,128 @@ pub async fn handle_db_v1_cthreads_sub(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let mut subscription: CThreadSubscription = serde_json::from_slice(&body_bytes).map_err(|e| {
+    let mut post: CThreadSubscription = serde_json::from_slice(&body_bytes).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
-    if subscription.limit == 0 {
-        subscription.limit = 100;
+    if post.limit == 0 {
+        post.limit = 100;
     }
 
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
 
-    let cthreads = if subscription.quicksearch.is_empty() {
-        let conn = lite_arc.lock();
-        let mut stmt = conn.prepare("SELECT * FROM cthreads LIMIT ?1").map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
-        })?;
-        let rows = stmt.query(rusqlite::params![subscription.limit]).map_err(|e| {
+    let (pre_existing_cthreads, mut last_event_id) = {
+        let mut conn = lite_arc.lock();
+        let tx = conn.transaction().unwrap();
+
+        let query = if post.quicksearch.is_empty() {
+            "SELECT * FROM cthreads ORDER BY cthread_id LIMIT ?"
+        } else {
+            "SELECT * FROM cthreads WHERE cthread_title LIKE ? ORDER BY cthread_id LIMIT ?"
+        };
+        let mut stmt = tx.prepare(query).unwrap();
+        let rows = if post.quicksearch.is_empty() {
+            stmt.query(rusqlite::params![post.limit])
+        } else {
+            stmt.query(rusqlite::params![format!("%{}%", post.quicksearch), post.limit])
+        }.map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
-        cthreads_from_rows(rows)
-    } else {
-        let conn = lite_arc.lock();
-        let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_title LIKE ?1 LIMIT ?2").map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
+        let cthreads = cthreads_from_rows(rows);
+
+        let max_event_id: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e))
         })?;
-        let rows = stmt.query(rusqlite::params![format!("%{}%", subscription.quicksearch), subscription.limit]).map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
-        })?;
-        cthreads_from_rows(rows)
+
+        (cthreads, max_event_id)
     };
 
     let sse = stream! {
-        for cthread in cthreads {
-            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&cthread).unwrap()));
+        for cthread in pre_existing_cthreads {
+            let e = json!({
+                "sub_event": "cthread_update",
+                "cthread_rec": cthread
+            });
+            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
-
+        let mut interval = interval(Duration::from_secs(1));
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&serde_json::json!("")).unwrap()));
+            interval.tick().await;
+            match _cthread_poll_sub(lite_arc.clone(), &mut last_event_id) {
+                Ok((deleted_cthread_ids, updated_cthread_ids)) => {
+                    for deleted_id in deleted_cthread_ids {
+                        let delete_event = json!({
+                            "sub_event": "cthread_delete",
+                            "cthread_id": deleted_id,
+                        });
+                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
+                    }
+                    for updated_id in updated_cthread_ids {
+                        if let Ok(updated_cthread) = cthread_get(cdb.clone(), updated_id) {
+                            let update_event = json!({
+                                "sub_event": "cthread_update",
+                                "cthread_rec": updated_cthread
+                            });
+                            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Error polling cthreads: {:?}", e);
+                    // yield an error event to the client here?
+                    break;
+                }
+            }
         }
     };
 
     let response = Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
-        // .header("Content-Type", "text/event-stream")
-        // .header("Cache-Control", "no-cache")
+        .header("Cache-Control", "no-cache")
         .body(Body::wrap_stream(sse))
         .unwrap();
 
     Ok(response)
+}
+
+fn _cthread_poll_sub(
+    lite_arc: Arc<ParkMutex<rusqlite::Connection>>,
+    seen_id: &mut i64
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let conn = lite_arc.lock();
+    let mut stmt = conn.prepare("
+        SELECT pubevent_id, pubevent_action, pubevent_json
+        FROM pubsub_events
+        WHERE pubevent_id > ?1
+        AND pubevent_channel = 'cthread'
+        AND (pubevent_action = 'update' OR pubevent_action = 'delete')
+        ORDER BY pubevent_id ASC
+    ").unwrap();
+    let mut rows = stmt.query([*seen_id]).map_err(|e| format!("Failed to execute query: {}", e))?;
+    let mut deleted_cthread_ids = Vec::new();
+    let mut updated_cthread_ids = Vec::new();
+    while let Some(row) = rows.next().map_err(|e| format!("Failed to fetch row: {}", e))? {
+        let id: i64 = row.get(0).map_err(|e| format!("Failed to get pubevent_id: {}", e))?;
+        let action: String = row.get(1).map_err(|e| format!("Failed to get pubevent_action: {}", e))?;
+        let json: String = row.get(2).map_err(|e| format!("Failed to get pubevent_json: {}", e))?;
+        let parsed_json: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        let cthread_id = parsed_json["cthread_id"].as_str()
+            .ok_or_else(|| "Missing cthread_id in JSON".to_string())?
+            .to_string();
+        match action.as_str() {
+            "delete" => deleted_cthread_ids.push(cthread_id),
+            "update" => updated_cthread_ids.push(cthread_id),
+            _ => return Err(format!("Unknown action: {}", action)),
+        }
+        *seen_id = id;
+    }
+    Ok((deleted_cthread_ids, updated_cthread_ids))
 }
 
 
@@ -137,7 +211,7 @@ pub async fn handle_db_v1_cmessages_sub(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let subscription: CMessagesSubscription = serde_json::from_slice(&body_bytes).map_err(|e| {
+    let post: CMessagesSubscription = serde_json::from_slice(&body_bytes).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
@@ -149,7 +223,7 @@ pub async fn handle_db_v1_cmessages_sub(
         let mut stmt = conn.prepare("SELECT * FROM cmessages WHERE cmessage_belongs_to_cthread_id = ?1 ORDER BY cmessage_num, cmessage_alt").map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
         })?;
-        let rows = stmt.query(rusqlite::params![subscription.cmessage_belongs_to_cthread_id]).map_err(|e| {
+        let rows = stmt.query(rusqlite::params![post.cmessage_belongs_to_cthread_id]).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
         cmessages_from_rows(rows)
@@ -168,7 +242,7 @@ pub async fn handle_db_v1_cmessages_sub(
 
     let response = Response::builder()
         .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream")
+        .header("Content-Type", "application/json")
         .header("Cache-Control", "no-cache")
         .body(Body::wrap_stream(sse))
         .unwrap();

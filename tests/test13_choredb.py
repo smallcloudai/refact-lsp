@@ -2,6 +2,8 @@ import aiohttp
 import asyncio
 import termcolor
 import json
+import argparse
+import time
 
 BASE_URL = "http://127.0.0.1:8001"
 
@@ -23,8 +25,10 @@ async def listen_to_sse(session):
         print(termcolor.colored("Connected to SSE", "green"))
         async for line in response.content:
             if line:
-                decoded_line = line.decode('utf-8')
-                print(termcolor.colored(f"Received SSE: {decoded_line}", "yellow"))
+                decoded_line = line.decode('utf-8').strip()
+                if decoded_line:
+                    print(termcolor.colored(decoded_line, "yellow"))
+                    print()
 
 
 async def update_cthread(session, cthread_id):
@@ -41,17 +45,28 @@ async def update_cthread(session, cthread_id):
     print(termcolor.colored("cthread_update", "green"))
 
 
-async def main():
-    cthread_id = "silly_thread_123"
+async def main(only_sub=False, only_update=False):
+    cthread_id = f"silly_thread_{int(time.time())}"  # Modified this line
     headers = {"Content-Type": "application/json"}
 
     async with aiohttp.ClientSession() as session:
-        sse_task = asyncio.create_task(listen_to_sse(session))
-        update_task = asyncio.create_task(update_cthread(session, cthread_id))
-        await asyncio.gather(sse_task, update_task)
+        tasks = []
+
+        if only_sub or (not only_sub and not only_update):
+            tasks.append(asyncio.create_task(listen_to_sse(session)))
+
+        if only_update or (not only_sub and not only_update):
+            tasks.append(asyncio.create_task(update_cthread(session, cthread_id)))
+
+        await asyncio.gather(*tasks)
 
     print(termcolor.colored("\nTEST PASSED", "green", attrs=["bold"]))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="ChoreDB test script")
+    parser.add_argument("--only-sub", action="store_true", help="Run only the subscription part")
+    parser.add_argument("--only-update", action="store_true", help="Run only the update part")
+    args = parser.parse_args()
+
+    asyncio.run(main(only_sub=args.only_sub, only_update=args.only_update))

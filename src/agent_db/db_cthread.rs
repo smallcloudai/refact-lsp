@@ -75,4 +75,14 @@ pub fn cthread_set(
             cthread.cthread_archived_ts,
         ],
     ).expect("Failed to insert or replace chat thread");
+
+    let event_json = serde_json::json!({
+        "cthread_id": cthread.cthread_id,
+        "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
+    });
+    conn.execute(
+        "INSERT INTO pubsub_events (pubevent_channel, pubevent_action, pubevent_json)
+         VALUES ('cthread', 'update', ?1)",
+        params![event_json.to_string()],
+    ).expect("Failed to insert pubsub event for chat thread update");
 }
