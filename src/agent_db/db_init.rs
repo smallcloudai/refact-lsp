@@ -1,18 +1,12 @@
 use std::sync::Arc;
-use std::time::Instant;
-use indexmap::IndexMap;
 use parking_lot::Mutex as ParkMutex;
-use tokio::task;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 
-use crate::agent_db::db_structs::{ChoreDB, Chore, ChoreEvent, CThread, CMessage};
-use crate::call_validation::ChatMessage;
+use crate::agent_db::db_structs::ChoreDB;
 
 
 fn _make_connection(
-    chore_db_fn: String,
+    _chore_db_fn: String,
 ) -> Result<Arc<ParkMutex<ChoreDB>>, String> {
     let db = Connection::open_with_flags(
         "experimental_db.sqlite",

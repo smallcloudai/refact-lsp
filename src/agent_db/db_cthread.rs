@@ -1,14 +1,8 @@
 use std::sync::Arc;
-use std::time::Instant;
-use indexmap::IndexMap;
 use parking_lot::Mutex as ParkMutex;
-use tokio::task;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use rusqlite::{params, Connection};
+use rusqlite::params;
 
-use crate::agent_db::db_structs::{ChoreDB, Chore, ChoreEvent, CThread, CMessage};
-use crate::call_validation::ChatMessage;
+use crate::agent_db::db_structs::{ChoreDB, CThread};
 
 
 pub fn cthread_get(

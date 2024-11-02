@@ -1,17 +1,7 @@
-use std::sync::Arc;
-use std::time::Instant;
-use indexmap::IndexMap;
-use parking_lot::Mutex as ParkMutex;
-use tokio::task;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use rusqlite::{params, Connection};
-
-use crate::agent_db::db_structs::{ChoreDB, Chore, ChoreEvent, CThread, CMessage};
-use crate::call_validation::ChatMessage;
+use rusqlite::Connection;
 
 
-pub fn create_tables_20241102(conn: &rusqlite::Connection, reset_memory: bool) -> Result<(), String> {
+pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(), String> {
     if reset_memory {
         conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cmessage", []).map_err(|e| e.to_string())?;

@@ -1,21 +1,17 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::json;
-use indexmap::IndexMap;
 use axum::Extension;
 use axum::response::Result;
-use axum::extract::Query;
 use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use async_stream::stream;
-use rusqlite::{params, Connection};
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::agent_db::db_cthread::{cthread_get, cthreads_from_rows, cthread_set};
 use crate::agent_db::db_cmessage::{cmessage_get, cmessages_from_rows, cmessage_set};
-use crate::agent_db::db_structs::{Chore, ChoreEvent, CThread, CMessage};
-use crate::call_validation::ChatMessage;
+use crate::agent_db::db_structs::{CThread, CMessage};
 
 
 pub async fn handle_db_v1_cthread_update(
@@ -94,7 +90,7 @@ pub async fn handle_db_v1_cthreads_sub(
         let mut stmt = conn.prepare("SELECT * FROM cthreads LIMIT ?1").map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
         })?;
-        let rows = stmt.query(params![subscription.limit]).map_err(|e| {
+        let rows = stmt.query(rusqlite::params![subscription.limit]).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
         cthreads_from_rows(rows)
@@ -103,7 +99,7 @@ pub async fn handle_db_v1_cthreads_sub(
         let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_title LIKE ?1 LIMIT ?2").map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
         })?;
-        let rows = stmt.query(params![format!("%{}%", subscription.quicksearch), subscription.limit]).map_err(|e| {
+        let rows = stmt.query(rusqlite::params![format!("%{}%", subscription.quicksearch), subscription.limit]).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
         cthreads_from_rows(rows)
@@ -153,7 +149,7 @@ pub async fn handle_db_v1_cmessages_sub(
         let mut stmt = conn.prepare("SELECT * FROM cmessages WHERE cmessage_belongs_to_cthread_id = ?1 ORDER BY cmessage_num, cmessage_alt").map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
         })?;
-        let rows = stmt.query(params![subscription.cmessage_belongs_to_cthread_id]).map_err(|e| {
+        let rows = stmt.query(rusqlite::params![subscription.cmessage_belongs_to_cthread_id]).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
         cmessages_from_rows(rows)

@@ -2,8 +2,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use parking_lot::Mutex as ParkMutex;
 
-use crate::call_validation::ChatMessage;
-
 
 #[derive(Serialize, Deserialize)]
 pub struct Chore {
