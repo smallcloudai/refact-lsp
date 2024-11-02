@@ -4,7 +4,7 @@ use rusqlite::Connection;
 pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(), String> {
     if reset_memory {
         conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
-        conn.execute("DROP TABLE IF EXISTS cmessage", []).map_err(|e| e.to_string())?;
+        conn.execute("DROP TABLE IF EXISTS cmessages", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS event_channel", []).map_err(|e| e.to_string())?;
     }
     conn.execute(
@@ -23,7 +23,7 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
         [],
     ).map_err(|e| e.to_string())?;
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS cmessage (
+        "CREATE TABLE IF NOT EXISTS cmessages (
             cmessage_belongs_to_cthread_id TEXT NOT NULL,
             cmessage_alt INT NOT NULL,
             cmessage_num INT NOT NULL,

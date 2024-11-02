@@ -12,8 +12,7 @@ use hyper::StatusCode;
 use structopt::StructOpt;
 use tokenizers::Tokenizer;
 use tokio::signal;
-use tokio::sync::{Mutex as AMutex, Semaphore};
-use tokio::sync::RwLock as ARwLock;
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock, Semaphore, Notify as ANotify};
 use tracing::{error, info};
 
 use crate::ast::ast_indexer_thread::AstIndexService;
@@ -246,7 +245,8 @@ pub async fn look_for_piggyback_fields(
 
 pub async fn block_until_signal(
     ask_shutdown_receiver: std::sync::mpsc::Receiver<String>,
-    shutdown_flag: Arc<AtomicBool>
+    shutdown_flag: Arc<AtomicBool>,
+    chore_sleeping_point: Arc<ANotify>,
 ) {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -294,6 +294,7 @@ pub async fn block_until_signal(
             info!("graceful shutdown to store telemetry");
         }
     }
+    chore_sleeping_point.notify_waiters();
 }
 
 pub async fn create_global_context(

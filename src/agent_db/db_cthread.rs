@@ -11,7 +11,7 @@ use async_stream::stream;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::agent_db::db_structs::{ChoreDB, CThread};
-use crate::agent_db::db_init::pubsub_sleeping_procedure;
+use crate::agent_db::chore_pubsub_sleeping_procedure;
 
 
 pub fn cthread_get(
@@ -53,11 +53,14 @@ pub fn cthread_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread: CThread,
 ) {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
     // sqlite dialect "INSERT OR REPLACE INTO"
     // mysql has INSERT INTO .. ON DUPLICATE KEY UPDATE ..
     // postgres has INSERT INTO .. ON CONFLICT .. DO UPDATE SET
+    let conn = lite.lock();
     conn.execute(
         "INSERT OR REPLACE INTO cthreads (
             cthread_id,
@@ -84,17 +87,12 @@ pub fn cthread_set(
             cthread.cthread_archived_ts,
         ],
     ).expect("Failed to insert or replace chat thread");
-
-    let event_json = serde_json::json!({
+    drop(conn);
+    let j = serde_json::json!({
         "cthread_id": cthread.cthread_id,
         "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
     });
-    conn.execute(
-        "INSERT INTO pubsub_events (pubevent_channel, pubevent_action, pubevent_json)
-         VALUES ('cthread', 'update', ?1)",
-        rusqlite::params![event_json.to_string()],
-    ).expect("Failed to insert pubsub event for chat thread update");
-    db.chore_sleeping_point.notify_waiters();
+    crate::agent_db::chore_pubub_push(&lite, "cthread", "update", &j, &chore_sleeping_point);
 }
 
 // HTTP handler
@@ -195,7 +193,7 @@ pub async fn handle_db_v1_cthreads_sub(
             yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
         loop {
-            if !pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
+            if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
                 break;
             }
             match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {

@@ -1,3 +1,10 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use parking_lot::Mutex as ParkMutex;
+use tokio::sync::RwLock as ARwLock;
+
+use crate::global_context::GlobalContext;
+
 
 pub mod db_chore;
 pub mod db_chore_event;
@@ -6,6 +13,44 @@ pub mod db_cthread;
 pub mod db_init;
 pub mod db_schema_20241102;
 pub mod db_structs;
+
+pub fn chore_pubub_push(
+    lite: &Arc<ParkMutex<rusqlite::Connection>>,
+    channel: &str,
+    action: &str,
+    event_json: &serde_json::Value,
+    notify_point: &Arc<tokio::sync::Notify>,
+) {
+    let conn = lite.lock();
+    match conn.execute(
+        "INSERT INTO pubsub_events (pubevent_channel, pubevent_action, pubevent_json)
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![channel, action, event_json.to_string()],
+    ) {
+        Ok(_) => {},
+        Err(e) => {
+            tracing::error!("Failed to insert pubsub event: {}", e);
+        }
+    }
+    notify_point.notify_waiters();
+}
+
+pub async fn chore_pubsub_sleeping_procedure(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    db: &Arc<ParkMutex<db_structs::ChoreDB>>,
+) -> bool {
+    let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();
+    if shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+    let sleeping_point = db.lock().chore_sleeping_point.clone();
+    match tokio::time::timeout(tokio::time::Duration::from_secs(5), sleeping_point.notified()).await {
+        Ok(_) => { },
+        Err(_) => { },   // timeout
+    }
+    let should_continue = !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed);
+    should_continue
+}
 
 
 pub fn merge_json(a: &mut serde_json::Value, b: &serde_json::Value) {

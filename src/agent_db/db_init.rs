@@ -1,13 +1,9 @@
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Notify as ANotify;
-use tokio::sync::RwLock as ARwLock;
 use parking_lot::Mutex as ParkMutex;
 use rusqlite::Connection;
-use std::sync::atomic::AtomicBool;
 
 use crate::agent_db::db_structs::ChoreDB;
-use crate::global_context::GlobalContext;
 
 
 fn _make_connection(
@@ -45,21 +41,4 @@ pub async fn chore_db_init(
     };
     crate::agent_db::db_schema_20241102::create_tables_20241102(&*lite_arc.lock(), false).expect("Failed to create tables");
     db
-}
-
-pub async fn pubsub_sleeping_procedure(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    db: &Arc<ParkMutex<ChoreDB>>,
-) -> bool {
-    let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();
-    if shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
-        return false;
-    }
-    let sleeping_point = db.lock().chore_sleeping_point.clone();
-    match tokio::time::timeout(Duration::from_secs(5), sleeping_point.notified()).await {
-        Ok(_) => { },
-        Err(_) => { },   // timeout
-    }
-    let should_continue = !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed);
-    should_continue
 }
