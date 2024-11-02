@@ -36,8 +36,8 @@ use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_st
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list, handle_ongoing_update_or_create, handle_ongoing_dump};
 
-use crate::http::routers::v1::handlers_choredb::{handle_db_v1_cthread_update, handle_db_v1_cthreads_sub};
-use crate::http::routers::v1::handlers_choredb::{handle_db_v1_cmessage_update, handle_db_v1_cmessages_sub};
+use crate::agent_db::db_cthread::{handle_db_v1_cthread_update, handle_db_v1_cthreads_sub};
+use crate::agent_db::db_cmessage::{handle_db_v1_cmessage_update, handle_db_v1_cmessages_sub};
 
 use crate::http::utils::telemetry_wrapper;
 
@@ -59,8 +59,6 @@ mod status;
 mod subchat;
 mod gui_help_handlers;
 mod patch;
-
-pub mod handlers_choredb;
 
 #[cfg(feature="vecdb")]
 pub mod handlers_memdb;
