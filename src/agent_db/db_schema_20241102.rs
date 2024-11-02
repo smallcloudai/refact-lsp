@@ -3,10 +3,19 @@ use rusqlite::Connection;
 
 pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(), String> {
     if reset_memory {
+        conn.execute("DROP TABLE IF EXISTS pubsub_events", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cmessages", []).map_err(|e| e.to_string())?;
-        conn.execute("DROP TABLE IF EXISTS event_channel", []).map_err(|e| e.to_string())?;
     }
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pubsub_events (
+            pubevent_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pubevent_channel TEXT NOT NULL,
+            pubevent_action TEXT NOT NULL,
+            pubevent_json TEXT NOT NULL
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS cthreads (
             cthread_id TEXT PRIMARY KEY,
@@ -32,16 +41,10 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             cmessage_usage_prompt TEXT NOT NULL,
             cmessage_usage_completion TEXT NOT NULL,
             cmessage_json TEXT NOT NULL,
-            PRIMARY KEY (cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num)
-        )",
-        [],
-    ).map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS pubsub_events (
-            pubevent_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pubevent_channel TEXT NOT NULL,
-            pubevent_action TEXT NOT NULL,
-            pubevent_json TEXT NOT NULL
+            PRIMARY KEY (cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num),
+            FOREIGN KEY (cmessage_belongs_to_cthread_id)
+                REFERENCES cthreads(cthread_id)
+                ON DELETE CASCADE
         )",
         [],
     ).map_err(|e| e.to_string())?;
