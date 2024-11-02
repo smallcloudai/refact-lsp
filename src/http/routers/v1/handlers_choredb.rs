@@ -12,9 +12,9 @@ use rusqlite::{params, Connection};
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::chore_db::{cthread_get, cthreads_from_rows, cthread_set};
-use crate::chore_db::{cmessage_get, cmessages_from_rows, cmessage_set};
-use crate::chore_schema::{Chore, ChoreEvent, CThread, CMessage};
+use crate::agent_db::db_cthread::{cthread_get, cthreads_from_rows, cthread_set};
+use crate::agent_db::db_cmessage::{cmessage_get, cmessages_from_rows, cmessage_set};
+use crate::agent_db::db_structs::{Chore, ChoreEvent, CThread, CMessage};
 use crate::call_validation::ChatMessage;
 
 

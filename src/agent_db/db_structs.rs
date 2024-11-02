@@ -10,12 +10,12 @@ pub struct Chore {
     pub chore_id: String,
     pub chore_title: String,
     pub chore_spontaneous_work_enable: bool,
-    pub chore_event_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ChoreEvent {
     pub chore_event_id: String,
+    pub chore_event_belongs_to_chore_id: String,
     pub chore_event_summary: String,
     pub chore_event_ts: f64,
     pub chore_event_link: String,
@@ -54,7 +54,7 @@ pub struct CMessage {
 // db_v1/cthread_update  { Option<cthread_id>, fields } -> cthread_id (and SSE in other channel)
 // db_v1/cthread_delete  { cthread_id } -> ok or detail
 // db_v1/cmessages_sub     { cthread_id } -> SSE
-// db_v1/cmessages_update  { cthread_id, n_onwards } -> ok or detail
+// db_v1/cmessage_update  { cthread_id, n_onwards } -> ok or detail
 
 
 pub struct ChoreDB {
