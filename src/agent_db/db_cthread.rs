@@ -18,8 +18,8 @@ pub fn cthread_get(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread_id: String,
 ) -> Result<CThread, String> {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
     let mut stmt = conn.prepare("SELECT * FROM cthreads WHERE cthread_id = ?1")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query(rusqlite::params![cthread_id])
@@ -155,32 +155,12 @@ pub async fn handle_db_v1_cthreads_sub(
     let lite_arc = cdb.lock().lite.clone();
 
     let (pre_existing_cthreads, mut last_event_id) = {
-        let mut conn = lite_arc.lock();
-        let tx = conn.transaction().unwrap();
-
-        let query = if post.quicksearch.is_empty() {
-            "SELECT * FROM cthreads ORDER BY cthread_id LIMIT ?"
-        } else {
-            "SELECT * FROM cthreads WHERE cthread_title LIKE ? ORDER BY cthread_id LIMIT ?"
-        };
-        let mut stmt = tx.prepare(query).unwrap();
-        let rows = if post.quicksearch.is_empty() {
-            stmt.query(rusqlite::params![post.limit])
-        } else {
-            stmt.query(rusqlite::params![format!("%{}%", post.quicksearch), post.limit])
-        }.map_err(|e| {
+        let lite = cdb.lock().lite.clone();
+        let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
+            .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
+        let cthreads = _cthread_get_with_quicksearch(cdb.clone(), &String::new(), &post).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
-        let cthreads = cthreads_from_rows(rows);
-
-        let max_event_id: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e))
-        })?;
-
         (cthreads, max_event_id)
     };
 
@@ -199,7 +179,7 @@ pub async fn handle_db_v1_cthreads_sub(
             let (deleted_cthread_ids, updated_cthread_ids) = match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::error!("handle_db_v1_cthreads_sub(1): {:?}", e);
+                    tracing::error!("handle_db_v1_cthreads_sub(1): {}", e);
                     break;
                 }
             };
@@ -246,16 +226,16 @@ fn _cthread_get_with_quicksearch(
     cthread_id: &String,
     post: &CThreadSubscription,
 ) -> Result<Vec<CThread>, String> {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
-    let query = if post.quicksearch.is_empty() {
-        "SELECT * FROM cthreads WHERE cthread_id = ?1 ORDER BY cthread_id LIMIT ?2"
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
+    let query = if cthread_id.is_empty() {
+        "SELECT * FROM cthreads WHERE cthread_title LIKE ?1 ORDER BY cthread_id LIMIT ?2"
     } else {
         "SELECT * FROM cthreads WHERE cthread_id = ?1 AND cthread_title LIKE ?2 ORDER BY cthread_id LIMIT ?3"
     };
     let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
-    let rows = if post.quicksearch.is_empty() {
-        stmt.query(rusqlite::params![cthread_id, post.limit])
+    let rows = if cthread_id.is_empty() {
+        stmt.query(rusqlite::params![format!("%{}%", post.quicksearch), post.limit])
     } else {
         stmt.query(rusqlite::params![cthread_id, format!("%{}%", post.quicksearch), post.limit])
     }.map_err(|e| e.to_string())?;

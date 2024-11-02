@@ -87,8 +87,8 @@ pub fn cmessage_get(
     cmessage_alt: i32,
     cmessage_num: i32,
 ) -> Result<CMessage, String> {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
     let mut stmt = conn.prepare(
         "SELECT * FROM cmessages WHERE cmessage_belongs_to_cthread_id = ?1 AND cmessage_alt = ?2 AND cmessage_num = ?3"
     ).map_err(|e| e.to_string())?;

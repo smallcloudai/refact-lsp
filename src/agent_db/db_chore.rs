@@ -73,8 +73,8 @@ pub fn chore_get(
     cdb: Arc<ParkMutex<ChoreDB>>,
     chore_id: String,
 ) -> Result<Chore, String> {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
     let mut stmt = conn.prepare("SELECT * FROM chores WHERE chore_id = ?1").unwrap();
     let rows = stmt.query(params![chore_id]).map_err(|e| e.to_string())?;
     let chores = chores_from_rows(rows);
@@ -141,27 +141,11 @@ pub async fn handle_db_v1_chores_sub(
     let lite_arc = cdb.lock().lite.clone();
 
     let (pre_existing_chores, mut last_event_id) = {
-        let mut conn = lite_arc.lock();
-        let tx = conn.transaction().unwrap();
-
-        let mut stmt = tx.prepare("
-            SELECT * FROM chores
-            WHERE chore_title LIKE ?1 AND (?2 = 0 OR chore_archived_ts IS NOT NULL)
-            ORDER BY chore_created_ts
-            LIMIT ?3
-        ").unwrap();
-        let rows = stmt.query(rusqlite::params![
-            format!("%{}%", post.quicksearch),
-            post.only_archived as i32,
-            post.limit as i64
-        ]).map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
-        })?;
-        let chores = chores_from_rows(rows);
-
-        let max_event_id: i64 = tx.query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
+        let lite = cdb.lock().lite.clone();
+        let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
             .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
-
+        let chores = _chore_get_with_quicksearch(cdb.clone(), String::new(), &post)
+            .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         (chores, max_event_id)
     };
 
@@ -181,7 +165,7 @@ pub async fn handle_db_v1_chores_sub(
             let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_event_id) {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::error!("handle_db_v1_chores_sub(1): {:?}", e);
+                    tracing::error!("handle_db_v1_chores_sub(1): {}", e);
                     break;
                 }
             };
@@ -193,7 +177,13 @@ pub async fn handle_db_v1_chores_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_key in updated_chore_keys {
-                let chores = _chore_get_with_quicksearch(cdb.clone(), updated_key.clone(), &post);
+                let chores = match _chore_get_with_quicksearch(cdb.clone(), updated_key.clone(), &post) {
+                    Ok(chores) => chores,
+                    Err(e) => {
+                        tracing::error!("handle_db_v1_chores_sub(2): {}", e);
+                        break;
+                    }
+                };
                 match chores.into_iter().next() {
                     Some(updated_chore) => {
                         let update_event = json!({
@@ -222,19 +212,31 @@ fn _chore_get_with_quicksearch(
     cdb: Arc<ParkMutex<ChoreDB>>,
     chore_id: String,
     post: &ChoresSubscriptionPost,
-) -> Vec<Chore> {
-    let db = cdb.lock();
-    let conn = db.lite.lock();
-    let mut stmt = conn.prepare("
-        SELECT * FROM chores
-        WHERE chore_id = ?1 AND (chore_title LIKE ?2 AND (?3 = 0 OR chore_archived_ts IS NOT NULL))
-    ").unwrap();
-    let rows = stmt.query(params![
-        chore_id,
-        format!("%{}%", post.quicksearch),
-        post.only_archived as i32
-    ]).unwrap();
-    chores_from_rows(rows)
+) -> Result<Vec<Chore>, String> {
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
+    let query = if chore_id.is_empty() {
+        "SELECT * FROM chores WHERE chore_title LIKE ?1 AND (?2 = 1 AND chore_archived_ts IS NOT NULL OR ?2 = 0 AND chore_archived_ts IS NULL) LIMIT ?3"
+    } else {
+        "SELECT * FROM chores WHERE chore_id = ?1 AND chore_title LIKE ?2 AND (?3 = 1 AND chore_archived_ts IS NOT NULL OR ?3 = 0 AND chore_archived_ts IS NULL) LIMIT ?4"
+    };
+    let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
+    let rows = if chore_id.is_empty() {
+        stmt.query(params![
+            format!("%{}%", post.quicksearch),
+            post.only_archived as i32,
+            post.limit as i64
+        ]).map_err(|e| e.to_string())?
+    } else {
+        stmt.query(params![
+            chore_id,
+            format!("%{}%", post.quicksearch),
+            post.only_archived as i32,
+            post.limit as i64
+        ]).map_err(|e| e.to_string())?
+    };
+
+    Ok(chores_from_rows(rows))
 }
 
 fn _chore_subscription_poll(
