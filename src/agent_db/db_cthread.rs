@@ -196,29 +196,28 @@ pub async fn handle_db_v1_cthreads_sub(
             if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
                 break;
             }
-            match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
-                Ok((deleted_cthread_ids, updated_cthread_ids)) => {
-                    for deleted_id in deleted_cthread_ids {
-                        let delete_event = json!({
-                            "sub_event": "cthread_delete",
-                            "cthread_id": deleted_id,
-                        });
-                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
-                    }
-                    for updated_id in updated_cthread_ids {
-                        if let Ok(updated_cthread) = cthread_get(cdb.clone(), updated_id) {
-                            let update_event = json!({
-                                "sub_event": "cthread_update",
-                                "cthread_rec": updated_cthread
-                            });
-                            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
-                        }
-                    }
-                },
+            let (deleted_cthread_ids, updated_cthread_ids) = match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
+                Ok(x) => x,
                 Err(e) => {
                     tracing::error!("Error polling cthreads: {:?}", e);
-                    // yield an error event to the client here?
                     break;
+                }
+            };
+
+            for deleted_id in deleted_cthread_ids {
+                let delete_event = json!({
+                    "sub_event": "cthread_delete",
+                    "cthread_id": deleted_id,
+                });
+                yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
+            }
+            for updated_id in updated_cthread_ids {
+                if let Ok(updated_cthread) = cthread_get(cdb.clone(), updated_id) {
+                    let update_event = json!({
+                        "sub_event": "cthread_update",
+                        "cthread_rec": updated_cthread
+                    });
+                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
                 }
             }
         }
