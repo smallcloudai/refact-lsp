@@ -9,6 +9,8 @@ pub struct Chore {
     pub chore_id: String,
     pub chore_title: String,
     pub chore_spontaneous_work_enable: bool,
+    pub chore_created_ts: f64,
+    pub chore_archived_ts: f64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -18,7 +20,7 @@ pub struct ChoreEvent {
     pub chore_event_summary: String,
     pub chore_event_ts: f64,
     pub chore_event_link: String,
-    pub chore_event_cthread_id: String,
+    pub chore_event_cthread_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]

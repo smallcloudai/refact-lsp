@@ -4,6 +4,8 @@ use rusqlite::Connection;
 pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(), String> {
     if reset_memory {
         conn.execute("DROP TABLE IF EXISTS pubsub_events", []).map_err(|e| e.to_string())?;
+        conn.execute("DROP TABLE IF EXISTS chores", []).map_err(|e| e.to_string())?;
+        conn.execute("DROP TABLE IF EXISTS chore_events", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cmessages", []).map_err(|e| e.to_string())?;
     }
@@ -13,6 +15,30 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             pubevent_channel TEXT NOT NULL,
             pubevent_action TEXT NOT NULL,
             pubevent_json TEXT NOT NULL
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chores (
+            chore_id TEXT PRIMARY KEY,
+            chore_title TEXT NOT NULL,
+            chore_spontaneous_work_enable BOOLEAN NOT NULL,
+            chore_created_ts REAL NOT NULL,
+            chore_archived_ts REAL NOT NULL
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chore_events (
+            chore_event_id TEXT PRIMARY KEY,
+            chore_event_belongs_to_chore_id TEXT NOT NULL,
+            chore_event_summary TEXT NOT NULL,
+            chore_event_ts REAL NOT NULL,
+            chore_event_link TEXT NOT NULL,
+            chore_event_cthread_id TEXT,                -- optional, can be NULL
+            FOREIGN KEY (chore_event_belongs_to_chore_id)
+                REFERENCES chores(chore_id)
+                ON DELETE CASCADE
         )",
         [],
     ).map_err(|e| e.to_string())?;
@@ -27,7 +53,10 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             cthread_anything_new BOOLEAN NOT NULL,
             cthread_created_ts REAL NOT NULL,
             cthread_updated_ts REAL NOT NULL,
-            cthread_archived_ts REAL NOT NULL
+            cthread_archived_ts REAL NOT NULL,
+            FOREIGN KEY (cthread_belongs_to_chore_event_id)
+                REFERENCES chore_events(chore_event_id)
+                ON DELETE CASCADE                       -- means cthread will be deleted together with chore_event, even though chore_event_cthread_id is optional
         )",
         [],
     ).map_err(|e| e.to_string())?;
@@ -48,5 +77,9 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
         )",
         [],
     ).map_err(|e| e.to_string())?;
+    // Useful to speed up SELECT .. JOIN
+    // conn.execute("CREATE INDEX IF NOT EXISTS idx_chore_event_belongs_to_chore_id ON chore_events (chore_event_belongs_to_chore_id)", []).map_err(|e| e.to_string())?;
+    // conn.execute("CREATE INDEX IF NOT EXISTS idx_cthread_belongs_to_chore_event_id ON cthreads (cthread_belongs_to_chore_event_id)", []).map_err(|e| e.to_string())?;
+    // conn.execute("CREATE INDEX IF NOT EXISTS idx_cmessage_belongs_to_cthread_id ON cmessages (cmessage_belongs_to_cthread_id)", []).map_err(|e| e.to_string())?;
     Ok(())
 }
