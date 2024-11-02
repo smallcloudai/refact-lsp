@@ -5,7 +5,7 @@ use parking_lot::Mutex as ParkMutex;
 use crate::call_validation::ChatMessage;
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Chore {
     pub chore_id: String,
     pub chore_title: String,
@@ -13,7 +13,7 @@ pub struct Chore {
     pub chore_event_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ChoreEvent {
     pub chore_event_id: String,
     pub chore_event_summary: String,
@@ -22,8 +22,8 @@ pub struct ChoreEvent {
     pub chore_event_cthread_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct ChatThread {
+#[derive(Serialize, Deserialize, Default)]
+pub struct CThread {
     pub cthread_id: String,
     pub cthread_belongs_to_chore_event_id: Option<String>,
     pub cthread_title: String,
@@ -34,6 +34,20 @@ pub struct ChatThread {
     pub cthread_created_ts: f64,
     pub cthread_updated_ts: f64,
     pub cthread_archived_ts: f64,     // associated container died, cannot continue
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct CMessage {
+    // primary key starts here
+    pub cmessage_belongs_to_cthread_id: String,
+    pub cmessage_alt: i32,
+    pub cmessage_num: i32,
+    // /primary
+    pub cmessage_prev_alt: i32,
+    pub cmessage_usage_model: String,
+    pub cmessage_usage_prompt: String,
+    pub cmessage_usage_completion: String,
+    pub cmessage_json: String,
 }
 
 // db_v1/cthread_sub     { quicksearch, limit } -> SSE

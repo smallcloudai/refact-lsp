@@ -13,7 +13,7 @@ silly_message = {
 
 async def listen_to_sse(session):
     async with session.post(
-        f"{BASE_URL}/db_v1/cthread-sub",
+        f"{BASE_URL}/db_v1/cthreads-sub",
         json={"limit": 5, "quicksearch": ""},
         headers={"Content-Type": "application/json"},
     ) as response:
