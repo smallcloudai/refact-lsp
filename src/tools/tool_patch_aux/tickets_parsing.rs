@@ -262,9 +262,6 @@ pub async fn get_and_correct_active_tickets(
             &ticket_ids, Some("split the tickets into multiple patch calls".to_string()),
         ));
     }
-    if active_tickets.is_empty() {
-        return Err(good_error_text("no tickets that are referred by IDs were found.", &ticket_ids, None));
-    }
     if active_tickets.len() > 1 && !active_tickets.iter().all(|s| PatchAction::PartialEdit == s.action) {
         return Err(good_error_text(
             "multiple tickets is allowed only for action==PARTIAL_EDIT.",
@@ -277,10 +274,11 @@ pub async fn get_and_correct_active_tickets(
             &ticket_ids, Some("split the tickets into multiple patch calls".to_string()),
         ));
     }
-
     for ticket in active_tickets.iter_mut() {
         correct_and_validate_active_ticket(gcx.clone(), ticket).await.map_err(|e| good_error_text(&e, &ticket_ids, None))?;
     }
-
+    if active_tickets.is_empty() {
+        return Err(good_error_text("no tickets that are referred by IDs were found.", &ticket_ids, None));
+    }
     Ok(active_tickets)
 }

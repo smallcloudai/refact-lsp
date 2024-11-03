@@ -121,6 +121,7 @@ impl Tool for ToolPatch {
         let gcx = ccx_subchat.lock().await.global_context.clone();
         let all_tickets_from_above = get_tickets_from_messages(ccx.clone()).await;
         let mut active_tickets = get_and_correct_active_tickets(gcx.clone(), tickets.clone(), all_tickets_from_above.clone()).await?;
+        assert!(!active_tickets.is_empty());
 
         if active_tickets[0].filename_before != path {
             return Err(good_error_text(
@@ -148,17 +149,18 @@ impl Tool for ToolPatch {
         diff_apply(gcx.clone(), &mut diff_chunks).await.map_err(
             |err| format!("Couldn't apply the diff: {}", err)
         )?;
-
-        let mut results = vec![];
-        results.push(ChatMessage {
-            role: "diff".to_string(),
-            content: ChatContent::SimpleText(json!(diff_chunks).to_string()),
-            tool_calls: None,
-            tool_call_id: tool_call_id.clone(),
-            usage: Some(usage),
-        });
-
-        let results = results.into_iter().map(|x| ContextEnum::ChatMessage(x)).collect::<Vec<_>>();
+        let results = vec![
+            ChatMessage {
+                role: "diff".to_string(),
+                content: ChatContent::SimpleText(json!(diff_chunks).to_string()),
+                tool_calls: None,
+                tool_call_id: tool_call_id.clone(),
+                usage: Some(usage),
+            }
+        ]
+            .into_iter()
+            .map(|x| ContextEnum::ChatMessage(x))
+            .collect::<Vec<_>>();
         Ok((false, results))
     }
 
