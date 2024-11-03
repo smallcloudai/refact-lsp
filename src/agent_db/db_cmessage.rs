@@ -161,7 +161,7 @@ pub async fn handle_db_v1_cmessages_sub(
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
 
-    let (pre_existing_cmessages, mut last_event_id) = {
+    let (pre_existing_cmessages, mut last_pubsub_id) = {
         let mut conn = lite_arc.lock();
         let tx = conn.transaction().unwrap();
 
@@ -197,7 +197,7 @@ pub async fn handle_db_v1_cmessages_sub(
             if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
                 break;
             }
-            let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_event_id) {
+            let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::error!("handle_db_v1_cmessages_sub(1): {:?}", e);

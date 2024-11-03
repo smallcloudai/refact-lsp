@@ -44,6 +44,8 @@ pub fn cthreads_from_rows(
             cthread_created_ts: row.get("cthread_created_ts").unwrap(),
             cthread_updated_ts: row.get("cthread_updated_ts").unwrap(),
             cthread_archived_ts: row.get("cthread_archived_ts").unwrap(),
+            cthread_locked_by: row.get("cthread_locked_by").unwrap(),
+            cthread_locked_ts: row.get("cthread_locked_ts").unwrap(),
         });
     }
     cthreads
@@ -51,7 +53,7 @@ pub fn cthreads_from_rows(
 
 pub fn cthread_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
-    cthread: CThread,
+    cthread: &CThread,
 ) {
     let (lite, chore_sleeping_point) = {
         let db = cdb.lock();
@@ -61,7 +63,7 @@ pub fn cthread_set(
     // mysql has INSERT INTO .. ON DUPLICATE KEY UPDATE ..
     // postgres has INSERT INTO .. ON CONFLICT .. DO UPDATE SET
     let conn = lite.lock();
-    conn.execute(
+    if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO cthreads (
             cthread_id,
             cthread_belongs_to_chore_event_id,
@@ -72,8 +74,10 @@ pub fn cthread_set(
             cthread_anything_new,
             cthread_created_ts,
             cthread_updated_ts,
-            cthread_archived_ts
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            cthread_archived_ts,
+            cthread_locked_by,
+            cthread_locked_ts
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             cthread.cthread_id,
             cthread.cthread_belongs_to_chore_event_id,
@@ -85,14 +89,38 @@ pub fn cthread_set(
             cthread.cthread_created_ts,
             cthread.cthread_updated_ts,
             cthread.cthread_archived_ts,
+            cthread.cthread_locked_by,
+            cthread.cthread_locked_ts,
         ],
-    ).expect("Failed to insert or replace chat thread");
+    ) {
+        tracing::error!("Failed to insert or replace cthread:\n{}", e);
+        return;
+    }
     drop(conn);
     let j = serde_json::json!({
         "cthread_id": cthread.cthread_id,
         "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
     });
     crate::agent_db::chore_pubub_push(&lite, "cthread", "update", &j, &chore_sleeping_point);
+}
+
+pub fn cthread_apply_json(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    incoming_json: serde_json::Value,
+) -> Result<CThread, String> {
+    let cthread_id = incoming_json.get("cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let mut cthread_rec = if !cthread_id.is_empty() {
+        cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default()
+    } else {
+        CThread::default()
+    };
+    let mut chat_thread_json = serde_json::to_value(&cthread_rec).map_err(|e| format!("Serialization error: {}", e))?;
+    crate::agent_db::merge_json(&mut chat_thread_json, &incoming_json);
+
+    cthread_rec = serde_json::from_value(chat_thread_json).map_err(|e| format!("Deserialization error: {}", e))?;
+    cthread_set(cdb, &cthread_rec);
+
+    Ok(cthread_rec)
 }
 
 // HTTP handler
@@ -104,39 +132,29 @@ pub async fn handle_db_v1_cthread_update(
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON parsing error: {}", e))
     })?;
 
-    let cthread_id = incoming_json.get("cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let mut cthread_rec = if !cthread_id.is_empty() {
-        cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default()
-    } else {
-        CThread::default()
-    };
-    let mut chat_thread_json = serde_json::to_value(&cthread_rec).unwrap();
-    crate::agent_db::merge_json(&mut chat_thread_json, &incoming_json);
-
-    cthread_rec = serde_json::from_value(chat_thread_json).map_err(|e| {
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
+    let cthread_rec = cthread_apply_json(cdb, incoming_json).map_err(|e| {
+        tracing::error!("Failed to apply JSON: {}", e);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("Failed to apply JSON: {}", e))
     })?;
-
-    cthread_set(cdb, cthread_rec);
 
     let response = Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"status": "success"}).to_string()))
+        .body(Body::from(json!({"status": "success", "cthread": cthread_rec}).to_string()))
         .unwrap();
 
     Ok(response)
 }
 
 #[derive(Deserialize)]
-struct CThreadSubscription {
+pub struct CThreadSubscription {
     #[serde(default)]
-    quicksearch: String,
+    pub quicksearch: String,
     #[serde(default)]
-    limit: usize,
+    pub limit: usize,
 }
 
 // HTTP handler
@@ -154,11 +172,11 @@ pub async fn handle_db_v1_cthreads_sub(
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
 
-    let (pre_existing_cthreads, mut last_event_id) = {
+    let (pre_existing_cthreads, mut last_pubsub_id) = {
         let lite = cdb.lock().lite.clone();
         let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
             .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
-        let cthreads = _cthread_get_with_quicksearch(cdb.clone(), &String::new(), &post).map_err(|e| {
+        let cthreads = cthread_quicksearch(cdb.clone(), &String::new(), &post).map_err(|e| {
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e))
         })?;
         (cthreads, max_event_id)
@@ -176,7 +194,7 @@ pub async fn handle_db_v1_cthreads_sub(
             if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
                 break;
             }
-            let (deleted_cthread_ids, updated_cthread_ids) = match _cthread_subsription_poll(lite_arc.clone(), &mut last_event_id) {
+            let (deleted_cthread_ids, updated_cthread_ids) = match cthread_subsription_poll(lite_arc.clone(), &mut last_pubsub_id) {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::error!("handle_db_v1_cthreads_sub(1): {}", e);
@@ -192,7 +210,7 @@ pub async fn handle_db_v1_cthreads_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_id in updated_cthread_ids {
-                match _cthread_get_with_quicksearch(cdb.clone(), &updated_id, &post) {
+                match cthread_quicksearch(cdb.clone(), &updated_id, &post) {
                     Ok(updated_cthreads) => {
                         for updated_cthread in updated_cthreads {
                             let update_event = json!({
@@ -221,7 +239,7 @@ pub async fn handle_db_v1_cthreads_sub(
     Ok(response)
 }
 
-fn _cthread_get_with_quicksearch(
+pub fn cthread_quicksearch(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread_id: &String,
     post: &CThreadSubscription,
@@ -242,7 +260,7 @@ fn _cthread_get_with_quicksearch(
     Ok(cthreads_from_rows(rows))
 }
 
-fn _cthread_subsription_poll(
+pub fn cthread_subsription_poll(
     lite_arc: Arc<ParkMutex<rusqlite::Connection>>,
     seen_id: &mut i64
 ) -> Result<(Vec<String>, Vec<String>), String> {

@@ -61,6 +61,7 @@ mod agent_db;
 mod dashboard;
 mod lsp;
 mod http;
+mod autonomy;
 
 mod integrations;
 mod privacy;

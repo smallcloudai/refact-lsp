@@ -265,7 +265,7 @@ pub async fn handle_db_v1_chores_sub(
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
 
-    let (pre_existing_chores, pre_existing_cevents, mut last_event_id) = {
+    let (pre_existing_chores, pre_existing_cevents, mut last_pubsub_id) = {
         let lite = cdb.lock().lite.clone();
         let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
             .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
@@ -294,7 +294,7 @@ pub async fn handle_db_v1_chores_sub(
             if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
                 break;
             }
-            let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_event_id) {
+            let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::error!("handle_db_v1_chores_sub(1): {}", e);

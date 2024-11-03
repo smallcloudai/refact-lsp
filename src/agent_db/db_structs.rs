@@ -35,6 +35,8 @@ pub struct CThread {
     pub cthread_created_ts: f64,
     pub cthread_updated_ts: f64,
     pub cthread_archived_ts: f64,     // associated container died, cannot continue
+    pub cthread_locked_by: String,
+    pub cthread_locked_ts: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]

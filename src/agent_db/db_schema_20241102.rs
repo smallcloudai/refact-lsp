@@ -54,6 +54,8 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             cthread_created_ts REAL NOT NULL,
             cthread_updated_ts REAL NOT NULL,
             cthread_archived_ts REAL NOT NULL,
+            cthread_locked_by TEXT NOT NULL,           -- for autonomous work to start, cthread is locked first, ts more than an hour old means the lock is outdated
+            cthread_locked_ts TEXT NOT NULL,
             FOREIGN KEY (cthread_belongs_to_chore_event_id)
                 REFERENCES chore_events(chore_event_id)
                 ON DELETE CASCADE                       -- means cthread will be deleted together with chore_event, even though chore_event_cthread_id is optional
