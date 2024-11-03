@@ -12,17 +12,6 @@ use tracing::warn;
 use crate::ast::ast_indexer_thread::{ast_indexer_block_until_finished, ast_indexer_enqueue_files};
 use crate::tools::tool_patch_aux::fs_utils::read_file;
 
-pub fn vec_contains_vec<T: PartialEq>(vec: &[T], subvec: &[T]) -> usize {
-    if subvec.is_empty() {
-        return 0;
-    }
-    if subvec.len() > vec.len() {
-        return 0;
-    }
-    vec.windows(subvec.len())
-        .filter(|window| *window == subvec)
-        .count()
-}
 
 pub fn minimal_common_indent(symbol_lines: &[&str]) -> (usize, usize) {
     let mut common_spaces = vec![];
