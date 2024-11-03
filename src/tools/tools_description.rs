@@ -421,7 +421,7 @@ pub struct ToolDictDeserialize {
 
 pub async fn tool_description_list_from_yaml(
     tools: indexmap::IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
-    turned_on: &Vec<String>,
+    turned_on: Option<&Vec<String>>,
     allow_experimental: bool,
 ) -> Result<Vec<ToolDesc>, String> {
     let tool_desc_deser: ToolDictDeserialize = serde_yaml::from_str(BUILT_IN_TOOLS)
@@ -441,7 +441,10 @@ pub async fn tool_description_list_from_yaml(
     }
 
     Ok(tool_desc_vec.iter()
-        .filter(|x| turned_on.contains(&x.name) && (allow_experimental || !x.experimental))
+        .filter(|x| {
+            turned_on.map_or(true, |turned_on_vec| turned_on_vec.contains(&x.name)) &&
+            (allow_experimental || !x.experimental)
+        })
         .cloned()
         .collect::<Vec<_>>())
 }

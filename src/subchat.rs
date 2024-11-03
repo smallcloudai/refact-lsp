@@ -19,7 +19,7 @@ const TEMPERATURE: f32 = 0.2;
 const MAX_NEW_TOKENS: usize = 4096;
 
 
-async fn create_chat_post_and_scratchpad(
+pub async fn create_chat_post_and_scratchpad(
     global_context: Arc<ARwLock<GlobalContext>>,
     model_name: &str,
     messages: Vec<&ChatMessage>,
@@ -201,7 +201,7 @@ async fn chat_interaction_non_stream(
 }
 
 
-async fn chat_interaction(
+pub async fn chat_interaction(
     ccx: Arc<AMutex<AtCommandsContext>>,
     mut spad: Box<dyn ScratchpadAbstract>,
     chat_post: &mut ChatPost,
@@ -249,13 +249,12 @@ pub async fn subchat_single(
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
     let gcx = ccx.lock().await.global_context.clone();
 
-    // this ignores customized tools
     let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone()).await?;
     let tools_turn_on_set: HashSet<String> = tools_subset.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.keys().cloned().collect();
     let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
     let allow_experimental = gcx.read().await.cmdline.experimental;
-    let tools_desclist = tool_description_list_from_yaml(tools_turned_on_by_cmdline, &tools_on_intersection, allow_experimental).await.unwrap_or_else(|e|{
+    let tools_desclist = tool_description_list_from_yaml(tools_turned_on_by_cmdline, Some(&tools_on_intersection), allow_experimental).await.unwrap_or_else(|e|{
         error!("Error loading compiled_in_tools: {:?}", e);
         vec![]
     });

@@ -29,7 +29,8 @@ pub struct CThread {
     pub cthread_belongs_to_chore_event_id: Option<String>,
     pub cthread_title: String,
     pub cthread_toolset: String,      // quick/explore/agent
-    pub cthread_model_used: String,
+    pub cthread_model: String,
+    pub cthread_temperature: f64,
     pub cthread_error: String,        // assign to special value "pause" to avoid auto repost to the model
     pub cthread_anything_new: bool,   // the ⚪
     pub cthread_created_ts: f64,

@@ -32,7 +32,7 @@ class CThread(BaseModel):
     cthread_belongs_to_chore_event_id: Optional[str]
     cthread_title: str
     cthread_toolset: str
-    cthread_model_used: str
+    cthread_model: str
     cthread_error: str
     cthread_anything_new: bool
     cthread_created_ts: float
