@@ -12,6 +12,7 @@ from refact import chat_client
 
 BASE_URL = "http://127.0.0.1:8001"
 SLEEP = 3
+quit_flag = False
 
 class CMessage(BaseModel):
     cmessage_belongs_to_cthread_id: str
@@ -178,53 +179,63 @@ def print_picture():
 
 
 async def cmessages_sub(session, cmessage_belongs_to_cthread_id):
-    async with session.post(
-        f"{BASE_URL}/db_v1/cmessages-sub",
-        json={"cmessage_belongs_to_cthread_id": cmessage_belongs_to_cthread_id},
-    ) as response:
-        if response.status != 200:
-            print(termcolor.colored(f"Failed to connect to SSE. Status code: {response.status}", "red"))
-            return
-        async for line in response.content:
-            if not line.strip():
-                continue
-            receive_sub_event(session, line)
+    global quit_flag
+    try:
+        async with session.post(
+            f"{BASE_URL}/db_v1/cmessages-sub",
+            json={"cmessage_belongs_to_cthread_id": cmessage_belongs_to_cthread_id},
+        ) as response:
+            if response.status != 200:
+                print(termcolor.colored(f"Failed to connect to SSE. Status code: {response.status}", "red"))
+                return
+            async for line in response.content:
+                if not line.strip():
+                    continue
+                receive_sub_event(session, line)
+    except Exception as e:
+        print(termcolor.colored(f"Exception occurred: {str(e)}", "red"))
+    finally:
+        quit_flag = True
 
 async def cthreads_sub(session, quicksearch):
-    async with session.post(
-        f"{BASE_URL}/db_v1/cthreads-sub",
-        json={"limit": 100, "quicksearch": quicksearch},
-    ) as response:
-        if response.status != 200:
-            print(termcolor.colored(f"Failed to connect to SSE. Status code: {response.status}", "red"))
-            return
-        async for line in response.content:
-            if not line.strip():
-                continue
-            receive_sub_event(session, line)
+    global quit_flag
+    try:
+        async with session.post(
+            f"{BASE_URL}/db_v1/cthreads-sub",
+            json={"limit": 100, "quicksearch": quicksearch},
+        ) as response:
+            if response.status != 200:
+                raise Exception(f"Failed to connect to SSE. Status code: {response.status}")
+            async for line in response.content:
+                if line.strip():
+                    receive_sub_event(session, line)
+    except Exception as e:
+        print(termcolor.colored(f"Exception occurred: {str(e)}", "red"))
+    finally:
+        quit_flag = True
 
 async def chores_sub(session, quicksearch: str, limit: int, only_archived: bool):
-    async with session.post(
-        f"{BASE_URL}/db_v1/chores-sub",
-        json={
-            "quicksearch": quicksearch,
-            "limit": limit,
-            "only_archived": only_archived
-        },
-    ) as response:
-        if response.status != 200:
-            print(termcolor.colored(f"Failed to connect to SSE. Status code: {response.status}", "red"))
-            return
-        async for line in response.content:
-            if not line.strip():
-                continue
-            receive_sub_event(session, line)
+    global quit_flag
+    try:
+        async with session.post(
+            f"{BASE_URL}/db_v1/chores-sub",
+            json={"quicksearch": quicksearch, "limit": limit, "only_archived": only_archived},
+        ) as response:
+            if response.status != 200:
+                raise Exception(f"Failed to connect to SSE. Status code: {response.status}")
+            async for line in response.content:
+                if line.strip():
+                    receive_sub_event(session, line)
+    except Exception as e:
+        print(termcolor.colored(f"Exception occurred: {str(e)}", "red"))
+    finally:
+        quit_flag = True
 
 async def main(only_sub=False, quicksearch=""):
     session = aiohttp.ClientSession()
 
     async def periodic_print():
-        while True:
+        while not quit_flag:
             await asyncio.sleep(SLEEP)
             print_picture()
 
@@ -234,7 +245,11 @@ async def main(only_sub=False, quicksearch=""):
     tasks.append(asyncio.create_task(chores_sub(session, quicksearch, limit=100, only_archived=False)))
     tasks.append(asyncio.create_task(cthreads_sub(session, quicksearch)))
     tasks.append(asyncio.create_task(periodic_print()))
-    await asyncio.gather(*tasks)
+
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        await session.close()
 
     print(termcolor.colored("\nTEST OVER", "green", attrs=["bold"]))
 
