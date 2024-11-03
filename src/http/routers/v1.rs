@@ -38,7 +38,7 @@ use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add,
 
 use crate::agent_db::db_cthread::{handle_db_v1_cthread_update, handle_db_v1_cthreads_sub};
 use crate::agent_db::db_cmessage::{handle_db_v1_cmessage_update, handle_db_v1_cmessages_sub};
-use crate::agent_db::db_chore::{handle_db_v1_chore_update, handle_db_v1_chores_sub};
+use crate::agent_db::db_chore::{handle_db_v1_chore_update, handle_db_v1_chore_event_update, handle_db_v1_chores_sub};
 
 use crate::http::utils::telemetry_wrapper;
 
@@ -133,12 +133,13 @@ pub fn make_v1_router() -> Router {
 
 pub fn make_db_v1_router() -> Router {
     let builder = Router::new()
-        .route("/cthread-update", telemetry_post!(handle_db_v1_cthread_update))
         .route("/cthreads-sub", telemetry_post!(handle_db_v1_cthreads_sub))
-        .route("/cmessage-update", telemetry_post!(handle_db_v1_cmessage_update))
+        .route("/cthread-update", telemetry_post!(handle_db_v1_cthread_update))
         .route("/cmessages-sub", telemetry_post!(handle_db_v1_cmessages_sub))
-        .route("/chore-update", telemetry_post!(handle_db_v1_chore_update))
+        .route("/cmessage-update", telemetry_post!(handle_db_v1_cmessage_update))
         .route("/chores-sub", telemetry_post!(handle_db_v1_chores_sub))
+        .route("/chore-update", telemetry_post!(handle_db_v1_chore_update))
+        .route("/chore-event-update", telemetry_post!(handle_db_v1_chore_event_update))
         ;
     builder.layer(CorsLayer::very_permissive())
 }

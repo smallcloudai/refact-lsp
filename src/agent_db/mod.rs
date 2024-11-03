@@ -7,7 +7,6 @@ use crate::global_context::GlobalContext;
 
 
 pub mod db_chore;
-pub mod db_chore_event;
 pub mod db_cmessage;
 pub mod db_cthread;
 pub mod db_init;

@@ -31,6 +31,7 @@ fn _make_connection(
 
 pub async fn chore_db_init(
     chore_db_fn: String,
+    reset_memory: bool,
 ) -> Arc<ParkMutex<ChoreDB>> {
     let db = match _make_connection(chore_db_fn) {
         Ok(db) => db,
@@ -39,6 +40,6 @@ pub async fn chore_db_init(
     let lite_arc = {
         db.lock().lite.clone()
     };
-    crate::agent_db::db_schema_20241102::create_tables_20241102(&*lite_arc.lock(), false).expect("Failed to create tables");
+    crate::agent_db::db_schema_20241102::create_tables_20241102(&*lite_arc.lock(), reset_memory).expect("Failed to create tables");
     db
 }

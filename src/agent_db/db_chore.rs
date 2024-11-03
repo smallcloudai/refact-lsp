@@ -9,7 +9,7 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use async_stream::stream;
 
-use crate::agent_db::db_structs::{ChoreDB, Chore};
+use crate::agent_db::db_structs::{ChoreDB, Chore, ChoreEvent};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 
@@ -27,6 +27,23 @@ pub fn chores_from_rows(
         });
     }
     chores
+}
+
+pub fn chore_events_from_rows(
+    mut rows: rusqlite::Rows,
+) -> Vec<ChoreEvent> {
+    let mut events = Vec::new();
+    while let Some(row) = rows.next().unwrap_or(None) {
+        events.push(ChoreEvent {
+            chore_event_id: row.get("chore_event_id").unwrap(),
+            chore_event_belongs_to_chore_id: row.get("chore_event_belongs_to_chore_id").unwrap(),
+            chore_event_summary: row.get("chore_event_summary").unwrap(),
+            chore_event_ts: row.get("chore_event_ts").unwrap(),
+            chore_event_link: row.get("chore_event_link").unwrap(),
+            chore_event_cthread_id: row.get("chore_event_cthread_id").unwrap_or(None),
+        });
+    }
+    events
 }
 
 pub fn chore_set(
@@ -69,6 +86,50 @@ pub fn chore_set(
     crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
 }
 
+// chore_event_set
+pub fn chore_event_set(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    cevent: ChoreEvent,
+) {
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    let conn = lite.lock();
+    match conn.execute(
+        "INSERT OR REPLACE INTO chore_events (
+            chore_event_id,
+            chore_event_belongs_to_chore_id,
+            chore_event_summary,
+            chore_event_ts,
+            chore_event_link,
+            chore_event_cthread_id
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            cevent.chore_event_id,
+            cevent.chore_event_belongs_to_chore_id,
+            cevent.chore_event_summary,
+            cevent.chore_event_ts,
+            cevent.chore_event_link,
+            cevent.chore_event_cthread_id,
+        ],
+    ) {
+        Ok(_) => {},
+        Err(e) => {
+            tracing::error!("Failed to insert or replace chore event:\n{} {}\nError: {}",
+                cevent.chore_event_id, cevent.chore_event_summary,
+                e
+            );
+        }
+    }
+    drop(conn);
+    // ChoreEvent produces updates for the whole Chore
+    let j = serde_json::json!({
+        "chore_id": cevent.chore_event_belongs_to_chore_id,
+    });
+    crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
+}
+
 pub fn chore_get(
     cdb: Arc<ParkMutex<ChoreDB>>,
     chore_id: String,
@@ -79,6 +140,30 @@ pub fn chore_get(
     let rows = stmt.query(params![chore_id]).map_err(|e| e.to_string())?;
     let chores = chores_from_rows(rows);
     chores.into_iter().next().ok_or_else(|| format!("No Chore found with id: {}", chore_id))
+}
+
+pub fn chore_event_get(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    chore_event_id: String,
+) -> Result<ChoreEvent, String> {
+    let lite = cdb.lock().lite.clone();
+    let conn = lite.lock();
+    let mut stmt = conn.prepare("SELECT * FROM chore_events WHERE chore_event_id = ?1").unwrap();
+    let mut rows = stmt.query(params![chore_event_id]).map_err(|e| e.to_string())?;
+
+    if let Some(row) = rows.next().unwrap_or(None) {
+        let event = ChoreEvent {
+            chore_event_id: row.get("chore_event_id").unwrap(),
+            chore_event_belongs_to_chore_id: row.get("chore_event_belongs_to_chore_id").unwrap(),
+            chore_event_summary: row.get("chore_event_summary").unwrap(),
+            chore_event_ts: row.get("chore_event_ts").unwrap(),
+            chore_event_link: row.get("chore_event_link").unwrap(),
+            chore_event_cthread_id: row.get("chore_event_cthread_id").unwrap_or(None),
+        };
+        Ok(event)
+    } else {
+        Err(format!("No ChoreEvent found with id: {}", chore_event_id))
+    }
 }
 
 // HTTP handler
@@ -121,6 +206,46 @@ pub async fn handle_db_v1_chore_update(
     Ok(response)
 }
 
+// HTTP handler
+pub async fn handle_db_v1_chore_event_update(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    let cdb = gcx.read().await.chore_db.clone();
+
+    let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
+        tracing::info!("cannot parse input:\n{:?}", body_bytes);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+    })?;
+
+    let chore_event_id = incoming_json.get("chore_event_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+
+    let chore_event_rec = match chore_event_get(cdb.clone(), chore_event_id.clone()) {
+        Ok(existing_event) => existing_event,
+        Err(_) => ChoreEvent {
+            chore_event_id,
+            ..Default::default()
+        },
+    };
+
+    let mut chore_event_json = serde_json::to_value(&chore_event_rec).unwrap();
+    crate::agent_db::merge_json(&mut chore_event_json, &incoming_json);
+
+    let chore_event_rec: ChoreEvent = serde_json::from_value(chore_event_json).map_err(|e| {
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
+    })?;
+
+    chore_event_set(cdb, chore_event_rec);
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(Body::from(json!({"status": "success"}).to_string()))
+        .unwrap();
+
+    Ok(response)
+}
+
 #[derive(Deserialize, Default)]
 struct ChoresSubscriptionPost {
     quicksearch: String,
@@ -140,13 +265,13 @@ pub async fn handle_db_v1_chores_sub(
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
 
-    let (pre_existing_chores, mut last_event_id) = {
+    let (pre_existing_chores, pre_existing_cevents, mut last_event_id) = {
         let lite = cdb.lock().lite.clone();
         let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
             .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
-        let chores = _chore_get_with_quicksearch(cdb.clone(), String::new(), &post)
+        let (pre_existing_chores, pre_existing_cevents) = _chore_get_with_quicksearch(cdb.clone(), String::new(), &post)
             .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        (chores, max_event_id)
+        (pre_existing_chores, pre_existing_cevents, max_event_id)
     };
 
     let sse = stream! {
@@ -154,6 +279,13 @@ pub async fn handle_db_v1_chores_sub(
             let e = json!({
                 "sub_event": "chore_update",
                 "chore_rec": chore
+            });
+            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
+        }
+        for cevent in pre_existing_cevents {
+            let e = json!({
+                "sub_event": "chore_event_update",
+                "chore_event_rec": cevent
             });
             yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
@@ -177,22 +309,26 @@ pub async fn handle_db_v1_chores_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_key in updated_chore_keys {
-                let chores = match _chore_get_with_quicksearch(cdb.clone(), updated_key.clone(), &post) {
+                let (chores, cevents) = match _chore_get_with_quicksearch(cdb.clone(), updated_key.clone(), &post) {
                     Ok(chores) => chores,
                     Err(e) => {
                         tracing::error!("handle_db_v1_chores_sub(2): {}", e);
                         break;
                     }
                 };
-                match chores.into_iter().next() {
-                    Some(updated_chore) => {
-                        let update_event = json!({
-                            "sub_event": "chore_update",
-                            "chore_rec": updated_chore
-                        });
-                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
-                    },
-                    None => { }  // doesn't fit the quicksearch, fine
+                for updated_chore in chores {
+                    let update_event = json!({
+                        "sub_event": "chore_update",
+                        "chore_rec": updated_chore
+                    });
+                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
+                }
+                for updated_event in cevents {
+                    let update_event = json!({
+                        "sub_event": "chore_event_update",
+                        "chore_event_rec": updated_event
+                    });
+                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
                 }
             }
         }
@@ -212,16 +348,26 @@ fn _chore_get_with_quicksearch(
     cdb: Arc<ParkMutex<ChoreDB>>,
     chore_id: String,
     post: &ChoresSubscriptionPost,
-) -> Result<Vec<Chore>, String> {
+) -> Result<(Vec<Chore>, Vec<ChoreEvent>), String> {
     let lite = cdb.lock().lite.clone();
     let conn = lite.lock();
+
     let query = if chore_id.is_empty() {
-        "SELECT * FROM chores WHERE chore_title LIKE ?1 AND (?2 = 1 AND chore_archived_ts IS NOT NULL OR ?2 = 0 AND chore_archived_ts IS NULL) LIMIT ?3"
+        "SELECT c.*, e.chore_event_id, e.chore_event_belongs_to_chore_id, e.chore_event_summary, e.chore_event_ts, e.chore_event_link, e.chore_event_cthread_id
+         FROM chores c
+         LEFT JOIN chore_events e ON c.chore_id = e.chore_event_belongs_to_chore_id
+         WHERE c.chore_title LIKE ?1 AND (?2 = 1 AND c.chore_archived_ts IS NOT NULL OR ?2 = 0 AND c.chore_archived_ts IS NULL)
+         LIMIT ?3"
     } else {
-        "SELECT * FROM chores WHERE chore_id = ?1 AND chore_title LIKE ?2 AND (?3 = 1 AND chore_archived_ts IS NOT NULL OR ?3 = 0 AND chore_archived_ts IS NULL) LIMIT ?4"
+        "SELECT c.*, e.chore_event_id, e.chore_event_belongs_to_chore_id, e.chore_event_summary, e.chore_event_ts, e.chore_event_link, e.chore_event_cthread_id
+         FROM chores c
+         LEFT JOIN chore_events e ON c.chore_id = e.chore_event_belongs_to_chore_id
+         WHERE c.chore_id = ?1 AND c.chore_title LIKE ?2 AND (?3 = 1 AND c.chore_archived_ts IS NOT NULL OR ?3 = 0 AND c.chore_archived_ts IS NULL)
+         LIMIT ?4"
     };
+
     let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
-    let rows = if chore_id.is_empty() {
+    let mut rows = if chore_id.is_empty() {
         stmt.query(params![
             format!("%{}%", post.quicksearch),
             post.only_archived as i32,
@@ -236,7 +382,24 @@ fn _chore_get_with_quicksearch(
         ]).map_err(|e| e.to_string())?
     };
 
-    Ok(chores_from_rows(rows))
+    let mut chores = Vec::new();
+    let mut chore_map = std::collections::HashMap::new();
+    while let Some(row) = rows.next().unwrap_or(None) {
+        let chore_id: String = row.get("chore_id").unwrap();
+        if !chore_map.contains_key(&chore_id) {
+            let chore = Chore {
+                chore_id: chore_id.clone(),
+                chore_title: row.get("chore_title").unwrap(),
+                chore_spontaneous_work_enable: row.get("chore_spontaneous_work_enable").unwrap(),
+                chore_created_ts: row.get("chore_created_ts").unwrap(),
+                chore_archived_ts: row.get("chore_archived_ts").unwrap(),
+            };
+            chores.push(chore);
+            chore_map.insert(chore_id.clone(), true);
+        }
+    }
+    let events = chore_events_from_rows(rows);
+    Ok((chores, events))
 }
 
 fn _chore_subscription_poll(

@@ -66,7 +66,6 @@ pub struct CommandLine {
     #[cfg(feature="vecdb")]
     #[structopt(long, help="Use vector database. Give it LSP workspace folders or a jsonl, it also needs an embedding model.")]
     pub vecdb: bool,
-    #[cfg(feature="vecdb")]
     #[structopt(long, help="Delete all memories, start with empty memory.")]
     pub reset_memory: bool,
     #[cfg(feature="vecdb")]
@@ -339,7 +338,7 @@ pub async fn create_global_context(
         privacy_settings: Arc::new(PrivacySettings::default()),
         integration_sessions: HashMap::new(),
         codelens_cache: Arc::new(AMutex::new(crate::http::routers::v1::code_lens::CodeLensCache::default())),
-        chore_db: crate::agent_db::db_init::chore_db_init("/tmp/chore.db".to_string()).await,
+        chore_db: crate::agent_db::db_init::chore_db_init("/tmp/chore.db".to_string(), cmdline.reset_memory).await,
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {
