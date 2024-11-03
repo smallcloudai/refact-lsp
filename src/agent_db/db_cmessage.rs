@@ -77,8 +77,10 @@ pub fn cmessage_set(
         "cmessage_belongs_to_cthread_id": cmessage.cmessage_belongs_to_cthread_id,
         "cmessage_alt": cmessage.cmessage_alt,
         "cmessage_num": cmessage.cmessage_num,
+        "cthread_id": cmessage.cmessage_belongs_to_cthread_id,
     });
     crate::agent_db::chore_pubub_push(&lite, "cmessage", "update", &j, &chore_sleeping_point);
+    crate::agent_db::chore_pubub_push(&lite, "cthread", "update", &j, &chore_sleeping_point);
 }
 
 pub fn cmessage_get(
@@ -108,7 +110,7 @@ pub async fn handle_db_v1_cmessage_update(
     let cdb = gcx.read().await.chore_db.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
-        tracing::info!("cannot parse input:\n{:?}", body_bytes);
+        tracing::error!("cannot parse input:\n{:?}", body_bytes);
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
@@ -194,7 +196,7 @@ pub async fn handle_db_v1_cmessages_sub(
         }
 
         loop {
-            if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
+            if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
                 break;
             }
             let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {

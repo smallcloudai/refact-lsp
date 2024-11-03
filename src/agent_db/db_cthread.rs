@@ -51,19 +51,14 @@ pub fn cthreads_from_rows(
     cthreads
 }
 
-pub fn cthread_set(
-    cdb: Arc<ParkMutex<ChoreDB>>,
+pub fn cthread_set_lowlevel(
+    tx: &rusqlite::Transaction,
     cthread: &CThread,
-) {
-    let (lite, chore_sleeping_point) = {
-        let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
-    };
+) -> Result<usize, String> {
     // sqlite dialect "INSERT OR REPLACE INTO"
     // mysql has INSERT INTO .. ON DUPLICATE KEY UPDATE ..
     // postgres has INSERT INTO .. ON CONFLICT .. DO UPDATE SET
-    let conn = lite.lock();
-    if let Err(e) = conn.execute(
+    tx.execute(
         "INSERT OR REPLACE INTO cthreads (
             cthread_id,
             cthread_belongs_to_chore_event_id,
@@ -92,11 +87,28 @@ pub fn cthread_set(
             cthread.cthread_locked_by,
             cthread.cthread_locked_ts,
         ],
-    ) {
-        tracing::error!("Failed to insert or replace cthread:\n{}", e);
-        return;
+    ).map_err(|e| {
+        e.to_string()
+    })
+}
+
+pub fn cthread_set(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    cthread: &CThread,
+) {
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    {
+        let mut conn = lite.lock();
+        let tx = conn.transaction().expect("Failed to start transaction");
+        if let Err(e) = cthread_set_lowlevel(&tx, cthread) {
+            tracing::error!("Failed to insert or replace cthread:\n{}", e);
+        } else if let Err(e) = tx.commit() {
+            tracing::error!("Failed to commit transaction:\n{}", e);
+        }
     }
-    drop(conn);
     let j = serde_json::json!({
         "cthread_id": cthread.cthread_id,
         "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
@@ -108,13 +120,13 @@ pub fn cthread_apply_json(
     cdb: Arc<ParkMutex<ChoreDB>>,
     incoming_json: serde_json::Value,
 ) -> Result<CThread, String> {
-    let cthread_id = incoming_json.get("cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let mut cthread_rec = if !cthread_id.is_empty() {
-        cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default()
-    } else {
-        CThread::default()
-    };
-    let mut chat_thread_json = serde_json::to_value(&cthread_rec).map_err(|e| format!("Serialization error: {}", e))?;
+    let cthread_id = incoming_json.get("cthread_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "cthread_id is required".to_string())?
+        .to_string();
+    // All default values if not found:
+    let mut cthread_rec = cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default();
+    let mut chat_thread_json = serde_json::to_value(&cthread_rec).unwrap();
     crate::agent_db::merge_json(&mut chat_thread_json, &incoming_json);
 
     cthread_rec = serde_json::from_value(chat_thread_json).map_err(|e| format!("Deserialization error: {}", e))?;
@@ -191,7 +203,7 @@ pub async fn handle_db_v1_cthreads_sub(
             yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
         loop {
-            if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
+            if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
                 break;
             }
             let (deleted_cthread_ids, updated_cthread_ids) = match cthread_subsription_poll(lite_arc.clone(), &mut last_pubsub_id) {

@@ -74,7 +74,7 @@ async def various_updates_generator(session, n, cthread_id):
             "cmessage_json": json.dumps(m.model_dump(exclude_unset=True)),
         })
     assert r.status == 200, f"oops:\n{r}"
-    print(termcolor.colored("updates over", "green"))
+    print(termcolor.colored("updates over %s" % cthread_id, "green"))
 
 
 async def main(only_sub=False, only_update=False):

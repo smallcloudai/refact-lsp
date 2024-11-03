@@ -37,13 +37,14 @@ pub fn chore_pubub_push(
 pub async fn chore_pubsub_sleeping_procedure(
     gcx: Arc<ARwLock<GlobalContext>>,
     db: &Arc<ParkMutex<db_structs::ChoreDB>>,
+    sleep_seconds: u64
 ) -> bool {
     let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();
     if shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
     let sleeping_point = db.lock().chore_sleeping_point.clone();
-    match tokio::time::timeout(tokio::time::Duration::from_secs(5), sleeping_point.notified()).await {
+    match tokio::time::timeout(tokio::time::Duration::from_secs(sleep_seconds), sleeping_point.notified()).await {
         Ok(_) => { },
         Err(_) => { },   // timeout
     }

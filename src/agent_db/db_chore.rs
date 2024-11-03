@@ -291,7 +291,7 @@ pub async fn handle_db_v1_chores_sub(
         }
 
         loop {
-            if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb).await {
+            if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
                 break;
             }
             let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {

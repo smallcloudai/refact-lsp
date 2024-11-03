@@ -11,6 +11,7 @@ from refact import chat_client
 
 
 BASE_URL = "http://127.0.0.1:8001"
+SLEEP = 3
 
 class CMessage(BaseModel):
     cmessage_belongs_to_cthread_id: str
@@ -36,7 +37,6 @@ class CThread(BaseModel):
     cthread_created_ts: float
     cthread_updated_ts: float
     cthread_archived_ts: float
-    _cmessages: Dict[str, CMessage] = PrivateAttr(default_factory=dict)    # use cmessage_key
 
 class ChoreEvent(BaseModel):
     chore_event_id: str
@@ -55,8 +55,12 @@ class Chore(BaseModel):
     _chore_events: Dict[str, ChoreEvent] = PrivateAttr(default_factory=dict)
 
 global_free_cthreads: Dict[str, CThread] = {}
+global_free_cthreads_msgdict: Dict[str, Dict[str, CMessage]] = {}
+
 global_chores: Dict[str, Chore] = {}
+
 global_bound_cthreads: Dict[str, CThread] = {}
+global_bound_cthreads_msgdict: Dict[str, Dict[str, CThread]] = {}
 
 
 global_cthread_id_to_cmessages_subs: Dict[str, asyncio.Task] = {}
@@ -73,7 +77,7 @@ def receive_sub_event(session, line):
         decoded_line = decoded_line[6:].strip()
     j = json.loads(decoded_line)
     sub_event = j["sub_event"]
-    print(termcolor.colored(sub_event, "red"), decoded_line)
+    print(termcolor.colored(sub_event, "red" if sub_event=="cmessage_update" else "magenta"), decoded_line)
 
     if sub_event == "chore_update":
         chore_obj = Chore(**j["chore_rec"])
@@ -96,35 +100,43 @@ def receive_sub_event(session, line):
         cthread_rec = CThread(**j["cthread_rec"])
         if not cthread_rec.cthread_belongs_to_chore_event_id:
             global_free_cthreads[cthread_rec.cthread_id] = cthread_rec
+            global_free_cthreads_msgdict.setdefault(cthread_rec.cthread_id, dict())
         else:
             global_bound_cthreads[cthread_rec.cthread_id] = cthread_rec
+            global_bound_cthreads_msgdict.setdefault(cthread_rec.cthread_id, cthread_rec)
         cmessages_subscribe_if_not_already(session, cthread_rec.cthread_id)
     elif sub_event == "cthread_delete":
         cthread_id = j["cthread_id"]
         global_free_cthreads.pop(cthread_id, None)
+        global_free_cthreads_msgdict.pop(cthread_id, None)
         global_bound_cthreads.pop(cthread_id, None)
+        global_bound_cthreads_msgdict.pop(cthread_id, None)
 
     elif sub_event == "cmessage_update":
         cmessage_rec = CMessage(**j["cmessage_rec"])
-        cthread = global_bound_cthreads.get(cmessage_rec.cmessage_belongs_to_cthread_id) or global_free_cthreads.get(cmessage_rec.cmessage_belongs_to_cthread_id)
+        d = global_bound_cthreads_msgdict.get(cmessage_rec.cmessage_belongs_to_cthread_id) or global_free_cthreads_msgdict.get(cmessage_rec.cmessage_belongs_to_cthread_id)
         k = cmessage_key(cmessage_rec.cmessage_belongs_to_cthread_id, cmessage_rec.cmessage_alt, cmessage_rec.cmessage_num)
-        if cthread:
-            cthread._cmessages[k] = cmessage_rec
+        if d is not None:
+            d[k] = cmessage_rec
+        else:
+            assert 0
     elif sub_event == "cmessage_delete":
         cmessage_belongs_to_cthread_id = j["cmessage_belongs_to_cthread_id"]
         cmessage_alt = j["cmessage_alt"]
         cmessage_num = j["cmessage_num"]
-        cthread = global_bound_cthreads.get(cmessage_belongs_to_cthread_id) or global_free_cthreads.get(cmessage_belongs_to_cthread_id)
+        d = global_bound_cthreads_msgdict.get(cmessage_rec.cmessage_belongs_to_cthread_id) or global_free_cthreads_msgdict.get(cmessage_rec.cmessage_belongs_to_cthread_id)
         k = cmessage_key(cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num)
-        if cthread:
-            cthread._cmessages.pop(k, None)
+        if d is not None:
+            d.pop(k, None)
+        else:
+            assert 0
 
     else:
         assert 0, decoded_line
 
 
-def print_messages(indent, cthread):
-    for message_key, message in cthread._cmessages.items():
+def print_messages(indent, msgdict: Dict[str, CMessage]):
+    for message_key, message in msgdict.items():
         mdict = json.loads(message.cmessage_json)
         chat_message = chat_client.Message(**mdict)
         output = termcolor.colored(f"{indent}{message_key} role=\"{chat_message.role}\" content=\"{chat_message.content}\"", "yellow")
@@ -145,7 +157,7 @@ def print_picture():
     for cthread_id, cthread in global_free_cthreads.items():
         emojis = cthread_emojis(cthread)
         print(termcolor.colored(f"CThread {cthread_id} {emojis}", "cyan"))
-        print_messages("  ", cthread)
+        print_messages("  ", global_free_cthreads_msgdict[cthread_id])
 
     print(termcolor.colored("Chores / ChoreEvents / CThreads / CMessages", "blue", attrs=["bold"]))
     for chore_id, chore in global_chores.items():
@@ -157,10 +169,12 @@ def print_picture():
                 if cthread:
                     emojis = cthread_emojis(cthread)
                     print(termcolor.colored(f"    CThread {cthread.cthread_id} {emojis}", "cyan"))
-                    print_messages("      ", cthread)
+                    print_messages("      ", global_bound_cthreads_msgdict.get(chore_event.chore_event_cthread_id))
                 else:
                     print(termcolor.colored("    CThread %s not found" % chore_event.chore_event_cthread_id, "red"))
+
     print("----------------/picture-------------")
+    print("subscribed cthread:", list(global_cthread_id_to_cmessages_subs.keys()))
 
 
 async def cmessages_sub(session, cmessage_belongs_to_cthread_id):
@@ -211,7 +225,7 @@ async def main(only_sub=False, quicksearch=""):
 
     async def periodic_print():
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(SLEEP)
             print_picture()
 
     print_picture()
