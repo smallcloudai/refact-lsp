@@ -54,6 +54,9 @@ pub async fn chore_pubsub_sleeping_procedure(
 
 
 pub fn merge_json(a: &mut serde_json::Value, b: &serde_json::Value) {
+    // if let serde_json::Value::Object(_) = b {
+    //     tracing::info!("merging json:\n{:#?}", b);
+    // }
     match (a, b) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
             for (k, v) in b {

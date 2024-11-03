@@ -46,23 +46,17 @@ pub fn chore_events_from_rows(
     events
 }
 
-pub fn chore_set(
-    cdb: Arc<ParkMutex<ChoreDB>>,
-    chore: Chore,
-) {
-    let (lite, chore_sleeping_point) = {
-        let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
-    };
-    let conn = lite.lock();
-    match conn.execute(
-        "INSERT OR REPLACE INTO chores (
-            chore_id,
-            chore_title,
-            chore_spontaneous_work_enable,
-            chore_created_ts,
-            chore_archived_ts
-        ) VALUES (?1, ?2, ?3, ?4, ?5)",
+fn chore_set_lowlevel(
+    tx: &rusqlite::Transaction,
+    chore: &Chore,
+) -> Result<usize, String> {
+    let updated_rows = tx.execute(
+        "UPDATE chores SET
+            chore_title = ?2,
+            chore_spontaneous_work_enable = ?3,
+            chore_created_ts = ?4,
+            chore_archived_ts = ?5
+        WHERE chore_id = ?1",
         params![
             chore.chore_id,
             chore.chore_title,
@@ -70,41 +64,41 @@ pub fn chore_set(
             chore.chore_created_ts,
             chore.chore_archived_ts,
         ],
-    ) {
-        Ok(_) => {},
-        Err(e) => {
-            tracing::error!("Failed to insert or replace chore:\n{} {}\nError: {}",
-                chore.chore_id, chore.chore_title,
-                e
-            );
-        }
+    ).map_err(|e| e.to_string())?;
+    if updated_rows == 0 {
+        tx.execute(
+            "INSERT INTO chores (
+                chore_id,
+                chore_title,
+                chore_spontaneous_work_enable,
+                chore_created_ts,
+                chore_archived_ts
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                chore.chore_id,
+                chore.chore_title,
+                chore.chore_spontaneous_work_enable,
+                chore.chore_created_ts,
+                chore.chore_archived_ts,
+            ],
+        ).map_err(|e| e.to_string())
+    } else {
+        Ok(updated_rows)
     }
-    drop(conn);
-    let j = serde_json::json!({
-        "chore_id": chore.chore_id,
-    });
-    crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
 }
 
-// chore_event_set
-pub fn chore_event_set(
-    cdb: Arc<ParkMutex<ChoreDB>>,
-    cevent: ChoreEvent,
-) {
-    let (lite, chore_sleeping_point) = {
-        let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
-    };
-    let conn = lite.lock();
-    match conn.execute(
-        "INSERT OR REPLACE INTO chore_events (
-            chore_event_id,
-            chore_event_belongs_to_chore_id,
-            chore_event_summary,
-            chore_event_ts,
-            chore_event_link,
-            chore_event_cthread_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+fn chore_event_set_lowlevel(
+    tx: &rusqlite::Transaction,
+    cevent: &ChoreEvent,
+) -> Result<usize, String> {
+    let updated_rows = tx.execute(
+        "UPDATE chore_events SET
+            chore_event_belongs_to_chore_id = ?2,
+            chore_event_summary = ?3,
+            chore_event_ts = ?4,
+            chore_event_link = ?5,
+            chore_event_cthread_id = ?6
+        WHERE chore_event_id = ?1",
         params![
             cevent.chore_event_id,
             cevent.chore_event_belongs_to_chore_id,
@@ -113,17 +107,71 @@ pub fn chore_event_set(
             cevent.chore_event_link,
             cevent.chore_event_cthread_id,
         ],
-    ) {
-        Ok(_) => {},
-        Err(e) => {
-            tracing::error!("Failed to insert or replace chore event:\n{} {}\nError: {}",
-                cevent.chore_event_id, cevent.chore_event_summary,
-                e
-            );
+    ).map_err(|e| e.to_string())?;
+    if updated_rows == 0 {
+        tx.execute(
+            "INSERT INTO chore_events (
+                chore_event_id,
+                chore_event_belongs_to_chore_id,
+                chore_event_summary,
+                chore_event_ts,
+                chore_event_link,
+                chore_event_cthread_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                cevent.chore_event_id,
+                cevent.chore_event_belongs_to_chore_id,
+                cevent.chore_event_summary,
+                cevent.chore_event_ts,
+                cevent.chore_event_link,
+                cevent.chore_event_cthread_id,
+            ],
+        ).map_err(|e| e.to_string())
+    } else {
+        Ok(updated_rows)
+    }
+}
+
+pub fn chore_set(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    chore: Chore,
+) {
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    {
+        let mut conn = lite.lock();
+        let tx = conn.transaction().expect("Failed to start transaction");
+        if let Err(e) = chore_set_lowlevel(&tx, &chore) {
+            tracing::error!("Failed to insert or replace chore:\n{}", e);
+        } else if let Err(e) = tx.commit() {
+            tracing::error!("Failed to commit transaction:\n{}", e);
         }
     }
-    drop(conn);
-    // ChoreEvent produces updates for the whole Chore
+    let j = serde_json::json!({
+        "chore_id": chore.chore_id,
+    });
+    crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
+}
+
+pub fn chore_event_set(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    cevent: ChoreEvent,
+) {
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    {
+        let mut conn = lite.lock();
+        let tx = conn.transaction().expect("Failed to start transaction");
+        if let Err(e) = chore_event_set_lowlevel(&tx, &cevent) {
+            tracing::error!("Failed to insert or replace chore event:\n{}", e);
+        } else if let Err(e) = tx.commit() {
+            tracing::error!("Failed to commit transaction:\n{}", e);
+        }
+    }
     let j = serde_json::json!({
         "chore_id": cevent.chore_event_belongs_to_chore_id,
     });

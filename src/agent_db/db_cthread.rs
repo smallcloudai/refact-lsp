@@ -55,24 +55,20 @@ pub fn cthread_set_lowlevel(
     tx: &rusqlite::Transaction,
     cthread: &CThread,
 ) -> Result<usize, String> {
-    // sqlite dialect "INSERT OR REPLACE INTO"
-    // mysql has INSERT INTO .. ON DUPLICATE KEY UPDATE ..
-    // postgres has INSERT INTO .. ON CONFLICT .. DO UPDATE SET
-    tx.execute(
-        "INSERT OR REPLACE INTO cthreads (
-            cthread_id,
-            cthread_belongs_to_chore_event_id,
-            cthread_title,
-            cthread_toolset,
-            cthread_model_used,
-            cthread_error,
-            cthread_anything_new,
-            cthread_created_ts,
-            cthread_updated_ts,
-            cthread_archived_ts,
-            cthread_locked_by,
-            cthread_locked_ts
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+    let updated_rows = tx.execute(
+        "UPDATE cthreads SET
+            cthread_belongs_to_chore_event_id = ?2,
+            cthread_title = ?3,
+            cthread_toolset = ?4,
+            cthread_model_used = ?5,
+            cthread_error = ?6,
+            cthread_anything_new = ?7,
+            cthread_created_ts = ?8,
+            cthread_updated_ts = ?9,
+            cthread_archived_ts = ?10,
+            cthread_locked_by = ?11,
+            cthread_locked_ts = ?12
+        WHERE cthread_id = ?1",
         rusqlite::params![
             cthread.cthread_id,
             cthread.cthread_belongs_to_chore_event_id,
@@ -87,9 +83,41 @@ pub fn cthread_set_lowlevel(
             cthread.cthread_locked_by,
             cthread.cthread_locked_ts,
         ],
-    ).map_err(|e| {
-        e.to_string()
-    })
+    ).map_err(|e| e.to_string())?;
+    if updated_rows == 0 {
+        tx.execute(
+            "INSERT INTO cthreads (
+                cthread_id,
+                cthread_belongs_to_chore_event_id,
+                cthread_title,
+                cthread_toolset,
+                cthread_model_used,
+                cthread_error,
+                cthread_anything_new,
+                cthread_created_ts,
+                cthread_updated_ts,
+                cthread_archived_ts,
+                cthread_locked_by,
+                cthread_locked_ts
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                cthread.cthread_id,
+                cthread.cthread_belongs_to_chore_event_id,
+                cthread.cthread_title,
+                cthread.cthread_toolset,
+                cthread.cthread_model_used,
+                cthread.cthread_error,
+                cthread.cthread_anything_new,
+                cthread.cthread_created_ts,
+                cthread.cthread_updated_ts,
+                cthread.cthread_archived_ts,
+                cthread.cthread_locked_by,
+                cthread.cthread_locked_ts,
+            ],
+        ).map_err(|e| e.to_string())
+    } else {
+        Ok(updated_rows)
+    }
 }
 
 pub fn cthread_set(

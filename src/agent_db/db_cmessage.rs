@@ -33,26 +33,21 @@ pub fn cmessages_from_rows(
     cmessages
 }
 
-pub fn cmessage_set(
-    cdb: Arc<ParkMutex<ChoreDB>>,
-    cmessage: CMessage,
-) {
-    let (lite, chore_sleeping_point) = {
-        let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
-    };
-    let conn = lite.lock();
-    match conn.execute(
-        "INSERT OR REPLACE INTO cmessages (
-            cmessage_belongs_to_cthread_id,
-            cmessage_alt,
-            cmessage_num,
-            cmessage_prev_alt,
-            cmessage_usage_model,
-            cmessage_usage_prompt,
-            cmessage_usage_completion,
-            cmessage_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+pub fn cmessage_set_lowlevel(
+    tx: &rusqlite::Transaction,
+    cmessage: &CMessage,
+) -> Result<usize, String> {
+    let updated_rows = tx.execute(
+        "UPDATE cmessages SET
+            cmessage_belongs_to_cthread_id = ?1,
+            cmessage_alt = ?2,
+            cmessage_num = ?3,
+            cmessage_prev_alt = ?4,
+            cmessage_usage_model = ?5,
+            cmessage_usage_prompt = ?6,
+            cmessage_usage_completion = ?7,
+            cmessage_json = ?8
+        WHERE cmessage_belongs_to_cthread_id = ?1 AND cmessage_alt = ?2 AND cmessage_num = ?3",
         params![
             cmessage.cmessage_belongs_to_cthread_id,
             cmessage.cmessage_alt,
@@ -63,16 +58,52 @@ pub fn cmessage_set(
             cmessage.cmessage_usage_completion,
             cmessage.cmessage_json,
         ],
-    ) {
-        Ok(_) => {},
-        Err(e) => {
-            tracing::error!("Failed to insert or replace cmessage:\n{} {} {}\nError: {}",
-                cmessage.cmessage_belongs_to_cthread_id, cmessage.cmessage_alt, cmessage.cmessage_num,
-                e
-            );
+    ).map_err(|e| e.to_string())?;
+    if updated_rows == 0 {
+        tx.execute(
+            "INSERT INTO cmessages (
+                cmessage_belongs_to_cthread_id,
+                cmessage_alt,
+                cmessage_num,
+                cmessage_prev_alt,
+                cmessage_usage_model,
+                cmessage_usage_prompt,
+                cmessage_usage_completion,
+                cmessage_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                cmessage.cmessage_belongs_to_cthread_id,
+                cmessage.cmessage_alt,
+                cmessage.cmessage_num,
+                cmessage.cmessage_prev_alt,
+                cmessage.cmessage_usage_model,
+                cmessage.cmessage_usage_prompt,
+                cmessage.cmessage_usage_completion,
+                cmessage.cmessage_json,
+            ],
+        ).map_err(|e| e.to_string())
+    } else {
+        Ok(updated_rows)
+    }
+}
+
+pub fn cmessage_set(
+    cdb: Arc<ParkMutex<ChoreDB>>,
+    cmessage: CMessage,
+) {
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    {
+        let mut conn = lite.lock();
+        let tx = conn.transaction().expect("Failed to start transaction");
+        if let Err(e) = cmessage_set_lowlevel(&tx, &cmessage) {
+            tracing::error!("Failed to insert or replace cmessage:\n{}", e);
+        } else if let Err(e) = tx.commit() {
+            tracing::error!("Failed to commit transaction:\n{}", e);
         }
     }
-    drop(conn);
     let j = serde_json::json!({
         "cmessage_belongs_to_cthread_id": cmessage.cmessage_belongs_to_cthread_id,
         "cmessage_alt": cmessage.cmessage_alt,
