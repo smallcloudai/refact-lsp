@@ -7,6 +7,7 @@ import time
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, List
 from pydantic import BaseModel, PrivateAttr
+from refact import chat_client
 
 
 BASE_URL = "http://127.0.0.1:8001"
@@ -122,28 +123,43 @@ def receive_sub_event(session, line):
         assert 0, decoded_line
 
 
+def print_messages(indent, cthread):
+    for message_key, message in cthread._cmessages.items():
+        mdict = json.loads(message.cmessage_json)
+        chat_message = chat_client.Message(**mdict)
+        output = termcolor.colored(f"{indent}{message_key} role=\"{chat_message.role}\" content=\"{chat_message.content}\"", "yellow")
+        if chat_message.tool_calls:
+            output += termcolor.colored(f" tool_calls=\"{chat_message.tool_calls}\"", "red")
+        print(output)
+
+def cthread_emojis(cthread: CThread):
+    archived_emoji = "🗑️" if cthread.cthread_archived_ts else ""
+    error_emoji = "❌" if cthread.cthread_error else ""
+    new_emoji = "🟡" if cthread.cthread_anything_new else ""
+    return f"{archived_emoji}{error_emoji}{new_emoji}"
+
 def print_picture():
     print("\033[H\033[J", end="")
     print("----------------picture--------------")
     print(termcolor.colored("Free CThreads %d" % len(global_free_cthreads), "blue", attrs=["bold"]))
     for cthread_id, cthread in global_free_cthreads.items():
-        print(termcolor.colored("CThread: %s" % cthread_id, "cyan"))
-        for message_key, message in cthread._cmessages.items():
-            print(termcolor.colored("  Message: %s" % message_key, "yellow"))
+        emojis = cthread_emojis(cthread)
+        print(termcolor.colored(f"CThread {cthread_id} {emojis}", "cyan"))
+        print_messages("  ", cthread)
 
     print(termcolor.colored("Chores / ChoreEvents / CThreads / CMessages", "blue", attrs=["bold"]))
     for chore_id, chore in global_chores.items():
-        print(termcolor.colored("Chore: %s has %d events" % (chore_id, len(chore._chore_events)), "cyan"))
+        print(termcolor.colored("Chore: %s has %d events" % (chore_id, len(chore._chore_events)), "magenta"))
         for chore_event_id, chore_event in chore._chore_events.items():
-            print(termcolor.colored("  Event: %s" % chore_event_id, "green"))
+            print(termcolor.colored("  Event %s" % chore_event_id, "green"))
             if chore_event.chore_event_cthread_id:
                 cthread = global_bound_cthreads.get(chore_event.chore_event_cthread_id)
                 if cthread:
-                    print(termcolor.colored("    CThread: %s" % cthread.cthread_id, "magenta"))
-                    for message_key, message in cthread._cmessages.items():
-                        print(termcolor.colored("      Message: %s" % message_key, "yellow"))
+                    emojis = cthread_emojis(cthread)
+                    print(termcolor.colored(f"    CThread {cthread.cthread_id} {emojis}", "cyan"))
+                    print_messages("      ", cthread)
                 else:
-                    print(termcolor.colored("    CThread: %s not found" % chore_event.chore_event_cthread_id, "red"))
+                    print(termcolor.colored("    CThread %s not found" % chore_event.chore_event_cthread_id, "red"))
     print("----------------/picture-------------")
 
 

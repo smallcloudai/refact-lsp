@@ -4,6 +4,9 @@ import termcolor
 import json
 import argparse
 import time
+from typing import Dict, List
+from refact import chat_client
+
 
 BASE_URL = "http://127.0.0.1:8001"
 
@@ -48,42 +51,43 @@ async def listen_to_cmessages(session, thread_id):
                     print()
 
 
-async def various_updates_generator(session, cthread_id):
-    r = await session.post(f"{BASE_URL}/db_v1/cthread-update",
-        json={
-            "cthread_id": cthread_id,
-            "cthread_title": "Hello world!!!",
-            "cthread_anything_new": True,
-        },
-    )
+async def various_updates_generator(session, n, cthread_id):
+    r = await session.post(f"{BASE_URL}/db_v1/cthread-update", json={
+        "cthread_id": cthread_id,
+        "cthread_title": "Frog launcher thread %d" % n,
+        "cthread_anything_new": False,
+        "cthread_created_ts": time.time(),
+        "cthread_error": ("pause" if n != 2 else ""),
+    })
     assert r.status == 200, f"oops:\n{r}"
-
-    r = await session.post(f"{BASE_URL}/db_v1/cmessage-update",
-        json={
+    msg: List[chat_client.Message] = [
+        chat_client.Message(role="user", content="Hello mister assistant, I have a question for you"),
+        chat_client.Message(role="user", content="Find Frog in this project"),
+    ]
+    for mi, m in enumerate(msg):
+        r = await session.post(f"{BASE_URL}/db_v1/cmessage-update", json={
             "cmessage_belongs_to_cthread_id": cthread_id,
             "cmessage_alt": 0,
-            "cmessage_num": 0,
-            "cmessage_prev_alt": -1,
+            "cmessage_num": mi,
+            "cmessage_prev_alt": mi - 1,
             "cmessage_usage_model": "gpt-3.5",
-            "cmessage_json": "{ \"something\": \"fishy\" }"
-        },
-    )
+            "cmessage_json": json.dumps(m.model_dump(exclude_unset=True)),
+        })
     assert r.status == 200, f"oops:\n{r}"
-
     print(termcolor.colored("updates over", "green"))
 
 
 async def main(only_sub=False, only_update=False):
-    cthread_id = f"silly_thread_{int(time.time())}"
-    headers = {"Content-Type": "application/json"}
-
+    cthread_id = f"test13thread{int(time.time())}"
     async with aiohttp.ClientSession() as session:
         tasks = []
         if only_sub or (not only_sub and not only_update):
             tasks.append(asyncio.create_task(listen_to_cthreads(session)))
             tasks.append(asyncio.create_task(listen_to_cmessages(session, cthread_id)))
         if only_update or (not only_sub and not only_update):
-            tasks.append(asyncio.create_task(various_updates_generator(session, cthread_id)))
+            tasks.append(asyncio.create_task(various_updates_generator(session, 1, cthread_id + "_1")))
+            tasks.append(asyncio.create_task(various_updates_generator(session, 2, cthread_id + "_2")))
+            tasks.append(asyncio.create_task(various_updates_generator(session, 3, cthread_id + "_3")))
         await asyncio.gather(*tasks)
 
     print(termcolor.colored("\nTEST OVER", "green", attrs=["bold"]))
