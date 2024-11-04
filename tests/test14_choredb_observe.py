@@ -140,7 +140,12 @@ def print_messages(indent, msgdict: Dict[str, CMessage]):
     for message_key, message in msgdict.items():
         mdict = json.loads(message.cmessage_json)
         chat_message = chat_client.Message(**mdict)
-        output = termcolor.colored(f"{indent}{message_key} role=\"{chat_message.role}\" content=\"{chat_message.content}\"", "yellow")
+        output = termcolor.colored("%s%s role=\"%s\" content=\"%s\"" % (
+            indent,
+            message_key,
+            chat_message.role,
+            chat_message.content[:20].replace("\n", "\\n")
+        ), "yellow")
         if chat_message.tool_calls:
             output += termcolor.colored(f" tool_calls=\"{chat_message.tool_calls}\"", "red")
         print(output)
