@@ -212,7 +212,9 @@ async fn parse_tickets(gcx: Arc<ARwLock<GlobalContext>>, content: &str) -> Vec<T
                 Ok((new_line_num, mut ticket)) => {
                     // if there is something to put to the extra context
                     if let Some(l) = line_num_before_first_block {
-                        ticket.hint_message = lines[0 .. l - 1].iter().join(" ");
+                        if l > 0 {
+                            ticket.hint_message = lines[0 .. l - 1].iter().join(" ");
+                        }
                     }
                     line_num = new_line_num;
                     tickets.push(ticket);
