@@ -257,8 +257,8 @@ pub async fn get_and_correct_active_tickets(
     // XXX: this is a useless message the model doesn't listen to anyway. We need cd_instruction and a better text.
     let mut active_tickets = ticket_ids.iter().map(|t| all_tickets_from_above.get(t).cloned()
         .ok_or(good_error_text(
-            &format!("No code block found for the ticket {:?} did you forget to write one using 📍-notation?", t),
-            &ticket_ids, Some("wrap the block of code in a 📍-notation, creating a ticket, do not call patch() until you do it. Do not prompt user again this time".to_string()),
+            &format!("No code block found for the ticket {:?}, did you forget to write one using 📍-notation or the message is stripped?", t),
+            &ticket_ids, Some("wrap the block of code in a 📍-notation, create a ticket, make sure the message isn't stripped. Do not call patch() until you do it. Do not prompt user again this time".to_string()),
         ))).collect::<Result<Vec<_>, _>>()?;
 
     if active_tickets.iter().map(|x| x.filename_before.clone()).unique().count() > 1 {
