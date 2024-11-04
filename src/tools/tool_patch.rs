@@ -119,6 +119,7 @@ impl Tool for ToolPatch {
                 false,
                 ccx_lock.messages.clone(),
                 ccx_lock.chat_id.clone(),
+                ccx_lock.should_execute_remotely,
             ).await))
         };
 
