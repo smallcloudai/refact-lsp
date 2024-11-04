@@ -14,14 +14,12 @@ pub mod db_schema_20241102;
 pub mod db_structs;
 
 pub fn chore_pubub_push(
-    lite: &Arc<ParkMutex<rusqlite::Connection>>,
+    transaction: &rusqlite::Transaction,
     channel: &str,
     action: &str,
     event_json: &serde_json::Value,
-    notify_point: &Arc<tokio::sync::Notify>,
 ) {
-    let conn = lite.lock();
-    match conn.execute(
+    match transaction.execute(
         "INSERT INTO pubsub_events (pubevent_channel, pubevent_action, pubevent_json)
          VALUES (?1, ?2, ?3)",
         rusqlite::params![channel, action, event_json.to_string()],
@@ -31,7 +29,6 @@ pub fn chore_pubub_push(
             tracing::error!("Failed to insert pubsub event: {}", e);
         }
     }
-    notify_point.notify_waiters();
 }
 
 pub async fn chore_pubsub_sleeping_procedure(

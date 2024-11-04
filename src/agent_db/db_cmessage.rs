@@ -9,7 +9,7 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use async_stream::stream;
 
-use crate::agent_db::db_structs::{ChoreDB, CMessage};
+use crate::agent_db::db_structs::CMessage;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 
@@ -88,21 +88,12 @@ pub fn cmessage_set_lowlevel(
 }
 
 pub fn cmessage_set(
-    cdb: Arc<ParkMutex<ChoreDB>>,
+    tx: &rusqlite::Transaction,
     cmessage: CMessage,
 ) {
-    let (lite, chore_sleeping_point) = {
-        let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
-    };
-    {
-        let mut conn = lite.lock();
-        let tx = conn.transaction().expect("Failed to start transaction");
-        if let Err(e) = cmessage_set_lowlevel(&tx, &cmessage) {
-            tracing::error!("Failed to insert or replace cmessage:\n{}", e);
-        } else if let Err(e) = tx.commit() {
-            tracing::error!("Failed to commit transaction:\n{}", e);
-        }
+    if let Err(e) = cmessage_set_lowlevel(&tx, &cmessage) {
+        tracing::error!("Failed to insert or replace cmessage:\n{}", e);
+        return;
     }
     let j = serde_json::json!({
         "cmessage_belongs_to_cthread_id": cmessage.cmessage_belongs_to_cthread_id,
@@ -110,19 +101,17 @@ pub fn cmessage_set(
         "cmessage_num": cmessage.cmessage_num,
         "cthread_id": cmessage.cmessage_belongs_to_cthread_id,
     });
-    crate::agent_db::chore_pubub_push(&lite, "cmessage", "update", &j, &chore_sleeping_point);
-    crate::agent_db::chore_pubub_push(&lite, "cthread", "update", &j, &chore_sleeping_point);
+    crate::agent_db::chore_pubub_push(tx, "cmessage", "update", &j);
+    crate::agent_db::chore_pubub_push(tx, "cthread", "update", &j);
 }
 
 pub fn cmessage_get(
-    cdb: Arc<ParkMutex<ChoreDB>>,
+    tx: &rusqlite::Transaction,
     cmessage_belongs_to_cthread_id: String,
     cmessage_alt: i32,
     cmessage_num: i32,
 ) -> Result<CMessage, String> {
-    let lite = cdb.lock().lite.clone();
-    let conn = lite.lock();
-    let mut stmt = conn.prepare(
+    let mut stmt = tx.prepare(
         "SELECT * FROM cmessages WHERE cmessage_belongs_to_cthread_id = ?1 AND cmessage_alt = ?2 AND cmessage_num = ?3"
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query(params![cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num])
@@ -132,9 +121,20 @@ pub fn cmessage_get(
         .ok_or_else(|| format!("No CMessage found with {}:{}:{}", cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num))
 }
 
+pub fn cmessage_get_with_lite_arc(
+    lite_arc: Arc<ParkMutex<rusqlite::Connection>>,
+    cmessage_belongs_to_cthread_id: String,
+    cmessage_alt: i32,
+    cmessage_num: i32,
+) -> Result<CMessage, String> {
+    let mut conn = lite_arc.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    cmessage_get(&tx, cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num)
+}
+
 
 // HTTP handler
-pub async fn handle_db_v1_cmessage_update(
+pub async fn handle_db_v1_cmessages_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
@@ -145,28 +145,50 @@ pub async fn handle_db_v1_cmessage_update(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    let cmessage_belongs_to_cthread_id = incoming_json.get("cmessage_belongs_to_cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let cmessage_num = incoming_json.get("cmessage_num").and_then(|v| v.as_i64()).unwrap_or_default() as i32;
-    let cmessage_alt = incoming_json.get("cmessage_alt").and_then(|v| v.as_i64()).unwrap_or_default() as i32;
-
-    let cmessage_rec = match cmessage_get(cdb.clone(), cmessage_belongs_to_cthread_id.clone(), cmessage_alt, cmessage_num) {
-        Ok(existing_cmessage) => existing_cmessage,
-        Err(_) => CMessage {
-            cmessage_belongs_to_cthread_id,
-            cmessage_alt,
-            cmessage_num,
-            ..Default::default()
-        },
-    };
-
-    let mut cmessage_json = serde_json::to_value(&cmessage_rec).unwrap();
-    crate::agent_db::merge_json(&mut cmessage_json, &incoming_json);
-
-    let cmessage_rec: CMessage = serde_json::from_value(cmessage_json).map_err(|e| {
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
+    let updates = incoming_json.as_array().ok_or_else(|| {
+        ScratchError::new(StatusCode::BAD_REQUEST, "Expected a list of updates".to_string())
     })?;
 
-    cmessage_set(cdb, cmessage_rec);
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+    {
+        let mut conn = lite.lock();
+        let tx = conn.transaction().map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Transaction error: {}", e))
+        })?;
+
+        for update in updates {
+            let cmessage_belongs_to_cthread_id = update.get("cmessage_belongs_to_cthread_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let cmessage_num = update.get("cmessage_num").and_then(|v| v.as_i64()).unwrap_or_default() as i32;
+            let cmessage_alt = update.get("cmessage_alt").and_then(|v| v.as_i64()).unwrap_or_default() as i32;
+
+            let cmessage_rec = match cmessage_get(&tx, cmessage_belongs_to_cthread_id.clone(), cmessage_alt, cmessage_num) {
+                Ok(existing_cmessage) => existing_cmessage,
+                Err(_) => CMessage {
+                    cmessage_belongs_to_cthread_id,
+                    cmessage_alt,
+                    cmessage_num,
+                    ..Default::default()
+                },
+            };
+
+            let mut cmessage_json = serde_json::to_value(&cmessage_rec).unwrap();
+            crate::agent_db::merge_json(&mut cmessage_json, &update);
+
+            let cmessage_rec: CMessage = serde_json::from_value(cmessage_json).map_err(|e| {
+                ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
+            })?;
+
+            cmessage_set(&tx, cmessage_rec);
+        }
+        chore_sleeping_point.notify_waiters();
+
+        tx.commit().map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Commit error: {}", e))
+        })?;
+    }
 
     let response = Response::builder()
         .status(StatusCode::OK)
@@ -249,21 +271,25 @@ pub async fn handle_db_v1_cmessages_sub(
                 }
             }
             for updated_key in updated_cmessage_keys {
-                match cmessage_get(cdb.clone(), updated_key.cmessage_belongs_to_cthread_id.clone(), updated_key.cmessage_alt, updated_key.cmessage_num) {
-                    Ok(updated_cmessage) => {
-                        if post.cmessage_belongs_to_cthread_id.is_empty() || post.cmessage_belongs_to_cthread_id == updated_key.cmessage_belongs_to_cthread_id {
-                            let update_event = json!({
-                                "sub_event": "cmessage_update",
-                                "cmessage_rec": updated_cmessage
-                            });
-                            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
+                let update_event = {
+                    match cmessage_get_with_lite_arc(lite_arc.clone(), updated_key.cmessage_belongs_to_cthread_id.clone(), updated_key.cmessage_alt, updated_key.cmessage_num) {
+                        Ok(updated_cmessage) => {
+                            if post.cmessage_belongs_to_cthread_id.is_empty() || post.cmessage_belongs_to_cthread_id == updated_key.cmessage_belongs_to_cthread_id {
+                                json!({
+                                    "sub_event": "cmessage_update",
+                                    "cmessage_rec": updated_cmessage
+                                })
+                            } else {
+                                continue;
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("handle_db_v1_cmessages_sub(2): {}", e);
+                            break;
                         }
-                    },
-                    Err(e) => {
-                        tracing::error!("handle_db_v1_cmessages_sub(2): {}", e);
-                        break;
                     }
-                }
+                };
+                yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
             }
         }
     };

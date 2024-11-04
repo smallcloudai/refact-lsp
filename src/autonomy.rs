@@ -19,7 +19,7 @@ pub async fn look_for_a_job(
     worker_n: usize,
 ) {
     let worker_pid = std::process::id();
-    let worker_name = format!("aworker/{}/{}", worker_pid, worker_n);
+    let worker_name = format!("aworker-{}-{}", worker_pid, worker_n);
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
     let mut might_work_on_cthread_id: IndexSet<String> = IndexSet::new();
@@ -152,6 +152,11 @@ async fn do_the_job(
     cmessages: &Vec<CMessage>,
 ) -> Result<serde_json::Value, String> {
     let cdb = gcx.read().await.chore_db.clone();
+    let (lite, chore_sleeping_point) = {
+        let db = cdb.lock();
+        (db.lite.clone(), db.chore_sleeping_point.clone())
+    };
+
     let messages: Vec<ChatMessage> = cmessages.iter().map(|cmsg| { serde_json::from_str(&cmsg.cmessage_json).map_err(|e| format!("{}", e))}).collect::<Result<Vec<_>, _>>()?;
     let message_info: Vec<String> = messages.iter().map(|msg| {
         let role = &msg.role;
@@ -225,8 +230,6 @@ async fn do_the_job(
         messages.clone(),
         cthread_rec.cthread_id.clone(),
     ).await));
-    // t.subchat_tx = ccx_lock.subchat_tx.clone();
-    // t.subchat_rx = ccx_lock.subchat_rx.clone();
 
     // XXX at commands
     tracing::info!("{} start chat_interaction()", worker_name);
@@ -236,29 +239,33 @@ async fn do_the_job(
     }
     let choice0: Vec<ChatMessage> = chat_response_msgs[0].clone();
 
-    // save the messages
-    for (i, chat_message) in choice0.iter().enumerate() {
-        let mut cmessage_usage_prompt = 0;
-        let mut cmessage_usage_completion = 0;
-        if let Some(u) = &chat_message.usage {
-            cmessage_usage_prompt = u.prompt_tokens as i32;
-            cmessage_usage_completion = u.completion_tokens as i32;
-        } else {
-            tracing::warn!("running {} didn't produce usage so it's hard to calculate tokens :/", cthread_rec.cthread_model);
+    {
+        let mut lite_locked = lite.lock();
+        let tx = lite_locked.transaction().map_err(|e| e.to_string())?;
+        for (i, chat_message) in choice0.iter().enumerate() {
+            let mut cmessage_usage_prompt = 0;
+            let mut cmessage_usage_completion = 0;
+            if let Some(u) = &chat_message.usage {
+                cmessage_usage_prompt = u.prompt_tokens as i32;
+                cmessage_usage_completion = u.completion_tokens as i32;
+            } else {
+                tracing::warn!("running {} didn't produce usage so it's hard to calculate tokens :/", cthread_rec.cthread_model);
+            }
+            let cmessage = CMessage {
+                cmessage_belongs_to_cthread_id: cthread_rec.cthread_id.clone(),
+                cmessage_alt: 0,
+                cmessage_num: (cmessages.len() as i32) + (i as i32),
+                cmessage_prev_alt: 0,
+                cmessage_usage_model: cthread_rec.cthread_model.clone(),
+                cmessage_usage_prompt,
+                cmessage_usage_completion,
+                cmessage_json: serde_json::to_string(chat_message).map_err(|e| format!("{}", e))?,
+            };
+            crate::agent_db::db_cmessage::cmessage_set(&tx, cmessage);
         }
-        let cmessage = CMessage {
-            cmessage_belongs_to_cthread_id: cthread_rec.cthread_id.clone(),
-            cmessage_alt: 0,
-            cmessage_num: (cmessages.len() as i32) + (i as i32),
-            cmessage_prev_alt: 0,
-            cmessage_usage_model: cthread_rec.cthread_model.clone(),
-            cmessage_usage_prompt,
-            cmessage_usage_completion,
-            cmessage_json: serde_json::to_string(chat_message).map_err(|e| format!("{}", e))?,
-        };
-        crate::agent_db::db_cmessage::cmessage_set(cdb.clone(), cmessage);
+        tx.commit().map_err(|e| e.to_string())?;
     }
-
+    chore_sleeping_point.notify_waiters();
 
 
     // let old_messages = messages.clone();

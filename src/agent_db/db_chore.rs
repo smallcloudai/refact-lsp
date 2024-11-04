@@ -145,14 +145,17 @@ pub fn chore_set(
         let tx = conn.transaction().expect("Failed to start transaction");
         if let Err(e) = chore_set_lowlevel(&tx, &chore) {
             tracing::error!("Failed to insert or replace chore:\n{}", e);
-        } else if let Err(e) = tx.commit() {
-            tracing::error!("Failed to commit transaction:\n{}", e);
+        } else {
+            let j = serde_json::json!({
+                "chore_id": chore.chore_id,
+            });
+            crate::agent_db::chore_pubub_push(&tx, "chore", "update", &j);
+            if let Err(e) = tx.commit() {
+                tracing::error!("Failed to commit transaction:\n{}", e);
+            }
         }
     }
-    let j = serde_json::json!({
-        "chore_id": chore.chore_id,
-    });
-    crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
+    chore_sleeping_point.notify_waiters();
 }
 
 pub fn chore_event_set(
@@ -168,14 +171,17 @@ pub fn chore_event_set(
         let tx = conn.transaction().expect("Failed to start transaction");
         if let Err(e) = chore_event_set_lowlevel(&tx, &cevent) {
             tracing::error!("Failed to insert or replace chore event:\n{}", e);
-        } else if let Err(e) = tx.commit() {
-            tracing::error!("Failed to commit transaction:\n{}", e);
+        } else {
+            let j = serde_json::json!({
+                "chore_id": cevent.chore_event_belongs_to_chore_id,
+            });
+            crate::agent_db::chore_pubub_push(&tx, "chore", "update", &j);
+            if let Err(e) = tx.commit() {
+                tracing::error!("Failed to commit transaction:\n{}", e);
+            }
         }
     }
-    let j = serde_json::json!({
-        "chore_id": cevent.chore_event_belongs_to_chore_id,
-    });
-    crate::agent_db::chore_pubub_push(&lite, "chore", "update", &j, &chore_sleeping_point);
+    chore_sleeping_point.notify_waiters();
 }
 
 pub fn chore_get(

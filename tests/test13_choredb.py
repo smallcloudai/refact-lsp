@@ -57,6 +57,8 @@ async def various_updates_generator(session, n, cthread_id):
         "cthread_title": "Frog launcher thread %d" % n,
         "cthread_anything_new": False,
         "cthread_created_ts": time.time(),
+        "cthread_model": "gpt-4o-mini",
+        "cthread_temperature": 0.8,
         "cthread_error": ("pause" if n != 2 else ""),
     })
     assert r.status == 200, f"oops:\n{r}"
@@ -64,15 +66,16 @@ async def various_updates_generator(session, n, cthread_id):
         chat_client.Message(role="user", content="Hello mister assistant, I have a question for you"),
         chat_client.Message(role="user", content="Find Frog in this project"),
     ]
+    messages_payload = []
     for mi, m in enumerate(msg):
-        r = await session.post(f"{BASE_URL}/db_v1/cmessage-update", json={
+        messages_payload.append({
             "cmessage_belongs_to_cthread_id": cthread_id,
             "cmessage_alt": 0,
             "cmessage_num": mi,
             "cmessage_prev_alt": mi - 1,
-            "cmessage_usage_model": "gpt-3.5",
             "cmessage_json": json.dumps(m.model_dump(exclude_unset=True)),
         })
+    r = await session.post(f"{BASE_URL}/db_v1/cmessages-update", json=messages_payload)
     assert r.status == 200, f"oops:\n{r}"
     print(termcolor.colored("updates over %s" % cthread_id, "green"))
 

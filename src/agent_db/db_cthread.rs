@@ -138,15 +138,18 @@ pub fn cthread_set(
         let tx = conn.transaction().expect("Failed to start transaction");
         if let Err(e) = cthread_set_lowlevel(&tx, cthread) {
             tracing::error!("Failed to insert or replace cthread:\n{}", e);
-        } else if let Err(e) = tx.commit() {
+        }
+        let j = serde_json::json!({
+            "cthread_id": cthread.cthread_id,
+            "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
+        });
+        crate::agent_db::chore_pubub_push(&tx, "cthread", "update", &j);
+        if let Err(e) = tx.commit() {
             tracing::error!("Failed to commit transaction:\n{}", e);
+            return;
         }
     }
-    let j = serde_json::json!({
-        "cthread_id": cthread.cthread_id,
-        "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
-    });
-    crate::agent_db::chore_pubub_push(&lite, "cthread", "update", &j, &chore_sleeping_point);
+    chore_sleeping_point.notify_waiters();
 }
 
 pub fn cthread_apply_json(
