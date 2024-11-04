@@ -200,14 +200,19 @@ async fn parse_tickets(gcx: Arc<ARwLock<GlobalContext>>, content: &str) -> Vec<T
 
     let lines: Vec<&str> = content.lines().collect();
     let mut line_num = 0;
+    let mut line_num_before_first_block: Option<usize> = None;
     let mut tickets = vec![];
     while line_num < lines.len() {
         let line = lines[line_num];
         if line.contains("📍") {
+            if line_num_before_first_block.is_none() {
+                line_num_before_first_block = Some(line_num);
+            }
             match process_ticket(gcx.clone(), &lines, line_num).await {
                 Ok((new_line_num, mut ticket)) => {
-                    if line_num > 0 {  // if there is something to put to the extra context
-                        ticket.hint_message = lines[0 .. line_num - 1].iter().join(" ");
+                    // if there is something to put to the extra context
+                    if let Some(l) = line_num_before_first_block {
+                        ticket.hint_message = lines[0 .. l - 1].iter().join(" ");
                     }
                     line_num = new_line_num;
                     tickets.push(ticket);

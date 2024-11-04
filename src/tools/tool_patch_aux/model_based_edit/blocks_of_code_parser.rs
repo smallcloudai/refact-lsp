@@ -145,8 +145,8 @@ async fn sections_to_diff_blocks(
             .map(|x| x.trim_start().to_string())
             .collect::<Vec<_>>();
         let mut start_offset = None;
-        for file_line_idx in 0..=file_lines.len() - orig_section.hunk.len() {
-            let file_lines_span = file_lines[file_line_idx..file_line_idx + orig_section.hunk.len()]
+        for file_line_idx in 0..=file_lines.len().saturating_sub(orig_section.hunk.len()) {
+            let file_lines_span = file_lines[file_line_idx..(file_line_idx + orig_section.hunk.len()).min(file_lines.len())]
                 .iter()
                 .map(|x| x.trim_start().to_string())
                 .collect::<Vec<_>>();
