@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use serde_json::{Value, json};
 use serde::{Deserialize, Serialize};
@@ -10,16 +9,14 @@ use tokio::sync::Mutex as AMutex;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
-use crate::integrations::integr_github::ToolGithub;
-use crate::integrations::integr_gitlab::ToolGitlab;
-use crate::integrations::integr_pdb::ToolPdb;
-use crate::integrations::integr_chrome::ToolChrome;
-use crate::integrations::integr_postgres::ToolPostgres;
+
+use crate::integrations::load_integration_tools;
+use crate::yaml_configs::create_configs::read_yaml_into_value;
 
 use crate::integrations::docker::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CommandsRequireConfirmationConfig { // todo: fix typo
+pub struct CommandsRequireConfirmationConfig {
     pub commands_need_confirmation: Vec<String>,
     pub commands_deny: Vec<String>,
 }
@@ -164,6 +161,12 @@ pub async fn tools_merged_and_filtered(
         tools_all.extend(cmdline_tools);
     }
 
+    //     let integrations = load_integration_tools(gcx.clone()).await;
+    //     tools_all.extend(integrations);
+    //     #[cfg(feature="vecdb")]
+    //     tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
+    // }
+
     let mut filtered_tools = IndexMap::new();
     for (tool_name, tool_arc) in tools_all {
         let tool_locked = tool_arc.lock().await;
@@ -183,6 +186,9 @@ pub async fn tools_merged_and_filtered(
 pub async fn commands_require_confirmation_rules_from_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<CommandsRequireConfirmationConfig, String>
 {
     let integrations_value = read_integrations_yaml(gcx.clone()).await?;
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let yaml_path = cache_dir.join("integrations.yaml");
+    let integrations_value = read_yaml_into_value(&yaml_path).await?;
 
     serde_yaml::from_value::<CommandsRequireConfirmationConfig>(integrations_value)
         .map_err(|e| format!("Failed to parse CommandsRequireConfirmationConfig: {}", e))
@@ -465,7 +471,7 @@ pub struct ToolDictDeserialize {
 }
 
 pub async fn tool_description_list_from_yaml(
-    tools: indexmap::IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
+    tools: IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     turned_on: &Vec<String>,
     allow_experimental: bool,
 ) -> Result<Vec<ToolDesc>, String> {

@@ -5,40 +5,62 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use sha2::{Sha256, Digest};
 use serde_yaml;
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
+use tracing::warn;
 use crate::global_context::GlobalContext;
-
+use crate::integrations::DEFAULT_INTEGRATION_VALUES;
 
 const DEFAULT_CHECKSUM_FILE: &str = "default-checksums.yaml";
 
-pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> String
-{
+pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> String {
     let mut results = Vec::new();
+    let cache_dir = gcx.read().await.cache_dir.clone();
+
     let files = vec![
         ("bring-your-own-key.yaml", crate::caps::BRING_YOUR_OWN_KEY_SAMPLE),
         ("customization.yaml", crate::yaml_configs::customization_compiled_in::COMPILED_IN_INITIAL_USER_YAML),
         ("privacy.yaml", crate::privacy_compiled_in::COMPILED_IN_INITIAL_PRIVACY_YAML),
         ("integrations.yaml", crate::integrations::INTEGRATIONS_DEFAULT_YAML),
     ];
+
     for (file_name, content) in files {
-        match _yaml_file_exists_or_create(gcx.clone(), file_name, content).await {
-            Ok(result) => results.push(result),
-            Err(e) => {
-                tracing::warn!("{}", e);
-                results.push(format!("Error processing {}: {}", file_name, e));
-            }
+        let file_path = cache_dir.join(file_name);
+        if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, content).await {
+            warn!("{}", e);
+            results.push(format!("Error processing {:?}: {}", file_path, e));
+        } else {
+            results.push(file_path.to_string_lossy().to_string());
         }
     }
-    results[0].clone()  // path to bring-your-own-key.yaml, relied upon by first run procedure
+
+    let integrations_d = cache_dir.join("integrations.d");
+    if let Err(e) = tokio::fs::create_dir_all(&integrations_d).await {
+        warn!("Failed to create directory {:?}: {}", integrations_d, e);
+        results.push(format!("Error creating directory {:?}: {}", integrations_d, e));
+    }
+
+    for (file_name, content) in DEFAULT_INTEGRATION_VALUES {
+        let file_path = integrations_d.join(file_name);
+        if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, content).await {
+            warn!("{}", e);
+            results.push(format!("Error processing {:?}: {}", file_path, e));
+        } else {
+            results.push(file_path.to_string_lossy().to_string());
+        }
+    }
+
+    results.get(0).cloned().unwrap_or_default()
 }
 
-
-async fn _yaml_file_exists_or_create(gcx: Arc<ARwLock<GlobalContext>>, config_name: &str, the_default: &str) -> Result<String, String>
+async fn _yaml_file_exists_or_create(
+    gcx: Arc<ARwLock<GlobalContext>>, 
+    config_path: &PathBuf,
+    the_default: &str
+) -> Result<String, String>
 {
     let cache_dir = gcx.read().await.cache_dir.clone();
-    let config_path = cache_dir.join(config_name);
     let config_path_str = config_path.to_string_lossy().to_string();
+    let config_name = config_path.file_name().ok_or_else(|| format!("{} is not a file", config_path.display()))?.to_string_lossy().to_string();
 
     let checksums_dict = read_checksums(&cache_dir).await?;
 
@@ -50,7 +72,7 @@ async fn _yaml_file_exists_or_create(gcx: Arc<ARwLock<GlobalContext>>, config_na
             return Ok(config_path_str);
         }
         let existing_checksum = calculate_checksum(&existing_content);
-        if existing_checksum == checksums_dict.get(config_name).map(|s| s.as_str()).unwrap_or("") {
+        if existing_checksum == checksums_dict.get(&config_name).map(|s| s.as_str()).unwrap_or("") {
             tracing::info!("\n * * * detected that {} is a default config from a previous version of this binary, no changes made by human, overwrite * * *\n", config_path.display());
         } else {
             // normal exit, config changed by user
@@ -100,4 +122,18 @@ async fn update_checksum(cache_dir: &Path, config_name: String, checksum: &str) 
     tokio::fs::write(&checksum_path, content).await
         .map_err(|e| format!("failed to write {}: {}", DEFAULT_CHECKSUM_FILE, e))?;
     Ok(())
+}
+
+pub async fn read_yaml_into_value(yaml_path: &PathBuf) -> Result<serde_yaml::Value, String> {
+    let file = std::fs::File::open(&yaml_path).map_err(
+        |e| format!("Failed to open {}: {}", yaml_path.display(), e)
+    )?;
+
+    let reader = std::io::BufReader::new(file);
+    serde_yaml::from_reader(reader).map_err(
+        |e| {
+            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
+            format!("Failed to parse {}{}: {}", yaml_path.display(), location, e)
+        }
+    )
 }

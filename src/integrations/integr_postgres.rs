@@ -110,3 +110,10 @@ impl Tool for ToolPostgres {
         unsafe { &mut DEFAULT_USAGE }
     }
 }
+
+pub const DEFAULT_POSTGRES_INTEGRATION_YAML: &str = r#"
+# Postgres database
+
+# psql_binary_path: "/path/to/psql"  # Uncomment to set a custom path for the psql binary, defaults to "psql"
+# connection_string: "postgresql://username:password@localhost/dbname"  # To get a connection string, check out https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
+"#;

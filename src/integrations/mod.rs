@@ -1,3 +1,15 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use indexmap::IndexMap;
+use tracing::warn;
+use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
+use crate::global_context::GlobalContext;
+use crate::tools::tools_description::Tool;
+use crate::yaml_configs::create_configs::read_yaml_into_value;
+
+pub mod sessions;
+pub mod process_io_utils;
+
 pub mod integr_github;
 pub mod integr_gitlab;
 pub mod integr_pdb;
@@ -6,6 +18,62 @@ pub mod docker;
 pub mod sessions;
 pub mod process_io_utils;
 pub mod integr_postgres;
+
+
+pub const DEFAULT_INTEGRATION_VALUES: &[(&str, &str)] = &[
+    ("github.yaml", integr_github::DEFAULT_GITHUB_INTEGRATION_YAML),
+    ("gitlab.yaml", integr_gitlab::DEFAULT_GITLAB_INTEGRATION_YAML),
+    ("pdb.yaml", integr_pdb::DEFAULT_PDB_INTEGRATION_YAML),
+    ("postgres.yaml", integr_postgres::DEFAULT_POSTGRES_INTEGRATION_YAML),
+    ("chrome.yaml", integr_chrome::DEFAULT_CHROME_INTEGRATION_YAML),
+];
+
+pub async fn load_integration_tools(
+    gcx: Arc<ARwLock<GlobalContext>>,
+) -> IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>> {
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let integrations_d= cache_dir.join("integrations.d");
+
+    let github_yaml = integrations_d.join("github.yaml");
+    let gitlab_yaml = integrations_d.join("gitlab.yaml");
+    let pdb_yaml = integrations_d.join("pdb.yaml");
+    let postgres_yaml = integrations_d.join("postgres.yaml");
+    let chrome_yaml = integrations_d.join("chrome.yaml");
+
+    let mut integrations = IndexMap::new();
+    load_tool_from_yaml(&github_yaml, integr_github::ToolGithub::new_from_yaml, &mut integrations).await;
+    load_tool_from_yaml(&gitlab_yaml, integr_gitlab::ToolGitlab::new_from_yaml, &mut integrations).await;
+    load_tool_from_yaml(&pdb_yaml, integr_pdb::ToolPdb::new_from_yaml, &mut integrations).await;
+    load_tool_from_yaml(&postgres_yaml, integr_postgres::ToolPostgres::new_from_yaml, &mut integrations).await;
+    load_tool_from_yaml(&chrome_yaml, integr_chrome::ToolChrome::new_from_yaml, &mut integrations).await;
+
+    integrations
+}
+
+async fn load_tool_from_yaml<T: Tool + Send + 'static>(
+    yaml_path: &PathBuf,
+    tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
+    integrations: &mut IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
+) {
+    let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("No file name").to_string();
+    if yaml_path.exists() {
+        match read_yaml_into_value(yaml_path).await {
+            Ok(value) => {
+                match tool_constructor(&value) {
+                    Ok(tool) => {
+                        integrations.insert(tool_name, Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
+                    }
+                    Err(e) => {
+                        warn!("Problem in {}: {}", yaml_path.display(), e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Problem reading {:?}: {}", yaml_path, e);
+            }
+        }
+    }
+}
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
 # If there is a syntax error in this file, no integrations will work.
@@ -27,41 +95,6 @@ commands_deny:
   - "docker* kill *"
   - "gh auth token*"
   - "glab auth token*"
-
-
-# GitHub integration
-#github:
-#   GH_TOKEN: "GH_xxx"                      # To get a token, check out https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
-#   gh_binary_path: "/opt/homebrew/bin/gh"  # Uncomment to set a custom path for the gh binary, defaults to "gh"
-
-
-# GitLab integration: install on mac using "brew install glab"
-#gitlab:
-#   GITLAB_TOKEN: "glpat-xxx"                   # To get a token, check out https://docs.gitlab.com/ee/user/profile/personal_access_tokens
-#   glab_binary_path: "/opt/homebrew/bin/glab"  # Uncomment to set a custom path for the glab binary, defaults to "glab"
-
-
-# Python debugger
-#pdb:
-#  python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
-
-
-# Chrome web browser
-chrome:
-  # This can be path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read
-  # more here https://developer.chrome.com/blog/chrome-for-testing/?utm_source=Fibery&utm_medium=iframely
-  #chrome_path: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  # Or you can give it ws:// path, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
-  # In that case start chrome with --remote-debugging-port
-  chrome_path: "ws://127.0.0.1:6006/"
-  window_size: [1024, 768]
-  idle_browser_timeout: 600
-
-
-# Postgres database
-#postgres:
-#  psql_binary_path: "/path/to/psql"  # Uncomment to set a custom path for the psql binary, defaults to "psql"
-#  connection_string: "postgresql://username:password@localhost/dbname"  # To get a connection string, check out https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 
 
 # Command line: things you can call and immediately get an answer
