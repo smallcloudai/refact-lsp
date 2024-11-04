@@ -20,8 +20,8 @@ class CMessage(BaseModel):
     cmessage_num: int
     cmessage_prev_alt: int
     cmessage_usage_model: str
-    cmessage_usage_prompt: str
-    cmessage_usage_completion: str
+    cmessage_usage_prompt: int
+    cmessage_usage_completion: int
     cmessage_json: str
 
 def cmessage_key(cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num):
@@ -147,7 +147,7 @@ def print_messages(indent, msgdict: Dict[str, CMessage]):
 
 def cthread_emojis(cthread: CThread):
     archived_emoji = "🗑️" if cthread.cthread_archived_ts else ""
-    error_emoji = "❌" if cthread.cthread_error else ""
+    error_emoji = ("❌%s" % cthread.cthread_error) if cthread.cthread_error else ""
     new_emoji = "🟡" if cthread.cthread_anything_new else ""
     return f"{archived_emoji}{error_emoji}{new_emoji}"
 

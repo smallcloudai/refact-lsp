@@ -49,8 +49,8 @@ pub struct CMessage {
     // /primary
     pub cmessage_prev_alt: i32,
     pub cmessage_usage_model: String,
-    pub cmessage_usage_prompt: String,
-    pub cmessage_usage_completion: String,
+    pub cmessage_usage_prompt: i32,
+    pub cmessage_usage_completion: i32,
     pub cmessage_json: String,
 }
 

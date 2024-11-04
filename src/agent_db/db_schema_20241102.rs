@@ -14,8 +14,17 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             pubevent_id INTEGER PRIMARY KEY AUTOINCREMENT,
             pubevent_channel TEXT NOT NULL,
             pubevent_action TEXT NOT NULL,
-            pubevent_json TEXT NOT NULL
+            pubevent_json TEXT NOT NULL,
+            pubevent_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )",
+        [],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS pubsub_events_delete_old
+        AFTER INSERT ON pubsub_events
+        BEGIN
+            DELETE FROM pubsub_events WHERE pubevent_ts <= datetime('now', '-15 minutes');
+        END;",
         [],
     ).map_err(|e| e.to_string())?;
     conn.execute(
@@ -70,8 +79,8 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             cmessage_num INT NOT NULL,
             cmessage_prev_alt INT NOT NULL,
             cmessage_usage_model TEXT NOT NULL,
-            cmessage_usage_prompt TEXT NOT NULL,
-            cmessage_usage_completion TEXT NOT NULL,
+            cmessage_usage_prompt INT NOT NULL,
+            cmessage_usage_completion INT NOT NULL,
             cmessage_json TEXT NOT NULL,
             PRIMARY KEY (cmessage_belongs_to_cthread_id, cmessage_alt, cmessage_num),
             FOREIGN KEY (cmessage_belongs_to_cthread_id)
