@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +12,10 @@ use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
+use crate::integrations::integr::{json_schema, Integration};
 
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitHub {
     pub gh_binary_path: Option<String>,
@@ -24,14 +26,22 @@ pub struct ToolGithub {
     integration_github: IntegrationGitHub,
 }
 
-impl ToolGithub {
-    pub fn new_from_yaml(gh_config: &serde_yaml::Value) -> Result<Self, String> {
+impl Integration for ToolGithub {
+    fn new_from_yaml(gh_config: &serde_yaml::Value) -> Result<Self, String> {
         let integration_github = serde_yaml::from_value::<IntegrationGitHub>(gh_config.clone())
             .map_err(|e| {
                 let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
                 format!("{}{}", e.to_string(), location)
             })?;
         Ok(Self { integration_github })
+    }
+
+    fn to_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_github).map_err(|e| e.to_string())
+    }
+
+    fn to_schema_json() -> Result<Value, String> {
+        json_schema::<IntegrationGitHub>().map_err(|e| e.to_string())
     }
 }
 

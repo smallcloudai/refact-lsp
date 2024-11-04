@@ -9,6 +9,7 @@ use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use tokio::time::Duration;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
@@ -16,13 +17,15 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
+use crate::integrations::integr::{json_schema, Integration};
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_lines, write_to_stdin_and_flush, blocking_read_until_token_or_timeout};
+
 
 const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 const PDB_TOKEN: &str = "(Pdb)";
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 pub struct IntegrationPdb {
     pub python_path: Option<String>,
 }
@@ -50,13 +53,21 @@ impl IntegrationSession for PdbSession
     }
 }
 
-impl ToolPdb {
-    pub fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
+impl Integration for ToolPdb {
+    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
         let integration_pdb = serde_yaml::from_value::<IntegrationPdb>(v.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
         Ok(Self { integration_pdb })
+    }
+    
+    fn to_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_pdb).map_err(|e| e.to_string())
+    }
+
+    fn to_schema_json() -> Result<Value, String> {
+        json_schema::<IntegrationPdb>().map_err(|e| e.to_string())
     }
 }
 

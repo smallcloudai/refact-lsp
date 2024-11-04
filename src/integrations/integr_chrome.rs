@@ -20,7 +20,9 @@ use headless_chrome::{Browser, LaunchOptions, Tab};
 use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::integrations::integr::{json_schema, Integration};
 
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -30,6 +32,10 @@ pub struct IntegrationChrome {
     pub idle_browser_timeout: Option<u32>,
     #[serde(default = "default_headless")]
     pub headless: bool,
+}
+
+pub struct ToolChrome {
+    integration_chrome: IntegrationChrome,
 }
 
 fn default_headless() -> bool { true }
@@ -67,6 +73,8 @@ impl IntegrationSession for ChromeSession
 
 impl ToolChrome {
     pub fn new_from_yaml(v: &serde_yaml::Value, supports_clicks: bool,) -> Result<Self, String> {
+impl Integration for ToolChrome {
+    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
         let integration_chrome = serde_yaml::from_value::<IntegrationChrome>(v.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
@@ -75,6 +83,14 @@ impl ToolChrome {
             integration_chrome,
             supports_clicks,
         })
+    }
+
+    fn to_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_chrome).map_err(|e| e.to_string())
+    }
+
+    fn to_schema_json() -> Result<Value, String> {
+        json_schema::<IntegrationChrome>().map_err(|e| e.to_string())
     }
 }
 
@@ -543,7 +559,7 @@ pub const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
 #chrome_path: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 # Or you can give it ws:// path, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
 # In that case start chrome with --remote-debugging-port
-chrome_path: "ws://127.0.0.1:6006/"
-window_size: [1024, 768]
-idle_browser_timeout: 600
+# chrome_path: "ws://127.0.0.1:6006/"
+# window_size: [1024, 768]
+# idle_browser_timeout: 600
 "#;

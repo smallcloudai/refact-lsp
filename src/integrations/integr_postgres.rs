@@ -8,11 +8,13 @@ use serde_json::Value;
 use serde_yaml;
 use std::collections::HashMap;
 use std::sync::Arc;
+use schemars::JsonSchema;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
+use crate::integrations::integr::{json_schema, Integration};
 
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 pub struct IntegrationPostgres {
     pub psql_binary_path: Option<String>,
     pub connection_string: String,
@@ -22,14 +24,25 @@ pub struct ToolPostgres {
     integration_postgres: IntegrationPostgres,
 }
 
-impl ToolPostgres {
-    pub fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
+impl Integration for ToolPostgres {
+    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
         let integration_postgres = serde_yaml::from_value::<IntegrationPostgres>(v.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
         Ok(Self { integration_postgres })
     }
+
+    fn to_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
+    }
+
+    fn to_schema_json() -> Result<Value, String> {
+        json_schema::<IntegrationPostgres>().map_err(|e| e.to_string())
+    }
+}
+
+impl ToolPostgres {
 
     async fn run_psql_command(&self, query: &str) -> Result<String, String> {
         let psql_command = self.integration_postgres.psql_binary_path.as_deref().unwrap_or("psql");
