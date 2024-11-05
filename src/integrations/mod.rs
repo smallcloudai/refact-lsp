@@ -4,14 +4,19 @@ use indexmap::IndexMap;
 use serde_json::json;
 use tracing::warn;
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
+
 use crate::global_context::GlobalContext;
 use crate::integrations::integr::Integration;
+use crate::integrations::integr_chrome::IntegrationChrome;
+use crate::integrations::integr_github::IntegrationGitHub;
+use crate::integrations::integr_gitlab::IntegrationGitLab;
+use crate::integrations::integr_pdb::IntegrationPdb;
+use crate::integrations::integr_postgres::IntegrationPostgres;
 use crate::tools::tools_description::Tool;
 use crate::yaml_configs::create_configs::read_yaml_into_value;
 
 pub mod sessions;
 pub mod process_io_utils;
-
 pub mod integr_github;
 pub mod integr_gitlab;
 pub mod integr_pdb;
@@ -23,7 +28,7 @@ pub mod integr_postgres;
 mod integr;
 
 
-// hint: when adding integration, update: DEFAULT_INTEGRATION_VALUES, integrations_paths, load_integration_tools, load_integration_schema_and_json
+// hint: when adding integration, update: DEFAULT_INTEGRATION_VALUES, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
 
 
 pub const DEFAULT_INTEGRATION_VALUES: &[(&str, &str)] = &[
@@ -42,6 +47,32 @@ pub async fn integrations_paths(gcx: Arc<ARwLock<GlobalContext>>) -> IndexMap<St
     integration_names.iter().map(|&name| {
         (name.to_string(), integrations_d.join(format!("{}.yaml", name)))
     }).collect()
+}
+
+pub fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
+    match name {
+        "github" => {
+            let integration: IntegrationGitHub = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
+            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+        }
+        "gitlab" => {
+            let integration: IntegrationGitLab = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
+            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+        }
+        "pdb" => {
+            let integration: IntegrationPdb = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
+            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+        }
+        "postgres" => {
+            let integration: IntegrationPostgres = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
+            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+        }
+        "chrome" => {
+            let integration: IntegrationChrome = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
+            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+        }
+        _ => Err(format!("Unknown integration type: {}", name)),
+    }
 }
 
 pub async fn load_integration_tools(
