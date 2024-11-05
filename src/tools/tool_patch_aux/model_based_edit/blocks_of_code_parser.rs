@@ -216,23 +216,23 @@ pub struct BlocksOfCodeParser {}
 
 impl BlocksOfCodeParser {
     pub fn prompt() -> String {
-        let prompt = r#"You will receive an original file and one or more modified sections within that file. 
-Your task is to identify, describe, and extract all original sections that correspond to the provided modified sections. 
-Follow the steps below to ensure accuracy and clarity in your response. 
+        let prompt = r#"You will receive an original file, modified sections within that file and extra hint messages. 
+Your task is to identify and extract all original sections that correspond to the provided modified sections and output them in the desired format. 
 Carefully read the hints if they're given, they contain important information about the changes (i.e. exact spots where to paste those sections).
+Follow the steps below to ensure accuracy and clarity in your response.
 
 ## Steps
-1. **Locate Modified Sections:** Carefully review the provided code file and identify all sections that differ between the original and modified versions.
-2. **Output Modifications:** Prepare the output using the format specified below. Ensure the original formatting is preserved for both the original and modified sections.
+1. **Locate Modified Sections:** Carefully review the provided file and identify all sections that differ between the original and modified versions.
+2. **Output Modifications:** Prepare the output using the format specified below. Ensure the original formatting (idents especially) is preserved for both the original and modified sections.
 
 ## Output Format:
 ### Original Section (to be replaced)
 ```
-[an original section]
+[an original section content]
 ```
 ### Modified Section (to replace with)
 ```
-[a modified section]
+[a modified section content]
 ```
 
 ## Notes
@@ -243,7 +243,7 @@ Carefully read the hints if they're given, they contain important information ab
 - If there is new code added without any modifications, use this format:
 ### Original Section (to be replaced)
 ```
-[an old section where you need to insert new code]
+[an old section where you need to insert new text]
 ```
 ### Modified Section (to replace with)
 ```
@@ -254,12 +254,13 @@ Carefully read the hints if they're given, they contain important information ab
 
     pub fn followup_prompt(error_message: &String) -> String {
         let prompt = r#"{error_message}
-1. Provide your thoughts why these sections couldn't be found. 
-2. Rewrite those sections. The best way to do that correctly is to split them into smaller pieces. 
-I.e., if there are many functions in a single section - make a separate section for each function
-3. Copy other correct sections without any changes
-4. Follow the hints to find the spot where to paste the code
-5. Keep the output format the same is in the initial prompt and don't forget to replace [Modified code section] with the real modified code:
+
+1. List potential reasons why the specified sections couldn't be found.
+2. Rewrite the missing sections: Break down each large section into smaller components. 
+If there are multiple functions in one section, create individual sections for each function to improve clarity.
+3. Copy the correct sections: For sections that are correct, replicate them exactly as they are.
+4. Use the hints: Follow any hints provided to identify the precise location for the revised code sections.
+5. Maintain the original output format: Ensure your output format mirrors the initial structure. Replace [Modified code section] with the actual modified code as follows:
 ## Output Format:
 ### Original Section (to be replaced)
 ```

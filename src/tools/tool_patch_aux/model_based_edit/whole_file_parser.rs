@@ -53,10 +53,9 @@ pub struct WholeFileParser {}
 
 impl WholeFileParser {
     pub fn prompt() -> String {
-        let prompt = r#"You will receive an original file and one or more modified sections within that file.
-Your task is to modify the original file according all modified sections and output the modified file.
-You must apply all listed changes even if they are minor or contain errors! 
-Before the modification, you must list all the changes you must introduce to the file
+        let prompt = r#"You will receive an original file, modified sections within that file and extra hint messages.
+Your task is to integrate each of these modified sections into the original file, applying every specified change exactly as provided, even if they seem minor or contain errors.
+Before modifying the file, list each required change.
 Output Format:
 [a list of required changes]
 # Modified file
