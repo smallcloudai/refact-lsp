@@ -91,7 +91,9 @@ async fn correct_and_validate_active_ticket(gcx: Arc<ARwLock<GlobalContext>>, ti
     match ticket.action {
         PatchAction::RewriteSymbol => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
-                .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
+                .map_err(|e| good_error_text(
+                    &format!("failed to resolve filename_before: '{}'. Error:\n{}. If you wanted to create a new file, use REWRITE_WHOLE_FILE ticket type", ticket.filename_before, e), 
+                    ticket))?;
             ticket.fallback_action = Some(PatchAction::PartialEdit);
 
             if ticket.locate_as != Some(PatchLocateAs::SYMBOLNAME) {
@@ -107,7 +109,9 @@ async fn correct_and_validate_active_ticket(gcx: Arc<ARwLock<GlobalContext>>, ti
         }
         PatchAction::PartialEdit => {
             ticket.filename_before = resolve_path(gcx.clone(), &ticket.filename_before).await
-                .map_err(|e| good_error_text(&format!("failed to resolve filename_before: '{}'. Error:\n{}", ticket.filename_before, e), ticket))?;
+                .map_err(|e| good_error_text(
+                    &format!("failed to resolve filename_before: '{}'. Error:\n{}. If you wanted to create a new file, use REWRITE_WHOLE_FILE ticket type", ticket.filename_before, e), 
+                    ticket))?;
         }
         PatchAction::RewriteWholeFile => {
             ticket.filename_before = match resolve_path(gcx.clone(), &ticket.filename_before).await {
