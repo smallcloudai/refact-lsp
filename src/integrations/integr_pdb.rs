@@ -25,10 +25,13 @@ use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_
 const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 const PDB_TOKEN: &str = "(Pdb)";
 
+
 #[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 pub struct IntegrationPdb {
+    #[schemars(description = "Path to the Python binary.")]
     pub python_path: Option<String>,
 }
+
 pub struct ToolPdb {
     integration_pdb: IntegrationPdb,
 }

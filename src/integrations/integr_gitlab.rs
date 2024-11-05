@@ -18,7 +18,9 @@ use crate::integrations::integr::{json_schema, Integration};
 #[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitLab {
+    #[schemars(description = "Path to the GitLab CLI binary.")]
     pub glab_binary_path: Option<String>,
+    #[schemars(description = "GitLab token for authentication.")]
     pub GITLAB_TOKEN: String,
 }
 

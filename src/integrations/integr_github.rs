@@ -18,7 +18,9 @@ use crate::integrations::integr::{json_schema, Integration};
 #[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitHub {
+    #[schemars(description = "Path to the GitHub CLI binary.")]
     pub gh_binary_path: Option<String>,
+    #[schemars(description = "GitHub token for authentication.")]
     pub GH_TOKEN: String,
 }
 

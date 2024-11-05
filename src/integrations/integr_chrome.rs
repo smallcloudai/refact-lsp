@@ -27,8 +27,11 @@ use crate::integrations::integr::{json_schema, Integration};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IntegrationChrome {
+    #[schemars(description = "Path to the Chrome binary or WebSocket URL for remote debugging.")]
     pub chrome_path: Option<String>,
+    #[schemars(description = "Window size for the Chrome browser in the format [width, height].")]
     pub window_size: Option<Vec<u32>>,
+    #[schemars(description = "Idle timeout for the Chrome browser in seconds.")]
     pub idle_browser_timeout: Option<u32>,
     #[serde(default = "default_headless")]
     pub headless: bool,

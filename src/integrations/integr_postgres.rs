@@ -16,7 +16,9 @@ use crate::integrations::integr::{json_schema, Integration};
 
 #[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
 pub struct IntegrationPostgres {
+    #[schemars(description = "Path to the psql binary.")]
     pub psql_binary_path: Option<String>,
+    #[schemars(description = "Connection string for the PostgreSQL database.")]
     pub connection_string: String,
 }
 
