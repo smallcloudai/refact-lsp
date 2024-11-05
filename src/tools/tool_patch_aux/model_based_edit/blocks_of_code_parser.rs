@@ -10,6 +10,7 @@ use tracing::error;
 
 use crate::global_context::GlobalContext;
 use crate::tools::tool_patch_aux::fs_utils::read_file;
+use crate::tools::tool_patch_aux::postprocessing_utils::{minimal_common_indent, place_indent};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum SectionType {
@@ -156,6 +157,9 @@ async fn sections_to_diff_blocks(
             }
         }
         if let Some(start_offset) = start_offset {
+            let file_section = file_lines[start_offset..start_offset + orig_section.hunk.len()].to_vec();
+            let (indent_spaces, indent_tabs) = minimal_common_indent(&file_section.iter().map(|x| x.as_str()).collect::<Vec<_>>());
+            let modified_section_hunk = place_indent(&modified_section.hunk.iter().map(|x| x.as_str()).collect::<Vec<_>>(), indent_spaces, indent_tabs);
             diff_blocks.push(DiffBlock {
                 file_name_before: filename.clone(),
                 file_name_after: filename.clone(),
@@ -170,8 +174,7 @@ async fn sections_to_diff_blocks(
                         file_line_num_idx: Some(start_offset + idx),
                         correct_spaces_offset: None,
                     })
-                    .chain(modified_section
-                        .hunk
+                    .chain(modified_section_hunk
                         .iter()
                         .map(|x| DiffLine {
                             line: x.clone(),
