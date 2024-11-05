@@ -1,7 +1,7 @@
 use schemars::{schema_for, JsonSchema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde_yaml::Value;
+
 
 pub trait Integration: Send + Sync + Sized {
     fn new_from_yaml(value: &serde_yaml::Value) -> Result<Self, String>;
