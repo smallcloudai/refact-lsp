@@ -28,7 +28,8 @@ pub mod integr_postgres;
 mod integr;
 
 
-// hint: when adding integration, update: DEFAULT_INTEGRATION_VALUES, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
+// hint: when adding integration, update:
+// DEFAULT_INTEGRATION_VALUES, INTEGRATION_ICONS, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
 
 
 pub const DEFAULT_INTEGRATION_VALUES: &[(&str, &str)] = &[
@@ -37,6 +38,14 @@ pub const DEFAULT_INTEGRATION_VALUES: &[(&str, &str)] = &[
     ("pdb.yaml", integr_pdb::DEFAULT_PDB_INTEGRATION_YAML),
     ("postgres.yaml", integr_postgres::DEFAULT_POSTGRES_INTEGRATION_YAML),
     ("chrome.yaml", integr_chrome::DEFAULT_CHROME_INTEGRATION_YAML),
+];
+
+pub const INTEGRATION_ICONS: &[(&str, &str)] = &[
+    ("github", "https://cdn-icons-png.flaticon.com/512/25/25231.png"),
+    ("gitlab", "https://cdn-icons-png.flaticon.com/512/5968/5968853.png"),
+    ("pdb", "https://cdn-icons-png.flaticon.com/512/919/919852.png"),
+    ("postgres", "https://cdn-icons-png.flaticon.com/512/5968/5968342.png"),
+    ("chrome", "https://cdn-icons-png.flaticon.com/512/732/732205.png"),
 ];
 
 pub async fn integrations_paths(gcx: Arc<ARwLock<GlobalContext>>) -> IndexMap<String, PathBuf> {
@@ -78,46 +87,50 @@ pub fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Resul
 pub async fn load_integration_tools(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>> {
-    // let cache_dir = gcx.read().await.cache_dir.clone();
-    // let integrations_d= cache_dir.join("integrations.d");
+    let paths = integrations_paths(gcx.clone()).await;
+    let integrations_yaml_value = {
+        let cache_dir = gcx.read().await.cache_dir.clone();
+        let yaml_path = cache_dir.join("integrations.yaml");
+        read_yaml_into_value(&yaml_path).await?
+    };
 
-    // let github_yaml = integrations_d.join("github.yaml");
-    // let gitlab_yaml = integrations_d.join("gitlab.yaml");
-    // let pdb_yaml = integrations_d.join("pdb.yaml");
-    // let postgres_yaml = integrations_d.join("postgres.yaml");
-    // let chrome_yaml = integrations_d.join("chrome.yaml");
-
-    let paths = integrations_paths(gcx).await;
     let mut integrations = IndexMap::new();
-    load_tool_from_yaml(paths.get("github"), integr_github::ToolGithub::new_from_yaml, &mut integrations).await;
-    load_tool_from_yaml(paths.get("gitlab"), integr_gitlab::ToolGitlab::new_from_yaml, &mut integrations).await;
-    load_tool_from_yaml(paths.get("pdb"), integr_pdb::ToolPdb::new_from_yaml, &mut integrations).await;
-    load_tool_from_yaml(paths.get("postgres"), integr_postgres::ToolPostgres::new_from_yaml, &mut integrations).await;
-    load_tool_from_yaml(paths.get("chrome"), integr_chrome::ToolChrome::new_from_yaml, &mut integrations).await;
-    integrations
+    load_tool_from_yaml(paths.get("github"), integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("gitlab"), integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("pdb"), integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("postgres"), integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("chrome"), integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), &mut integrations).await?;
+
+    Ok(integrations)
 }
 
 pub async fn load_integration_schema_and_json(
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> IndexMap<String, (serde_json::Value, serde_json::Value)> {
-    let paths = integrations_paths(gcx).await;
+) -> Result<IndexMap<String, (serde_json::Value, serde_json::Value)>, String> {
+    let paths = integrations_paths(gcx.clone()).await;
+    let integrations_yaml_value = {
+        let cache_dir = gcx.read().await.cache_dir.clone();
+        let yaml_path = cache_dir.join("integrations.yaml");
+        read_yaml_into_value(&yaml_path).await?
+    };
 
     let mut integrations = IndexMap::new();
-    schema_and_json_from_integration(paths.get("github"), integr_github::ToolGithub::to_schema_json, integr_github::ToolGithub::new_from_yaml, &mut integrations).await;
-    schema_and_json_from_integration(paths.get("gitlab"), integr_gitlab::ToolGitlab::to_schema_json, integr_gitlab::ToolGitlab::new_from_yaml, &mut integrations).await;
-    schema_and_json_from_integration(paths.get("pdb"), integr_pdb::ToolPdb::to_schema_json, integr_pdb::ToolPdb::new_from_yaml, &mut integrations).await;
-    schema_and_json_from_integration(paths.get("postgres"), integr_postgres::ToolPostgres::to_schema_json, integr_postgres::ToolPostgres::new_from_yaml, &mut integrations).await;
-    schema_and_json_from_integration(paths.get("chrome"), integr_chrome::ToolChrome::to_schema_json, integr_chrome::ToolChrome::new_from_yaml, &mut integrations).await;
+    schema_and_json_from_integration(paths.get("github"), integr_github::ToolGithub::to_schema_json, integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), &mut integrations).await?;
+    schema_and_json_from_integration(paths.get("gitlab"), integr_gitlab::ToolGitlab::to_schema_json, integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), &mut integrations).await?;
+    schema_and_json_from_integration(paths.get("pdb"), integr_pdb::ToolPdb::to_schema_json, integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), &mut integrations).await?;
+    schema_and_json_from_integration(paths.get("postgres"), integr_postgres::ToolPostgres::to_schema_json, integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), &mut integrations).await?;
+    schema_and_json_from_integration(paths.get("chrome"), integr_chrome::ToolChrome::to_schema_json, integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), &mut integrations).await?;
 
-    integrations
+    Ok(integrations)
 }
 
 async fn schema_and_json_from_integration<T: Integration>(
     yaml_path: Option<&PathBuf>,
     schema_constructor: fn() -> Result<serde_json::Value, String>,
     tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
+    value_from_integrations: Option<&serde_yaml::Value>,
     data: &mut IndexMap<String, (serde_json::Value, serde_json::Value)>,
-) {
+) -> Result<(), String> {
     let yaml_path = yaml_path.expect("No yaml path provided");
     let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("Invalid file name").to_string();
 
@@ -154,36 +167,95 @@ async fn schema_and_json_from_integration<T: Integration>(
             }
         }
     } else {
-        serde_json::Value::Null
+        json!({"detail": format!("Cannot read {}. Probably, file does not exist", yaml_path.display())})
     };
 
-    data.insert(tool_name, (schema, value));
+    let value_from_integrations = value_from_integrations.map_or(json!({"detail": format!("tool {tool_name} is not defined in integrations.yaml")}), |value| {
+        match tool_constructor(&value) {
+            Ok(tool) => match tool.to_json() {
+                Ok(json_value) => json_value,
+                Err(e) => {
+                    let e = format!("Problem converting integration to JSON for {}: {}", tool_name, e);
+                    warn!("{e}");
+                    json!({"detail": e.to_string()})
+                }
+            },
+            Err(e) => {
+                warn!("Problem in {}: {}", yaml_path.display(), e);
+                json!({"detail": e.to_string()})
+            }
+        }
+    });
+
+    match (value.get("detail"), value_from_integrations.get("detail")) {
+        (None, None) => {
+            return Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."));
+        },
+        (Some(_), None) => {
+            data.insert(tool_name, (schema, value_from_integrations));
+        },
+        (None, Some(_)) => {
+            data.insert(tool_name, (schema, value));
+        }
+        (Some(_), Some(_)) => {
+            data.insert(tool_name, (schema, value));
+        }
+    }
+
+    Ok(())
 }
 
 async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
     yaml_path: Option<&PathBuf>,
     tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
+    value_from_integrations: Option<&serde_yaml::Value>,
     integrations: &mut IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
-) {
+) -> Result<(), String> {
     let yaml_path = yaml_path.as_ref().expect("No yaml path");
     let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("No file name").to_string();
-    if yaml_path.exists() {
+    let tool = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
             Ok(value) => {
                 match tool_constructor(&value) {
                     Ok(tool) => {
-                        integrations.insert(tool_name, Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
+                        // integrations.insert(tool_name, Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
+                        Some(tool)
                     }
                     Err(e) => {
                         warn!("Problem in {}: {}", yaml_path.display(), e);
+                        None
                     }
                 }
             }
             Err(e) => {
                 warn!("Problem reading {:?}: {}", yaml_path, e);
+                None
             }
         }
+    } else {
+        None
+    };
+
+    let tool_from_integrations = value_from_integrations
+        .and_then(|value| match tool_constructor(&value) {
+            Ok(tool) => Some(tool),
+            Err(e) => {
+                warn!("Problem in {}: {}", yaml_path.display(), e);
+                None
+            }
+        });
+
+    match (tool, tool_from_integrations) {
+        (Some(_), Some(_)) => {
+            return Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."));
+        },
+        (Some(tool), None) | (None, Some(tool)) => {
+            integrations.insert(tool_name.clone(), Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
+        },
+        _ => {}
     }
+
+    Ok(())
 }
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.

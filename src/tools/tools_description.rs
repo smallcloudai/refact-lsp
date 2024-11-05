@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
+use tracing::error;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
@@ -147,6 +148,14 @@ pub async fn tools_merged_and_filtered(
                 tools_all.insert("deep_thinking".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_deep_thinking::ToolDeepThinking{}) as Box<dyn Tool + Send>)));
             }
         }
+        // #[cfg(feature="vecdb")]
+        // tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
+        // match load_integration_tools(gcx.clone()).await {
+        //     Ok(integrations) => {
+        //         tools_all.extend(integrations);
+        //     }
+        //     Err(e) => error!("Failed to load integrations: {}", e),
+        // }
         // #[cfg(feature="vecdb")]
         // tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
     }

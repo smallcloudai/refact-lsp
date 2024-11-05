@@ -23,7 +23,9 @@ pub async fn handle_v1_integrations(
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
 
-    let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await;
+    let schemas_and_json_dict = load_integration_schema_and_json(gcx).await.map_err(|e|{
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    })?;
     
     let mut items = vec![];
     for (name, (schema, value)) in schemas_and_json_dict {
