@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::integrations::integr::{json_schema, Integration};
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitHub {
     #[schemars(description = "Path to the GitHub CLI binary.")]

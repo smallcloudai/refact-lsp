@@ -26,7 +26,7 @@ const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 const PDB_TOKEN: &str = "(Pdb)";
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
 pub struct IntegrationPdb {
     #[schemars(description = "Path to the Python binary.")]
     pub python_path: Option<String>,

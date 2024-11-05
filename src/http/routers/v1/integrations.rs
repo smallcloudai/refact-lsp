@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use axum::Extension;
-use axum::http::{Response, StatusCode};
+use axum::http::Response;
 use tokio::sync::RwLock as ARwLock;
 use hyper::Body;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
-use tracing::info;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::integrations::load_integration_schema_and_json;
