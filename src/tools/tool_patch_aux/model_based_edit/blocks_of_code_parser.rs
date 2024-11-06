@@ -6,7 +6,7 @@ use crate::tools::tool_patch_aux::diff_structs::{diff_blocks_to_diff_chunks, Dif
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock as ARwLock;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::global_context::GlobalContext;
 use crate::tools::tool_patch_aux::fs_utils::read_file;
@@ -283,16 +283,14 @@ If there are multiple functions in one section, create individual sections for e
     ) -> Result<Vec<DiffChunk>, String> {
         let sections = get_edit_sections(content);
         if sections.is_empty() {
-            return Err("no sections found, probably an empty diff".to_string());
+            warn!("no sections found, probably an empty diff");
+            return Ok(vec![]);
         }
         let diff_blocks = sections_to_diff_blocks(gcx, &sections, &filename).await?;
         let chunks = diff_blocks_to_diff_chunks(&diff_blocks)
             .into_iter()
             .unique()
             .collect::<Vec<_>>();
-        if chunks.is_empty() {
-            return Err("no chunks found, probably an empty diff".to_string());
-        }
         Ok(chunks)
     }
 }

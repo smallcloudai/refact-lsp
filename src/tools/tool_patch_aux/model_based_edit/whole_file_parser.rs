@@ -55,6 +55,7 @@ impl WholeFileParser {
     pub fn prompt() -> String {
         let prompt = r#"You will receive an original file, modified sections within that file and extra hint messages.
 Your task is to integrate each of these modified sections into the original file, applying every specified change exactly as provided, even if they seem minor or contain errors.
+Output the whole modified file!
 Before modifying the file, list each required change.
 Output Format:
 [a list of required changes]
