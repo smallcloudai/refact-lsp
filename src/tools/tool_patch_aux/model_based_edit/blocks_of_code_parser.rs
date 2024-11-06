@@ -226,7 +226,7 @@ Follow the steps below to ensure accuracy and clarity in your response.
 
 ## Steps
 1. **Locate Modified Sections:** Carefully review the provided file and identify all sections that differ between the original and modified versions.
-2. **Output Modifications:** Prepare the output using the format specified below. Ensure the original formatting (idents especially) is preserved for both the original and modified sections.
+2. **Output Modifications:** Prepare the output using the format specified below. Ensure the original formatting (indents especially) is preserved for both the original and modified sections.
 
 ## Output Format:
 ### Original Section (to be replaced)
