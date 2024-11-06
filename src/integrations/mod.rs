@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use indexmap::IndexMap;
 use serde_json::json;
-use tracing::warn;
+use tracing::{info, warn};
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use crate::global_context::GlobalContext;
@@ -13,7 +13,7 @@ use crate::integrations::integr_gitlab::IntegrationGitLab;
 use crate::integrations::integr_pdb::IntegrationPdb;
 use crate::integrations::integr_postgres::IntegrationPostgres;
 use crate::tools::tools_description::Tool;
-use crate::yaml_configs::create_configs::read_yaml_into_value;
+use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
 pub mod sessions;
 pub mod process_io_utils;
@@ -93,13 +93,25 @@ pub async fn load_integration_tools(
         let yaml_path = cache_dir.join("integrations.yaml");
         read_yaml_into_value(&yaml_path).await?
     };
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    let enabled = match integrations_enabled_cfg(&enabled_path).await {
+        serde_yaml::Value::Mapping(map) => map.into_iter().filter_map(|(k, v)| {
+            if let (serde_yaml::Value::String(key), serde_yaml::Value::Bool(value)) = (k, v) {
+                Some((key, value))
+            } else {
+                None
+            }
+        }).collect::<std::collections::HashMap<String, bool>>(),
+        _ => std::collections::HashMap::new(),
+    };
 
     let mut integrations = IndexMap::new();
-    load_tool_from_yaml(paths.get("github"), integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("gitlab"), integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("pdb"), integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("postgres"), integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("chrome"), integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("github"), integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), enabled.get("github"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("gitlab"), integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), enabled.get("gitlab"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("pdb"), integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), enabled.get("pdb"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("postgres"), integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), enabled.get("postgres"), &mut integrations).await?;
+    load_tool_from_yaml(paths.get("chrome"), integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), enabled.get("chrome"), &mut integrations).await?;
 
     Ok(integrations)
 }
@@ -209,10 +221,15 @@ async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
     yaml_path: Option<&PathBuf>,
     tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
     value_from_integrations: Option<&serde_yaml::Value>,
+    enabled: Option<&bool>,
     integrations: &mut IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
 ) -> Result<(), String> {
     let yaml_path = yaml_path.as_ref().expect("No yaml path");
     let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("No file name").to_string();
+    if !enabled.unwrap_or(&false) {
+        info!("Integration {} is disabled", tool_name);
+        return Ok(());
+    }
     let tool = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
             Ok(value) => {
@@ -239,10 +256,7 @@ async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
     let tool_from_integrations = value_from_integrations
         .and_then(|value| match tool_constructor(&value) {
             Ok(tool) => Some(tool),
-            Err(e) => {
-                warn!("Problem in {}: {}", yaml_path.display(), e);
-                None
-            }
+            Err(_) => None
         });
 
     match (tool, tool_from_integrations) {

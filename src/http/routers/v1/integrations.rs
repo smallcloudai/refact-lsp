@@ -7,10 +7,6 @@ use hyper::Body;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use url::Url;
-use crate::custom_error::ScratchError;
-use crate::global_context::GlobalContext;
-use crate::integrations::{integrations_paths, load_integration_schema_and_json, validate_integration_value, INTEGRATION_ICONS};
-
 use std::fs;
 use std::io::Read;
 #[allow(deprecated)]
@@ -19,12 +15,18 @@ use reqwest::Client;
 use tokio::fs as async_fs;
 use tracing::info;
 
+use crate::custom_error::ScratchError;
+use crate::global_context::GlobalContext;
+use crate::integrations::{integrations_paths, load_integration_schema_and_json, validate_integration_value, INTEGRATION_ICONS};
+use crate::yaml_configs::create_configs::{integrations_enabled_cfg, write_yaml_value};
+
 
 #[derive(Serialize, Deserialize)]
 struct IntegrationItem {
     name: String,
+    enabled: bool,
     schema: Option<Value>,
-    value: Value,
+    value: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -32,7 +34,6 @@ struct IntegrationIcon {
     name: String,
     value: String,
 }
-
 
 pub async fn get_image_base64(
     cache_dir: &PathBuf, 
@@ -112,16 +113,24 @@ pub async fn handle_v1_integrations(
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
 
-    let schemas_and_json_dict = load_integration_schema_and_json(gcx).await.map_err(|e|{
+    let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
     })?;
+    
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    let enabled_mapping = match integrations_enabled_cfg(&enabled_path).await {
+        serde_yaml::Value::Mapping(map) => map,
+        _ => serde_yaml::Mapping::new(),
+    };
     
     let mut items = vec![];
     for (name, (schema, value)) in schemas_and_json_dict {
         let item = IntegrationItem {
-            name,
+            name: name.clone(),
+            enabled: enabled_mapping.get(&name).and_then(|v| v.as_bool()).unwrap_or(false),
             schema: Some(schema),
-            value,
+            value: Some(value),
         };
         
         items.push(item);
@@ -143,34 +152,37 @@ pub async fn handle_v1_integrations_save(
     let post = serde_json::from_slice::<IntegrationItem>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let yaml_value: serde_yaml::Value = serde_json::to_string(&post.value).map_err(|e|e.to_string())
-        .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR converting JSON to YAML: {}", e)))?;
-
-    let yaml_value = validate_integration_value(&post.name, yaml_value)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR validating integration value: {}", e)))?;
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    let mut enabled_value = integrations_enabled_cfg(&enabled_path).await;
+    if let serde_yaml::Value::Mapping(ref mut map) = enabled_value {
+        map.insert(serde_yaml::Value::String(post.name.clone()), serde_yaml::Value::Bool(post.enabled));
+    } else {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse {:?} as YAML::Mapping", enabled_path)));
+    }
+    write_yaml_value(&enabled_path, &enabled_value).await
+        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e)))?;
     
-    let integr_paths = integrations_paths(gcx.clone()).await;
-    
-    let path = integr_paths.get(&post.name)
-        .ok_or(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Integration {} not found", post.name)))?;
+    if let Some(post_value) = &post.value {
+        let yaml_value: serde_yaml::Value = serde_json::to_string(post_value).map_err(|e|e.to_string())
+            .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
+            .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR converting JSON to YAML: {}", e)))?;
 
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .await
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to open file: {}", e)))?;
+        let yaml_value = validate_integration_value(&post.name, yaml_value)
+            .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR validating integration value: {}", e)))?;
 
-    let yaml_string = serde_yaml::to_string(&yaml_value)
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to convert YAML to string: {}", e)))?;
+        let integr_paths = integrations_paths(gcx.clone()).await;
+        let path = integr_paths.get(&post.name)
+            .ok_or(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Integration {} not found", post.name)))?;
 
-    tokio::io::AsyncWriteExt::write_all(&mut file, yaml_string.as_bytes()).await
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write to file: {}", e)))?;
+        write_yaml_value(path, &yaml_value).await.map_err(|e|{
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e))
+        })?;
+    }
 
     Ok(Response::builder()
        .status(StatusCode::OK)
        .header("Content-Type", "application/json")
-       .body(Body::from(format!("Integration {} saved", post.name)))
+       .body(Body::from(format!("Integration {} updated", post.name)))
        .unwrap())
 }
