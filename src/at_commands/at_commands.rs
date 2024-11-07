@@ -16,7 +16,6 @@ use crate::at_commands::at_ast_reference::AtAstReference;
 use crate::at_commands::at_tree::AtTree;
 use crate::at_commands::at_web::AtWeb;
 use crate::at_commands::execute_at::AtCommandMember;
-use crate::integrations::docker::integr_docker::ToolDocker;
 
 
 pub struct AtCommandsContext {
@@ -62,7 +61,7 @@ impl AtCommandsContext {
             correction_only_up_to_step: 0,
             chat_id,
             should_execute_remotely,
-            
+
             at_commands: at_commands_dict(global_context.clone()).await,
             subchat_tool_parameters: IndexMap::new(),
             postprocess_parameters: PostprocessSettings::new(),
