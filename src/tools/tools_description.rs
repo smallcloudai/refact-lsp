@@ -293,23 +293,6 @@ tools:
       - "project_dir"
       - "command"
 
-  - name: "chrome"
-    agentic: true
-    experimental: true
-    description: "A real web browser with graphical interface."
-    parameters:
-      - name: "command"
-        type: "string"
-        description: |
-          Supports these commands:
-          navigate_to <uri> <tab_id>
-          screenshot <tab_id>
-          html <tab_id>
-          reload <tab_id>
-          device <desktop|mobile> <tab_id>
-    parameters_required:
-      - "command"
-
   - name: "postgres"
     agentic: true
     experimental: true
@@ -323,7 +306,6 @@ tools:
           CREATE INDEX my_index_users_email ON my_users (email);
     parameters_required:
       - "query"
-
 
   - name: "docker"
     agentic: true

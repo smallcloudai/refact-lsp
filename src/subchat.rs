@@ -255,7 +255,7 @@ pub async fn subchat_single(
         (ccx_locked.global_context.clone(), ccx_locked.should_execute_remotely)
     };
     // this ignores customized tools
-    let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone()).await?;
+    let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone(), false).await?;
     let tools_turn_on_set: HashSet<String> = tools_subset.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.keys().cloned().collect();
     let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
@@ -17,6 +17,7 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, get_default_system_prompt_from_remote, system_prompt_add_workspace_info};
+use crate::tools::tools_description::{tool_description_list_from_yaml, tools_merged_and_filtered};
 use crate::tools::tools_execute::{run_tools_locally, run_tools_remotely};
 
 
@@ -116,6 +117,7 @@ impl ScratchpadAbstract for ChatPassthrough {
             (ccx_locked.global_context.clone(), ccx_locked.n_ctx, ccx_locked.should_execute_remotely)
         };
         let style = self.post.style.clone();
+        let at_tools = tools_merged_and_filtered(gcx.clone(), self.supports_clicks).await?;
 
         // TODO? Maybe we should execute at commands remotely.
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at && !should_execute_remotely {
@@ -127,7 +129,7 @@ impl ScratchpadAbstract for ChatPassthrough {
             (messages, _) = if should_execute_remotely {
                 run_tools_remotely(ccx.clone(), &self.post.model, sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
             } else {
-                run_tools_locally(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
+                run_tools_locally(ccx.clone(), at_tools.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
             }
         };
         let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
@@ -210,24 +212,47 @@ impl ScratchpadAbstract for ChatPassthrough {
                 warn!("unknown role: {}", msg.role);
             }
         }
-        let mut big_json = serde_json::json!({
+        let mut big_json = json!({
             "messages": filtered_msgs,
         });
         if self.supports_tools {
-            let tools = if let Some(tools) = &self.post.tools {
-                // if tools.is_empty() || any_context_produced {
+            let tools = self.post.tools.as_ref().and_then(|tools| {
                 if tools.is_empty() {
-                        None
+                    None
                 } else {
-                    Some(tools)
+                    Some(tools.clone())
                 }
+            });
+            
+            // tools list from post may be different as it isn't model-specific
+            let mut tools = if let Some(t) = tools {
+                let turned_on = t.iter().filter_map(|x| {
+                    if let Value::Object(map) = x {
+                        map.get("function").and_then(|f| f.get("name")).and_then(|name| name.as_str().map(|s| s.to_string()))
+                    } else {
+                        None
+                    }
+                }).collect::<Vec<String>>();
+                let allow_experimental = gcx.read().await.cmdline.experimental;
+                let tool_descriptions = tool_description_list_from_yaml(at_tools, &turned_on, allow_experimental).await?;
+                Some(tool_descriptions.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>())
             } else {
-                None
+                tools
             };
-            big_json["tools"] = serde_json::json!(tools);
-            big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
+
+            // converts tools into openai style
+            if let Some(tools) = &mut tools {
+                for tool in tools {
+                    if let Some(function) = tool.get_mut("function") {
+                        function.as_object_mut().unwrap().remove("agentic");
+                    }
+                }
+            }
+
+            big_json["tools"] = json!(tools);
+            big_json["tool_choice"] = json!(self.post.tool_choice);
             if DEBUG {
-                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());
+                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(vec![]).len());
             }
         } else {
             if DEBUG {

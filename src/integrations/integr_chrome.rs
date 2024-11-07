@@ -12,7 +12,7 @@ use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key}
 use crate::global_context::GlobalContext;
 use crate::call_validation::{ChatContent, ChatMessage};
 use crate::scratchpads::multimodality::MultimodalElement;
-use crate::tools::tools_description::{Tool, ToolDesc};
+use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 
 use reqwest::Client;
 use std::path::PathBuf;
@@ -116,9 +116,29 @@ impl Tool for ToolChrome {
         Ok((false, vec![msg]))
     }
 
-    fn tool_description_patch(&self, desc: &mut ToolDesc) {
+    fn tool_description(&self) -> ToolDesc {
+        let mut command_desc = r#"
+Supports these commands:
+navigate_to <uri> <tab_id>
+screenshot <tab_id>
+html <tab_id>
+reload <tab_id>
+device <desktop|mobile> <tab_id>
+        "#.to_string();
         if self.supports_clicks {
-            desc.description = format!("{}\nclick <x> <y> <tab_id>\ninsert_text <text> <tab_id>\n", desc.description)
+            command_desc = format!("{}\nclick <x> <y> <tab_id>\ninsert_text <text> <tab_id>\n", command_desc);
+        }
+        ToolDesc {
+            name: "chrome".to_string(),
+            agentic: true,
+            experimental: true,
+            description: "A real web browser with graphical interface.".to_string(),
+            parameters: vec![ToolParam {
+                name: "command".to_string(),
+                param_type: "string".to_string(),
+                description: command_desc,
+            }],
+            parameters_required: vec!["command".to_string()],
         }
     }
 }
