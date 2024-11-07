@@ -203,7 +203,7 @@ pub async fn handle_v1_tools_execute(
     let ccx_arc = Arc::new(AMutex::new(ccx));
 
     let (messages, tools_runned) = run_tools(
-        ccx_arc.clone(), tokenizer.clone(), tools_execute_post.maxgen, &tools_execute_post.messages, &tools_execute_post.style
+        ccx_arc.clone(), tokenizer.clone(), tools_execute_post.maxgen, &tools_execute_post.messages, false, &tools_execute_post.style
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error running tools: {}", e)))?;
 
     let response = ToolExecuteResponse {

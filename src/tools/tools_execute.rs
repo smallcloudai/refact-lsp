@@ -109,8 +109,9 @@ pub async fn run_tools_locally(
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
     style: &Option<String>,
+    supports_clicks: bool,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
-    let (new_messages, tools_runned) = run_tools(ccx, tokenizer, maxgen, original_messages, style).await?;
+    let (new_messages, tools_runned) = run_tools(ccx, tokenizer, maxgen, original_messages, supports_clicks, style).await?; // todo: fix typo "runned"
 
     let mut all_messages = original_messages.to_vec();
     for msg in new_messages {
@@ -126,6 +127,7 @@ pub async fn run_tools(
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
+    supports_clicks: bool,
     style: &Option<String>,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let gcx = ccx.lock().await.global_context.clone();

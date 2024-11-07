@@ -12,7 +12,7 @@ use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key}
 use crate::global_context::GlobalContext;
 use crate::call_validation::{ChatContent, ChatMessage};
 use crate::scratchpads::multimodality::MultimodalElement;
-use crate::tools::tools_description::Tool;
+use crate::tools::tools_description::{Tool, ToolDesc};
 
 use reqwest::Client;
 use std::path::PathBuf;
@@ -36,6 +36,7 @@ fn default_headless() -> bool { true }
 
 pub struct ToolChrome {
     integration_chrome: IntegrationChrome,
+    supports_clicks: bool,
 }
 
 struct ChromeSession {
@@ -65,12 +66,15 @@ impl IntegrationSession for ChromeSession
 }
 
 impl ToolChrome {
-    pub fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
+    pub fn new_from_yaml(v: &serde_yaml::Value, supports_clicks: bool,) -> Result<Self, String> {
         let integration_chrome = serde_yaml::from_value::<IntegrationChrome>(v.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
-        Ok(Self { integration_chrome })
+        Ok(Self { 
+            integration_chrome,
+            supports_clicks,
+        })
     }
 }
 
@@ -110,6 +114,12 @@ impl Tool for ToolChrome {
         });
 
         Ok((false, vec![msg]))
+    }
+
+    fn tool_description_patch(&self, desc: &mut ToolDesc) {
+        if self.supports_clicks {
+            desc.description = format!("{}\nclick <x> <y> <tab_id>\ninsert_text <text> <tab_id>\n", desc.description)
+        }
     }
 }
 

@@ -61,6 +61,7 @@ pub struct ChatPassthrough {
     pub global_context: Arc<ARwLock<GlobalContext>>,
     pub allow_at: bool,
     pub supports_tools: bool,
+    pub supports_clicks: bool,
 }
 
 impl ChatPassthrough {
@@ -71,6 +72,7 @@ impl ChatPassthrough {
         global_context: Arc<ARwLock<GlobalContext>>,
         allow_at: bool,
         supports_tools: bool,
+        supports_clicks: bool,
     ) -> Self {
         ChatPassthrough {
             t: HasTokenizerAndEot::new(tokenizer),
@@ -82,6 +84,7 @@ impl ChatPassthrough {
             global_context,
             allow_at,
             supports_tools,
+            supports_clicks,
         }
     }
 }

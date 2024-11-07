@@ -63,7 +63,7 @@ async fn create_chat_post_and_scratchpad(
         style: None,
     };
 
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality, supports_clicks) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await?;
@@ -85,6 +85,7 @@ async fn create_chat_post_and_scratchpad(
         &scratchpad_patch,
         false,
         supports_tools,
+        supports_clicks,
         should_execute_remotely,
     ).await?;
 

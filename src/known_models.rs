@@ -184,9 +184,17 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             },
             "similar_models": [
-                "claude-3-5-sonnet-20240620",
-                "claude-3-5-sonnet-20241022"
+                "claude-3-5-sonnet-20240620"
             ]
+        },
+        "claude-3-5-sonnet-20241022": {
+            "n_ctx": 16384,
+            "supports_tools": true,
+            "supports_multimodality": true,
+            "supports_clicks": true,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
         },
         "llama3/8b/instruct": {
             "n_ctx": 4096,
