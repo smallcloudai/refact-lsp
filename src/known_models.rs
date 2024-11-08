@@ -187,43 +187,6 @@ pub const KNOWN_MODELS: &str = r####"
                 "claude-3-5-sonnet-20240620"
             ]
         },
-        "groq-llama-3.1-8b": {
-            "n_ctx": 128000,
-            "supports_tools": false,
-            "supports_multimodality": false,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {}
-            },
-            "similar_models": [
-                "groq-llama-3.1-70b",
-                "groq-llama-3.2-1b",
-                "groq-llama-3.2-3b",
-                "groq-llama-3.2-11b-vision",
-                "groq-llama-3.2-90b-vision"
-            ]
-        },        
-        "cerebras-llama3.1-8b": {
-            "n_ctx": 8192,
-            "supports_tools": false,
-            "supports_multimodality": false,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {}
-            },
-            "similar_models": [
-                "cerebras-llama3.1-70b"
-            ]
-        },
-        "claude-3-5-sonnet": {
-            "n_ctx": 16384,
-            "supports_tools": true,
-            "supports_multimodality": true,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {}
-            },
-            "similar_models": [
-                "claude-3-5-sonnet-20240620"
-            ]
-        },
         "llama3/8b/instruct": {
             "n_ctx": 4096,
             "supports_scratchpads": {
@@ -331,6 +294,32 @@ pub const KNOWN_MODELS: &str = r####"
                 "deepseek-coder/33b/instruct",
                 "deepseek-coder/6.7b/instruct-finetune",
                 "deepseek-coder/6.7b/instruct-finetune/vllm"
+            ]
+        },
+        "groq-llama-3.1-8b": {
+            "n_ctx": 128000,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "groq-llama-3.1-70b",
+                "groq-llama-3.2-1b",
+                "groq-llama-3.2-3b",
+                "groq-llama-3.2-11b-vision",
+                "groq-llama-3.2-90b-vision"
+            ]
+        },        
+        "cerebras-llama3.1-8b": {
+            "n_ctx": 8192,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "cerebras-llama3.1-70b"
             ]
         }
     },
