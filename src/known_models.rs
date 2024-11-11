@@ -245,7 +245,8 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             },
             "similar_models": [
-                "claude-3-5-sonnet-20240620"
+                "claude-3-5-sonnet-20240620",
+                "claude-3-5-sonnet-20241022"
             ]
         },
         "claude-3-5-sonnet-20241022": {
@@ -380,7 +381,7 @@ pub const KNOWN_MODELS: &str = r####"
                 "groq-llama-3.2-11b-vision",
                 "groq-llama-3.2-90b-vision"
             ]
-        },        
+        },
         "cerebras-llama3.1-8b": {
             "n_ctx": 8192,
             "supports_tools": false,
@@ -391,7 +392,7 @@ pub const KNOWN_MODELS: &str = r####"
             "similar_models": [
                 "cerebras-llama3.1-70b"
             ]
-        },  
+        },
         "qwen2.5/coder/0.5b/instruct": {
             "n_ctx": 8192,
             "supports_tools": false,
@@ -451,7 +452,7 @@ pub const KNOWN_MODELS: &str = r####"
         "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20241022": "Xenova/claude-tokenizer",
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
-        "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer"
+        "groq-llama-3.1-70b":     "Xenova/Meta-Llama-3.1-Tokenizer"
     }
 }
 "####;

@@ -5,18 +5,22 @@ use tokio::sync::mpsc;
 use async_stream::stream;
 use futures::StreamExt;
 use hyper::{Body, Response, StatusCode};
+use reqwest::Client;
 use reqwest_eventsource::Event;
 use serde_json::json;
 use tracing::{error, info};
 
-use crate::call_validation::SamplingParameters;
+use crate::call_validation::{ChatMessage, SamplingParameters};
 use crate::custom_error::ScratchError;
 use crate::nicer_logs;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::telemetry::telemetry_structs;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::caps::get_api_key;
-
+use crate::forward_to_anthropic_endpoint::{forward_to_anthropic_endpoint, forward_to_anthropic_endpoint_streaming};
+use crate::forward_to_hf_endpoint::{forward_to_hf_style_endpoint, forward_to_hf_style_endpoint_streaming};
+use crate::forward_to_openai_endpoint::{forward_to_openai_style_endpoint, forward_to_openai_style_endpoint_streaming};
+use crate::scratchpads::multimodality::AnthropicInputElement;
 
 async fn _get_endpoint_and_stuff_from_model_name(
     gcx: Arc<ARwLock<crate::global_context::GlobalContext>>,
@@ -61,12 +65,117 @@ async fn _get_endpoint_and_stuff_from_model_name(
     if !custom_endpoint_template.is_empty() {
         endpoint_template = custom_endpoint_template;
     }
-    return (
+    (
         api_key,
         endpoint_template,
         endpoint_style,
         endpoint_chat_passthrough,
     )
+}
+
+async fn get_model_says(
+    only_deterministic_messages: bool,
+    endpoint_style: String,
+    bearer: String,
+    model_name: &String,
+    prompt: &str,
+    client: &Client,
+    endpoint_template: &String,
+    endpoint_chat_passthrough: &String,
+    parameters: &SamplingParameters,
+    save_url: &mut String,
+) -> Result<serde_json::Value, String> {
+    if only_deterministic_messages {
+        *save_url = "only-det-messages".to_string();
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+
+    match endpoint_style.as_str() {
+        "hf" => forward_to_hf_style_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &parameters
+        ).await,
+        "anthropic" => forward_to_anthropic_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, endpoint_chat_passthrough, &parameters
+        ).await,
+        _ => {
+            forward_to_openai_style_endpoint(
+                save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &endpoint_chat_passthrough, &parameters  // includes n
+            ).await
+        }
+    }
+}
+
+fn scratchpad_result_not_stream(
+    model_says: &mut serde_json::Value,
+    scratchpad: &mut Box<dyn ScratchpadAbstract>,
+    only_deterministic_messages: bool,
+) -> Result<serde_json::Value, ScratchError> {
+    let scratchpad_result = if only_deterministic_messages {
+        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+            model_says["deterministic_messages"] = json!(det_msgs);
+            model_says["choices"] = serde_json::Value::Array(vec![]);
+        }
+        Ok(model_says.clone())
+        
+    } else if let Some(hf_arr) = model_says.as_array() {
+        let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let stopped = vec![false; choices.len()];
+        scratchpad.response_n_choices(choices, stopped)
+
+    } else if let Some(oai_choices) = model_says.get("choices") {
+        let choice0 = oai_choices.as_array().unwrap().get(0).unwrap();
+        if let Some(_msg) = choice0.get("message") {
+            if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+                model_says["deterministic_messages"] = json!(det_msgs);
+            }
+            Ok(model_says.clone())
+        } else {
+            unreachable!()
+        } 
+        
+    } else if let Some(content) = model_says.get("content") { // anthropic style
+        let content_elements = if let Some(content_arr) = content.as_array() {
+            content_arr.clone()
+        } else {
+            vec![content.clone()]
+        };
+        let multimodal_elements: Vec<AnthropicInputElement> = serde_json::from_value(serde_json::Value::Array(content_elements)).map_err(|e|{
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Anthropic: failed to deserialize content: {:?}", e))
+        })?;
+        let role = model_says["role"].as_str().unwrap();
+        let chat_message = ChatMessage::from_anthropic_input(multimodal_elements, role);
+        
+        let mut message = json!({"role": role, "content": chat_message.content});
+        if let Some(t_calls) = chat_message.tool_calls {
+            message["tool_calls"] = json!(t_calls);
+        }
+        
+        let mut response = json!({
+            "choices": [{
+                "index": 0,
+                "message": message,
+                // todo: maybe provide real finish reason in else case
+                "finish_reason": if model_says["stop_reason"] == "end_turn" { "stop" } else { "length" },
+            }]
+        });
+        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+            response["deterministic_messages"] = json!(det_msgs);
+        }
+        Ok(response)
+        
+    } else if let Some(err) = model_says.get("error") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", err)));
+    } else if let Some(msg) = model_says.get("human_readable_message") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", msg)));
+    } else if let Some(msg) = model_says.get("detail") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", msg)));
+    } else {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("unrecognized response (1): {:?}", model_says)));
+    };
+    match scratchpad_result { 
+        Ok(x) => Ok(x),
+        Err(e) => Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("scratchpad: {}", e)))
+    }
 }
 
 pub async fn scratchpad_interaction_not_stream_json(
@@ -100,39 +209,19 @@ pub async fn scratchpad_interaction_not_stream_json(
 
     let mut save_url: String = String::new();
     let _ = slowdown_arc.acquire().await;
-    let mut model_says = if only_deterministic_messages {
-        save_url = "only-det-messages".to_string();
-        Ok(serde_json::Value::Object(serde_json::Map::new()))
-    } else if endpoint_style == "hf" {
-        crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &parameters,
-        ).await
-    } else {
-        crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &endpoint_chat_passthrough,
-            &parameters,  // includes n
-        ).await
-    }.map_err(|e| {
+    
+    let mut model_says = get_model_says(
+        only_deterministic_messages, endpoint_style, bearer, &model_name, prompt, &client, &endpoint_template, &endpoint_chat_passthrough, &parameters, &mut save_url
+    ).await.map_err(|e|{
         tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
-                save_url.clone(),
-                scope.clone(),
-                false,
-                e.to_string(),
-            ));
+            save_url.clone(),
+            scope.clone(),
+            false,
+            e.to_string(),
+        ));
         ScratchError::new_but_skip_telemetry(StatusCode::INTERNAL_SERVER_ERROR, format!("forward_to_endpoint: {}", e))
     })?;
+    
     tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
         save_url.clone(),
         scope.clone(),
@@ -142,63 +231,11 @@ pub async fn scratchpad_interaction_not_stream_json(
     info!("forward to endpoint {:.2}ms, url was {}", t2.elapsed().unwrap().as_millis() as f64, save_url);
     crate::global_context::look_for_piggyback_fields(gcx.clone(), &model_says).await;
 
-    let scratchpad_result: Result<serde_json::Value, String>;
-    if only_deterministic_messages {
-        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
-            model_says["deterministic_messages"] = json!(det_msgs);
-            model_says["choices"] = serde_json::Value::Array(vec![]);
-        }
-        scratchpad_result = Ok(model_says.clone());
-    } else if let Some(hf_arr) = model_says.as_array() {
-        let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-        let stopped = vec![false; choices.len()];
-        scratchpad_result = scratchpad.response_n_choices(choices, stopped);
-
-    } else if let Some(oai_choices) = model_says.get("choices") {
-        let choice0 = oai_choices.as_array().unwrap().get(0).unwrap();
-        if let Some(_msg) = choice0.get("message") {
-            if let Ok(det_msgs) = scratchpad.response_spontaneous() {
-                model_says["deterministic_messages"] = json!(det_msgs);
-            }
-            // new style openai response, used in passthrough
-            scratchpad_result = Ok(model_says.clone());
-        } else {
-            // TODO: restore order using 'index'
-            // for oai_choice in oai_choices.as_array().unwrap() {
-            //     let index = oai_choice.get("index").unwrap().as_u64().unwrap() as usize;
-            // }
-            let choices = oai_choices.as_array().unwrap().iter().map(|x| x.get("text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-            let stopped = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
-            scratchpad_result = scratchpad.response_n_choices(choices, stopped);
-        }
-
-    } else if let Some(err) = model_says.get("error") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", err)
-        ));
-
-    } else if let Some(msg) = model_says.get("human_readable_message") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", msg)
-        ));
-
-    } else if let Some(msg) = model_says.get("detail") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", msg)
-        ));
-
-    } else {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("unrecognized response (1): {:?}", model_says))
-        );
-    }
-
-    if let Err(problem) = scratchpad_result {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("scratchpad: {}", problem))
-        );
-    }
-    return Ok(scratchpad_result.unwrap());
+    scratchpad_result_not_stream(
+        &mut model_says,
+        scratchpad,
+        only_deterministic_messages,
+    )
 }
 
 pub async fn scratchpad_interaction_not_stream(
@@ -238,7 +275,7 @@ pub async fn scratchpad_interaction_not_stream(
         .header("Content-Type", "application/json")
         .body(Body::from(txt))
         .unwrap();
-    return Ok(response);
+    Ok(response)
 }
 
 pub async fn scratchpad_interaction_stream(
@@ -343,9 +380,9 @@ pub async fn scratchpad_interaction_stream(
             if only_deterministic_messages {
                 break;
             }
-            // info!("prompt: {:?}", prompt);
-            let event_source_maybe = if endpoint_style == "hf" {
-                crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint_streaming(
+            
+            let event_source = match endpoint_style.as_str() {
+                "hf" => forward_to_hf_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -353,9 +390,17 @@ pub async fn scratchpad_interaction_stream(
                     &client,
                     &endpoint_template,
                     &parameters,
-                ).await
-            } else {
-                crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint_streaming(
+                ).await,
+                "anthropic" => forward_to_anthropic_endpoint_streaming(
+                    &mut save_url,
+                    bearer.clone(),
+                    &model_name,
+                    prompt.as_str(),
+                    &client,
+                    &endpoint_chat_passthrough,
+                    &parameters,
+                ).await,
+                _ => forward_to_openai_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -366,7 +411,8 @@ pub async fn scratchpad_interaction_stream(
                     &parameters,
                 ).await
             };
-            let mut event_source = match event_source_maybe {
+            
+            let mut event_source = match event_source {
                 Ok(event_source) => event_source,
                 Err(e) => {
                     let e_str = format!("forward_to_endpoint: {:?}", e);
@@ -385,25 +431,60 @@ pub async fn scratchpad_interaction_stream(
             let mut finished: bool = false;
             let mut problem_reported = false;
             let mut was_correct_output_even_if_error = false;
+            let mut message_template: serde_json::Value = serde_json::Value::Null;
+            let mut ant_tool_call_index: i32 = -1;
             // let mut test_countdown = 250;
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(Event::Open) => {},
                     Ok(Event::Message(message)) => {
-                        // info!("Message: {:#?}", message);
                         if message.data.starts_with("[DONE]") {
                             break;
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
+                        
+                        // for anthropic
+                        match message.event.as_str() {
+                            "message_start" => {
+                                message_template = json!({
+                                    "id": json["message"]["id"],
+                                    "object": "chat.completion.chunk",
+                                    "model": json["message"]["model"],
+                                    // "usage": json["message"]["usage"], todo: implement usage (event: message_delta)
+                                    "choices": [
+                                        {"index": 0, "delta": {"role": json["message"]["role"], "content": ""}}
+                                    ]
+                                });
+                            },
+                            "content_block_start" => {
+                                
+                            },
+                            "message_stop" => {
+                                finished = true;
+                                break;
+                            },
+                            "ping" | "content_block_stop" => {
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        
                         crate::global_context::look_for_piggyback_fields(gcx.clone(), &json).await;
                         let value_maybe = _push_streaming_json_into_scratchpad(
                             my_scratchpad,
                             &json,
+                            &message_template,
+                            message.event.as_str(),
                             &mut model_name,
                             &mut finished,
                             &mut was_correct_output_even_if_error,
+                            &mut ant_tool_call_index,
                         );
-                        if let Ok(mut value) = value_maybe {
+                        if let Ok(value) = value_maybe {
+                            let mut value = match value {
+                                Some(v) => v,
+                                None => continue
+                            };
                             try_insert_usage(&mut value);
                             value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                             let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
@@ -517,17 +598,21 @@ pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
 fn _push_streaming_json_into_scratchpad(
     scratch: &mut Box<dyn ScratchpadAbstract>,
     json: &serde_json::Value,
+    message_template: &serde_json::Value,
+    event_type: &str,
     model_name: &mut String,
     finished: &mut bool,
     was_correct_output_even_if_error: &mut bool,
-) -> Result<serde_json::Value, String> {
+    ant_tool_call_index: &mut i32,
+) -> Result<Option<serde_json::Value>, String> {
     if let Some(token) = json.get("token") { // hf style produces this
         let text = token.get("text").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
         let mut value: serde_json::Value;
         (value, *finished) = scratch.response_streaming(text, false, false)?;
         value["model"] = json!(model_name.clone());
         *was_correct_output_even_if_error |= json.get("generated_text").is_some();
-        Ok(value)
+        Ok(Some(value))
+        
     } else if let Some(choices) = json.get("choices") { // openai style
         let choice0 = &choices[0];
         let mut value: serde_json::Value;
@@ -553,7 +638,69 @@ fn _push_streaming_json_into_scratchpad(
             model_name.clone_from(&model_value.as_str().unwrap_or("").to_string());
         }
         value["model"] = json!(model_name.clone());
-        Ok(value)
+        Ok(Some(value))
+        
+    } else if message_template.is_object() { // anthropic
+        let mut value = message_template.clone();
+
+        return match event_type {
+            "error" => {
+                let error_type = json.get("error")
+                    .and_then(|e| e.get("type"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Unknown error type");
+
+                let error_message = json.get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error message");
+
+                Err(format!("{}: {}", error_type, error_message))
+            },
+            "message_start" => {
+                Ok(Some(value))
+            },
+            "content_block_start" => {
+                if json["content_block"]["type"] == "tool_use" {
+                    let tool_id = json["content_block"]["id"].clone();
+                    let tool_name = json["content_block"]["name"].clone();
+                    *ant_tool_call_index += 1;
+                    value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": ""
+                            }
+                        }]
+                    });
+                    Ok(Some(value))
+                } else {
+                    Ok(None)
+                }
+            },
+            _ => {
+                value["choices"][0]["delta"] = json!({});
+                let delta = json["delta"].clone();
+                if delta["type"] == "text_delta" {
+                    value["choices"][0]["delta"]["content"] = delta["text"].clone();
+                } else if delta["type"] == "input_json_delta" {
+                    let partial_json = delta["partial_json"].clone();
+                    value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "function": {
+                                "arguments": partial_json
+                            }
+                        }]
+                    });
+                }
+                Ok(Some(value))
+            }
+        }
+        
     } else if let Some(err) = json.get("error") {
         Err(format!("{}", err))
     } else if let Some(msg) = json.get("human_readable_message") {
