@@ -1009,7 +1009,7 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         });
 
         let json_messages = &serde_json::to_string(&json!({
-            "messages":  messages.iter().map(|x| { x.into_value(&None) }).collect::<Vec<_>>(),
+            "messages":  messages.iter().map(|x| { x.into_value("openai") }).collect::<Vec<_>>(),
         }))
         .unwrap();
         let prompt = format!("PASSTHROUGH {json_messages}").to_string();
