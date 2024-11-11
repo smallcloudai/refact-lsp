@@ -47,8 +47,10 @@ pub async fn create_code_completion_scratchpad(
         result = Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(tokenizer_arc, &post, "PSM".to_string(), cache_arc, tele_storage, ast_module, global_context.clone()));
     } else if scratchpad_name == "FIM-SPM" {
         result = Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(tokenizer_arc, &post, "SPM".to_string(), cache_arc, tele_storage, ast_module, global_context.clone()));
-    }  else if scratchpad_name == "REPLACE" {
+    } else if scratchpad_name == "REPLACE" {
         result = Box::new(code_completion_replace::CodeCompletionReplaceScratchpad::new(tokenizer_arc, &post, cache_arc, tele_storage, ast_module, global_context.clone()));
+    } else if scratchpad_name == "REPLACE_PASSTHROUGH" {
+        result = Box::new(code_completion_replace::CodeCompletionReplacePassthroughScratchpad::new(tokenizer_arc, &post, cache_arc, tele_storage, ast_module, global_context.clone()));
     } else {
         return Err(format!("This rust binary doesn't have code completion scratchpad \"{}\" compiled in", scratchpad_name));
     }

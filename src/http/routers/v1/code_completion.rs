@@ -76,6 +76,7 @@ pub async fn handle_v1_code_completion(
     if code_completion_post.scratchpad == "" {
         code_completion_post.scratchpad = scratchpad_name.clone();
     }
+    let using_passthrough = scratchpad_name.contains("PASSTHROUGH");
     code_completion_post.parameters.temperature = Some(code_completion_post.parameters.temperature.unwrap_or(0.2));
     let (cache_arc, tele_storage) = {
         let gcx_locked = gcx.write().await;
@@ -117,10 +118,10 @@ pub async fn handle_v1_code_completion(
         "".to_string(),
         false,
     ).await));
-    if !code_completion_post.stream {
-        crate::restream::scratchpad_interaction_not_stream(ccx.clone(), &mut scratchpad, "completion".to_string(), model_name, &mut code_completion_post.parameters, false).await
-    } else {
+    if using_passthrough || code_completion_post.stream {
         crate::restream::scratchpad_interaction_stream(ccx.clone(), scratchpad, "completion-stream".to_string(), model_name, code_completion_post.parameters.clone(), false).await
+    } else {
+        crate::restream::scratchpad_interaction_not_stream(ccx.clone(), &mut scratchpad, "completion".to_string(), model_name, &mut code_completion_post.parameters, false).await
     }
 }
 

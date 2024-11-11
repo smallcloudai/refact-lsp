@@ -120,6 +120,48 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3.2/1b/instruct/vllm"
             ]
         },
+        "gpt-4o": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { }
+            },
+            "similar_models": [
+                "gpt-4o-2024-05-13",
+                "gpt-4o-2024-08-06",
+                "openai/gpt-4o"
+            ]
+        },
+        "gpt-4o-mini": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { }
+            },
+            "similar_models": [
+                "gpt-4o-mini-2024-07-18"
+            ]
+        },
+        "groq-llama-3.1-8b": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { }
+            },
+            "similar_models": [
+                "groq-llama-3.1-70b",
+                "groq-llama-3.2-1b",
+                "groq-llama-3.2-3b",
+                "groq-llama-3.2-11b-vision",
+                "groq-llama-3.2-90b-vision"
+            ]
+        },        
+        "cerebras-llama3.1-8b": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { }
+            },
+            "similar_models": [
+                "cerebras-llama3.1-70b"
+            ]
+        },
         "qwen2.5/coder/0.5b/instruct": {
             "n_ctx": 8192,
             "supports_scratchpads": {
