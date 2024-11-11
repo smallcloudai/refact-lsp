@@ -59,6 +59,7 @@ pub struct ChatPassthrough {
     pub allow_at: bool,
     pub supports_tools: bool,
     pub supports_clicks: bool,
+    pub endpoint_style: String,
 }
 
 impl ChatPassthrough {
@@ -69,6 +70,7 @@ impl ChatPassthrough {
         allow_at: bool,
         supports_tools: bool,
         supports_clicks: bool,
+        endpoint_style: &str,
     ) -> Self {
         ChatPassthrough {
             t: HasTokenizerAndEot::new(tokenizer),
@@ -79,6 +81,7 @@ impl ChatPassthrough {
             allow_at,
             supports_tools,
             supports_clicks,
+            endpoint_style: endpoint_style.to_string(),
         }
     }
 }
@@ -103,7 +106,8 @@ impl ScratchpadAbstract for ChatPassthrough {
             let ccx_locked = ccx.lock().await;
             (ccx_locked.global_context.clone(), ccx_locked.n_ctx, ccx_locked.should_execute_remotely)
         };
-        let style = self.post.style.clone();
+        let style = self.endpoint_style.clone();
+        let allow_experimental = gcx.read().await.cmdline.experimental;
         let at_tools = tools_merged_and_filtered(gcx.clone(), self.supports_clicks).await?;
 
         let messages = prepend_the_right_system_prompt_and_maybe_more_initial_messages(gcx.clone(), self.messages.clone(), &self.post, &mut self.has_rag_results).await;
@@ -125,50 +129,49 @@ impl ScratchpadAbstract for ChatPassthrough {
         });
 
         let converted_messages = convert_messages_to_openai_format(limited_msgs, &style);
+        let converted_messages = if style.as_str() == "anthropic" {
+            format_messages_anthropic(converted_messages)
+        } else {
+            converted_messages
+        };
 
         let mut big_json = serde_json::json!({
             "messages": converted_messages,
         });
 
         if self.supports_tools {
-            let post_tools = self.post.tools.as_ref().and_then(|tools| {
+            let tools = if let Some(tools) = &self.post.tools {
+                // if tools.is_empty() || any_context_produced {
                 if tools.is_empty() {
                     None
                 } else {
-                    Some(tools.clone())
+                    Some(tools)
                 }
-            });
-
-            let mut tools = if let Some(t) = post_tools {
-                // here we only use names from the tools in `post`
-                let turned_on = t.iter().filter_map(|x| {
-                    if let Value::Object(map) = x {
-                        map.get("function").and_then(|f| f.get("name")).and_then(|name| name.as_str().map(|s| s.to_string()))
-                    } else {
-                        None
-                    }
-                }).collect::<Vec<String>>();
-                let allow_experimental = gcx.read().await.cmdline.experimental;
-                // and take descriptions of tools from the official source
-                let tool_descriptions = tool_description_list_from_yaml(at_tools, &turned_on, allow_experimental).await?;
-                Some(tool_descriptions.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>())
             } else {
                 None
             };
 
-            // remove "agentic"
-            if let Some(tools) = &mut tools {
-                for tool in tools {
-                    if let Some(function) = tool.get_mut("function") {
-                        function.as_object_mut().unwrap().remove("agentic");
-                    }
+            let tools_enabled = match tools {
+                Some(tools) => {
+                    tools.iter().map(|t|t["function"]["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+                },
+                None => vec![]
+            };
+
+            let tools_desc_list = tool_description_list_from_yaml(at_tools, &tools_enabled, allow_experimental).await?;
+            let tools_filtered = tools_desc_list.iter().filter(|t|tools_enabled.contains(&t.name)).cloned().collect::<Vec<_>>();
+
+            if !tools_filtered.is_empty() {
+                if self.endpoint_style == "anthropic" {
+                    big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_anthropic_style()).collect::<Vec<_>>());
+                } else {
+                    big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_openai_style(false)).collect::<Vec<_>>());
+                    big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
                 }
             }
 
-            big_json["tools"] = json!(tools);
-            big_json["tool_choice"] = json!(self.post.tool_choice);
             if DEBUG {
-                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(vec![]).len());
+                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());
             }
         } else {
             if DEBUG {
@@ -231,4 +234,29 @@ impl ScratchpadAbstract for ChatPassthrough {
             "object": "chat.completion.chunk",
         }))
     }
+}
+
+// for anthropic:
+// tool answers must be located in the same message.content (if tools executed in parallel)
+fn format_messages_anthropic(messages: Vec<Value>) -> Vec<Value> {
+    let mut res: Vec<Value> = vec![];
+    for m in messages {
+        match m.get("content") {
+            Some(Value::Array(cont)) => {
+                if let Some(prev_el) = res.last_mut() {
+                    if let Some(Value::Array(prev_cont)) = prev_el.get_mut("content") {
+                        if cont.iter().any(|c| c.get("type") == Some(&Value::String("tool_result".to_string())))
+                            && prev_cont.iter().any(|p| p.get("type") == Some(&Value::String("tool_result".to_string())))
+                        {
+                            prev_cont.extend(cont.iter().cloned());
+                            continue;
+                        }
+                    }
+                }
+                res.push(m);
+            }
+            _ => res.push(m),
+        }
+    }
+    res
 }

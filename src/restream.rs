@@ -5,17 +5,22 @@ use tokio::sync::mpsc;
 use async_stream::stream;
 use futures::StreamExt;
 use hyper::{Body, Response, StatusCode};
+use reqwest::Client;
 use reqwest_eventsource::Event;
 use serde_json::json;
 use tracing::info;
 
-use crate::call_validation::SamplingParameters;
+use crate::call_validation::{ChatMessage, SamplingParameters};
 use crate::custom_error::ScratchError;
 use crate::nicer_logs;
 use crate::scratchpad_abstract::{FinishReason, ScratchpadAbstract};
 use crate::telemetry::telemetry_structs;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::caps::get_api_key;
+use crate::forward_to_anthropic_endpoint::{forward_to_anthropic_endpoint, forward_to_anthropic_endpoint_streaming};
+use crate::forward_to_hf_endpoint::{forward_to_hf_style_endpoint, forward_to_hf_style_endpoint_streaming};
+use crate::forward_to_openai_endpoint::{forward_to_openai_style_endpoint, forward_to_openai_style_endpoint_streaming};
+use crate::scratchpads::multimodality::AnthropicInputElement;
 
 
 async fn _get_endpoint_and_stuff_from_model_name(
@@ -61,12 +66,44 @@ async fn _get_endpoint_and_stuff_from_model_name(
     if !custom_endpoint_template.is_empty() {
         endpoint_template = custom_endpoint_template;
     }
-    return (
+    (
         api_key,
         endpoint_template,
         endpoint_style,
         endpoint_chat_passthrough,
     )
+}
+
+async fn get_model_says(
+    only_deterministic_messages: bool,
+    endpoint_style: String,
+    bearer: String,
+    model_name: &String,
+    prompt: &str,
+    client: &Client,
+    endpoint_template: &String,
+    endpoint_chat_passthrough: &String,
+    parameters: &SamplingParameters,
+    save_url: &mut String,
+) -> Result<serde_json::Value, String> {
+    if only_deterministic_messages {
+        *save_url = "only-det-messages".to_string();
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+
+    match endpoint_style.as_str() {
+        "hf" => forward_to_hf_style_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &parameters
+        ).await,
+        "anthropic" => forward_to_anthropic_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, endpoint_chat_passthrough, &parameters
+        ).await,
+        _ => {
+            forward_to_openai_style_endpoint(
+                save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &endpoint_chat_passthrough, &parameters  // includes n
+            ).await
+        }
+    }
 }
 
 pub async fn scratchpad_interaction_not_stream_json(
@@ -100,39 +137,19 @@ pub async fn scratchpad_interaction_not_stream_json(
 
     let mut save_url: String = String::new();
     let _ = slowdown_arc.acquire().await;
-    let mut model_says = if only_deterministic_messages {
-        save_url = "only-det-messages".to_string();
-        Ok(serde_json::Value::Object(serde_json::Map::new()))
-    } else if endpoint_style == "hf" {
-        crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &parameters,
-        ).await
-    } else {
-        crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &endpoint_chat_passthrough,
-            &parameters,  // includes n
-        ).await
-    }.map_err(|e| {
+
+    let mut model_says = get_model_says(
+        only_deterministic_messages, endpoint_style, bearer, &model_name, prompt, &client, &endpoint_template, &endpoint_chat_passthrough, &parameters, &mut save_url
+    ).await.map_err(|e|{
         tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
-                save_url.clone(),
-                scope.clone(),
-                false,
-                e.to_string(),
-            ));
+            save_url.clone(),
+            scope.clone(),
+            false,
+            e.to_string(),
+        ));
         ScratchError::new_but_skip_telemetry(StatusCode::INTERNAL_SERVER_ERROR, format!("forward_to_endpoint: {}", e))
     })?;
+
     tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
         save_url.clone(),
         scope.clone(),
@@ -281,7 +298,7 @@ pub async fn scratchpad_interaction_not_stream(
         .header("Content-Type", "application/json")
         .body(Body::from(txt))
         .unwrap();
-    return Ok(response);
+    Ok(response)
 }
 
 pub async fn scratchpad_interaction_stream(
@@ -386,9 +403,9 @@ pub async fn scratchpad_interaction_stream(
             if only_deterministic_messages {
                 break;
             }
-            // info!("prompt: {:?}", prompt);
-            let event_source_maybe = if endpoint_style == "hf" {
-                crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint_streaming(
+
+            let event_source = match endpoint_style.as_str() {
+                "hf" => forward_to_hf_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -396,9 +413,17 @@ pub async fn scratchpad_interaction_stream(
                     &client,
                     &endpoint_template,
                     &parameters,
-                ).await
-            } else {
-                crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint_streaming(
+                ).await,
+                "anthropic" => forward_to_anthropic_endpoint_streaming(
+                    &mut save_url,
+                    bearer.clone(),
+                    &model_name,
+                    prompt.as_str(),
+                    &client,
+                    &endpoint_chat_passthrough,
+                    &parameters,
+                ).await,
+                _ => forward_to_openai_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -409,7 +434,8 @@ pub async fn scratchpad_interaction_stream(
                     &parameters,
                 ).await
             };
-            let mut event_source = match event_source_maybe {
+
+            let mut event_source = match event_source {
                 Ok(event_source) => event_source,
                 Err(e) => {
                     let e_str = format!("forward_to_endpoint: {:?}", e);
@@ -427,17 +453,54 @@ pub async fn scratchpad_interaction_stream(
             };
             let mut was_correct_output_even_if_error = false;
             let mut last_finish_reason = FinishReason::None;
+            let mut message_template: serde_json::Value = serde_json::Value::Null;
+            let mut ant_tool_call_index: i32 = -1;
+
             // let mut test_countdown = 250;
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(Event::Open) => {},
                     Ok(Event::Message(message)) => {
-                        // info!("Message: {:#?}", message);
                         if message.data.starts_with("[DONE]") {
                             break;
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
+
+                        // for anthropic
+                        match message.event.as_str() {
+                            "message_start" => {
+                                message_template = json!({
+                                    "id": json["message"]["id"],
+                                    "object": "chat.completion.chunk",
+                                    "model": json["message"]["model"],
+                                    // "usage": json["message"]["usage"], todo: implement usage (event: message_delta)
+                                    "choices": [
+                                        {"index": 0, "delta": {"role": json["message"]["role"], "content": ""}}
+                                    ]
+                                });
+                            },
+                            "content_block_start" => {
+
+                            },
+                            "message_stop" => {
+                                finished = true;
+                                break;
+                            },
+                            "ping" | "content_block_stop" => {
+                                continue;
+                            }
+                            _ => {}
+                        }
+
                         crate::global_context::look_for_piggyback_fields(gcx.clone(), &json).await;
+
+                        let value = _push_streaming_json_into_scratchpad(
+                            my_scratchpad,
+                            &json,
+                            &mut model_name,
+                            &mut was_correct_output_even_if_error,
+                        );
+
                         match _push_streaming_json_into_scratchpad(
                             my_scratchpad,
                             &json,
@@ -449,8 +512,6 @@ pub async fn scratchpad_interaction_stream(
                                 try_insert_usage(&mut value);
                                 value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                                 let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
-                                // let last_60_chars: String = crate::nicer_logs::first_n_chars(&value_str, 60);
-                                // info!("yield: {:?}", last_60_chars);
                                 yield Result::<_, String>::Ok(value_str);
                             },
                             Err(err_str) => {
@@ -548,6 +609,76 @@ pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
         return true;
     }
     return false;
+}
+
+fn _push_streaming_json_anthropic(
+    json: &serde_json::Value,
+    message_template: &serde_json::Value,
+    event_type: &str,
+    ant_tool_call_index: &mut i32,
+) -> Result<Option<serde_json::Value>, String> {
+    if !message_template.is_object() {
+        return Ok(None);
+    }
+    let mut value = message_template.clone();
+
+    match event_type {
+        "error" => {
+            let error_type = json.get("error")
+                .and_then(|e| e.get("type"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("Unknown error type");
+
+            let error_message = json.get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error message");
+
+            Err(format!("{}: {}", error_type, error_message))
+        },
+        "message_start" => {
+            Ok(Some(value))
+        },
+        "content_block_start" => {
+            if json["content_block"]["type"] == "tool_use" {
+                let tool_id = json["content_block"]["id"].clone();
+                let tool_name = json["content_block"]["name"].clone();
+                *ant_tool_call_index += 1;
+                value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": ""
+                            }
+                        }]
+                    });
+                Ok(Some(value))
+            } else {
+                Ok(None)
+            }
+        },
+        _ => {
+            value["choices"][0]["delta"] = json!({});
+            let delta = json["delta"].clone();
+            if delta["type"] == "text_delta" {
+                value["choices"][0]["delta"]["content"] = delta["text"].clone();
+            } else if delta["type"] == "input_json_delta" {
+                let partial_json = delta["partial_json"].clone();
+                value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "function": {
+                                "arguments": partial_json
+                            }
+                        }]
+                    });
+            }
+            Ok(Some(value))
+        }
+    }
 }
 
 fn _push_streaming_json_into_scratchpad(

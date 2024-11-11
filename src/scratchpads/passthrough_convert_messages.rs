@@ -3,7 +3,7 @@ use tracing::{error, warn};
 use crate::call_validation::{ChatContent, ChatMessage, ContextFile};
 
 
-pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &Option<String>) -> Vec<Value> {
+pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &str) -> Vec<Value> {
     let mut results = vec![];
     let mut delay_images = vec![];
 
@@ -179,7 +179,7 @@ mod tests {
 
         let roles_out_expected = expected_output.iter().map(|x| x.get("role").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
 
-        let style = Some("openai".to_string());
+        let style = "openai";
         let output = convert_messages_to_openai_format(messages, &style);
 
         // println!("OUTPUT: {:#?}", output);

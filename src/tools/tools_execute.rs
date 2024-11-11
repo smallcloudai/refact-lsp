@@ -54,7 +54,7 @@ pub async fn run_tools_remotely(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (n_ctx, subchat_tool_parameters, postprocess_parameters, gcx, chat_id) = {
         let ccx_locked = ccx.lock().await;
@@ -75,7 +75,7 @@ pub async fn run_tools_remotely(
         postprocess_parameters,
         model_name: model_name.to_string(),
         chat_id: chat_id.clone(),
-        style: style.clone(),
+        style: style.to_string(),
     };
 
     let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
@@ -101,7 +101,7 @@ pub async fn run_tools_locally(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (new_messages, tools_runned) = run_tools( // todo: fix typo "runned"
         ccx, tools, tokenizer, maxgen, original_messages, style
@@ -122,7 +122,7 @@ pub async fn run_tools(
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let n_ctx = ccx.lock().await.n_ctx;
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
@@ -161,16 +161,21 @@ pub async fn run_tools(
             }
         };
 
-        let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
-            Ok(args) => args,
-            Err(e) => {
-                let tool_failed_message = tool_answer(
-                    format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
-                );
-                generated_tool.push(tool_failed_message);
-                continue;
+        let args = if t_call.function.arguments.trim().is_empty() {
+            HashMap::new()
+        } else {
+            match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
+                Ok(args) => args,
+                Err(e) => {
+                    let tool_failed_message = tool_answer(
+                        format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
+                    );
+                    generated_tool.push(tool_failed_message);
+                    continue;
+                }
             }
         };
+        
         info!("tool use {}({:?})", &t_call.function.name, args);
         
         {
@@ -263,7 +268,7 @@ async fn pp_run_tools(
     context_files_for_pp: &mut Vec<ContextFile>,
     tokens_for_rag: usize,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    style: &Option<String>,
+    style: &str,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut generated_tool = generated_tool.to_vec();
     let mut generated_other = generated_other.to_vec();
