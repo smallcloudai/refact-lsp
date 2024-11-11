@@ -7,11 +7,11 @@ use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use crate::global_context::GlobalContext;
 use crate::integrations::integr::Integration;
-use crate::integrations::integr_chrome::IntegrationChrome;
-use crate::integrations::integr_github::IntegrationGitHub;
-use crate::integrations::integr_gitlab::IntegrationGitLab;
-use crate::integrations::integr_pdb::IntegrationPdb;
-use crate::integrations::integr_postgres::IntegrationPostgres;
+use crate::integrations::integr_chrome::ToolChrome;
+use crate::integrations::integr_github::ToolGithub;
+use crate::integrations::integr_gitlab::ToolGitlab;
+use crate::integrations::integr_pdb::ToolPdb;
+use crate::integrations::integr_postgres::ToolPostgres;
 use crate::tools::tools_description::Tool;
 use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
@@ -28,59 +28,71 @@ pub mod integr_postgres;
 mod integr;
 
 
+<<<<<<< HEAD
 // hint: when adding integration, update:
 // DEFAULT_INTEGRATION_VALUES, INTEGRATION_ICONS, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
+=======
+// when adding integration, update: get_empty_integrations (2 occurrences)
+>>>>>>> 9b1345a1 (simplified code)
 
 
-pub const DEFAULT_INTEGRATION_VALUES: &[(&str, &str)] = &[
-    ("github.yaml", integr_github::DEFAULT_GITHUB_INTEGRATION_YAML),
-    ("gitlab.yaml", integr_gitlab::DEFAULT_GITLAB_INTEGRATION_YAML),
-    ("pdb.yaml", integr_pdb::DEFAULT_PDB_INTEGRATION_YAML),
-    ("postgres.yaml", integr_postgres::DEFAULT_POSTGRES_INTEGRATION_YAML),
-    ("chrome.yaml", integr_chrome::DEFAULT_CHROME_INTEGRATION_YAML),
-];
-
-pub const INTEGRATION_ICONS: &[(&str, &str)] = &[
-    ("github", "https://cdn-icons-png.flaticon.com/512/25/25231.png"),
-    ("gitlab", "https://cdn-icons-png.flaticon.com/512/5968/5968853.png"),
-    ("pdb", "https://cdn-icons-png.flaticon.com/512/919/919852.png"),
-    ("postgres", "https://cdn-icons-png.flaticon.com/512/5968/5968342.png"),
-    ("chrome", "https://cdn-icons-png.flaticon.com/512/732/732205.png"),
-];
-
-pub async fn integrations_paths(gcx: Arc<ARwLock<GlobalContext>>) -> IndexMap<String, PathBuf> {
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let integrations_d = cache_dir.join("integrations.d");
+pub fn get_empty_integrations() -> IndexMap<String, Box<dyn Integration + Send + Sync>> {
     let integration_names = ["github", "gitlab", "pdb", "postgres", "chrome"];
-
-    integration_names.iter().map(|&name| {
-        (name.to_string(), integrations_d.join(format!("{}.yaml", name)))
-    }).collect()
+    let mut integrations = IndexMap::new();
+    for i_name in integration_names {
+        let i = match i_name {
+            "github" => Box::new(ToolGithub {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
+            "gitlab" => Box::new(ToolGitlab {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
+            "pdb" => Box::new(ToolPdb {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
+            "postgres" => Box::new(ToolPostgres {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
+            "chrome" => Box::new(ToolChrome {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
+            _ => panic!("Unknown integration name: {}", i_name)
+        };
+        integrations.insert(i_name.to_string(), i);
+    }
+    integrations
 }
 
-pub fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
-    match name {
-        "github" => {
-            let integration: IntegrationGitHub = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
-            serde_yaml::to_value(integration).map_err(|e| e.to_string())
+pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
+    cache_dir.join("integrations.d").join(format!("{}.yaml", name))
+}
+
+pub async fn get_integrations(
+    gcx: Arc<ARwLock<GlobalContext>>,
+) -> Result<IndexMap<String, Box<dyn Integration + Send + Sync>>, String> {
+    let integrations = get_empty_integrations();
+    let cache_dir = gcx.read().await.cache_dir.clone();
+
+    let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
+
+    let mut results = IndexMap::new();
+    for (i_name, mut i) in integrations {
+        let path = get_integration_path(&cache_dir, &i_name);
+        let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
+
+        if j_value.get("detail").is_some() {
+            warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
+        } else {
+            if let Err(e) = i.update_from_json(&j_value) {
+                warn!("failed to load integration {}: {}", i_name, e);
+            };
         }
-        "gitlab" => {
-            let integration: IntegrationGitLab = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
-            serde_yaml::to_value(integration).map_err(|e| e.to_string())
-        }
-        "pdb" => {
-            let integration: IntegrationPdb = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
-            serde_yaml::to_value(integration).map_err(|e| e.to_string())
-        }
-        "postgres" => {
-            let integration: IntegrationPostgres = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
-            serde_yaml::to_value(integration).map_err(|e| e.to_string())
-        }
-        "chrome" => {
-            let integration: IntegrationChrome = serde_yaml::from_value(value).map_err(|e| e.to_string())?;
-            serde_yaml::to_value(integration).map_err(|e| e.to_string())
-        }
-        _ => Err(format!("Unknown integration type: {}", name)),
+        results.insert(i_name.clone(), i);
+    }
+
+    Ok(results)
+}
+
+pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
+    let integrations = get_empty_integrations();
+
+    match integrations.get(name) {
+        Some(i) => {
+            let j_value = i.from_yaml_validate_to_json(&value)?;
+            let yaml_value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
+            Ok(yaml_value)
+        },
+        None => Err(format!("Integration {} is not defined", name))
     }
 }
 
@@ -106,75 +118,35 @@ pub async fn load_integration_tools(
         _ => std::collections::HashMap::new(),
     };
 
-    let mut integrations = IndexMap::new();
-    load_tool_from_yaml(paths.get("github"), integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), enabled.get("github"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("gitlab"), integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), enabled.get("gitlab"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("pdb"), integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), enabled.get("pdb"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("postgres"), integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), enabled.get("postgres"), &mut integrations).await?;
-    load_tool_from_yaml(paths.get("chrome"), integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), enabled.get("chrome"), &mut integrations).await?;
+    let integrations = get_integrations(gcx.clone()).await?;
 
-    Ok(integrations)
-}
-
-pub async fn load_integration_schema_and_json(
-    gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<IndexMap<String, (serde_json::Value, serde_json::Value)>, String> {
-    let paths = integrations_paths(gcx.clone()).await;
-    let integrations_yaml_value = {
-        let cache_dir = gcx.read().await.cache_dir.clone();
-        let yaml_path = cache_dir.join("integrations.yaml");
-        read_yaml_into_value(&yaml_path).await?
-    };
-
-    let mut integrations = IndexMap::new();
-    schema_and_json_from_integration(paths.get("github"), integr_github::ToolGithub::to_schema_json, integr_github::ToolGithub::new_from_yaml, integrations_yaml_value.get("github"), &mut integrations).await?;
-    schema_and_json_from_integration(paths.get("gitlab"), integr_gitlab::ToolGitlab::to_schema_json, integr_gitlab::ToolGitlab::new_from_yaml, integrations_yaml_value.get("gitlab"), &mut integrations).await?;
-    schema_and_json_from_integration(paths.get("pdb"), integr_pdb::ToolPdb::to_schema_json, integr_pdb::ToolPdb::new_from_yaml, integrations_yaml_value.get("pdb"), &mut integrations).await?;
-    schema_and_json_from_integration(paths.get("postgres"), integr_postgres::ToolPostgres::to_schema_json, integr_postgres::ToolPostgres::new_from_yaml, integrations_yaml_value.get("postgres"), &mut integrations).await?;
-    schema_and_json_from_integration(paths.get("chrome"), integr_chrome::ToolChrome::to_schema_json, integr_chrome::ToolChrome::new_from_yaml, integrations_yaml_value.get("chrome"), &mut integrations).await?;
-
-    Ok(integrations)
-}
-
-async fn schema_and_json_from_integration<T: Integration>(
-    yaml_path: Option<&PathBuf>,
-    schema_constructor: fn() -> Result<serde_json::Value, String>,
-    tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
-    value_from_integrations: Option<&serde_yaml::Value>,
-    data: &mut IndexMap<String, (serde_json::Value, serde_json::Value)>,
-) -> Result<(), String> {
-    let yaml_path = yaml_path.expect("No yaml path provided");
-    let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("Invalid file name").to_string();
-
-    let schema = match schema_constructor() {
-        Ok(schema) => schema,
-        Err(e) => {
-            let e = format!("Problem generating schema for {}: {}", tool_name, e);
-            warn!("{e}");
-            json!({"detail": e.to_string()})
+    let mut tools = IndexMap::new();
+    for (i_name, i) in integrations.iter() {
+        if !enabled.get(i_name).unwrap_or(&false) {
+            info!("Integration {} is disabled", i_name);
+            continue;
         }
-    };
+        let tool = i.to_tool();
+        tools.insert(i_name.clone(), Arc::new(AMutex::new(tool)));
+    }
+    Ok(tools)
+}
+
+pub async fn json_for_integration(
+    yaml_path: &PathBuf,
+    value_from_integrations: Option<&serde_yaml::Value>,
+    integration: &Box<dyn Integration + Send + Sync>,
+) -> Result<serde_json::Value, String> {
+    let tool_name = integration.name().clone();
 
     let value = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
-            Ok(yaml_value) => match tool_constructor(&yaml_value) {
-                Ok(integr) => match integr.to_json() {
-                    Ok(json_value) => json_value,
-                    Err(e) => {
-                        let e = format!("Problem converting integration to JSON for {}: {}", tool_name, e);
-                        warn!("{e}");
-                        json!({"detail": e.to_string()})
-                    }
-                },
-                Err(e) => {
-                    let e = format!("Problem constructing tool from {}: {}", yaml_path.display(), e);
-                    warn!("{e}");
-                    json!({"detail": e.to_string()})
-                }
-            },
+            Ok(value) => integration.from_yaml_validate_to_json(&value).unwrap_or_else(|e| {
+                let e = format!("Problem converting integration to JSON: {}", e);
+                json!({"detail": e.to_string()})
+            }),
             Err(e) => {
                 let e = format!("Problem reading YAML from {}: {}", yaml_path.display(), e);
-                warn!("{e}");
                 json!({"detail": e.to_string()})
             }
         }
@@ -183,36 +155,27 @@ async fn schema_and_json_from_integration<T: Integration>(
     };
 
     let value_from_integrations = value_from_integrations.map_or(json!({"detail": format!("tool {tool_name} is not defined in integrations.yaml")}), |value| {
-        match tool_constructor(&value) {
-            Ok(tool) => match tool.to_json() {
-                Ok(json_value) => json_value,
-                Err(e) => {
-                    let e = format!("Problem converting integration to JSON for {}: {}", tool_name, e);
-                    warn!("{e}");
-                    json!({"detail": e.to_string()})
-                }
-            },
-            Err(e) => {
-                warn!("Problem in {}: {}", yaml_path.display(), e);
-                json!({"detail": e.to_string()})
-            }
-        }
+        integration.from_yaml_validate_to_json(value).unwrap_or_else(|e| {
+            let e = format!("Problem converting integration to JSON: {}", e);
+            json!({"detail": e.to_string()})
+        })
     });
 
     match (value.get("detail"), value_from_integrations.get("detail")) {
         (None, None) => {
-            return Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."));
+            Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."))
         },
         (Some(_), None) => {
-            data.insert(tool_name, (schema, value_from_integrations));
+            Ok(value_from_integrations)
         },
         (None, Some(_)) => {
-            data.insert(tool_name, (schema, value));
+            Ok(value)
         }
         (Some(_), Some(_)) => {
-            data.insert(tool_name, (schema, value));
+            Ok(value)
         }
     }
+<<<<<<< HEAD
 
     Ok(())
 }
@@ -270,6 +233,8 @@ async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
     }
 
     Ok(())
+=======
+>>>>>>> 9b1345a1 (simplified code)
 }
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.

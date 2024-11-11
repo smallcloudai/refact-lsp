@@ -8,9 +8,11 @@ use serde_yaml;
 use std::path::{Path, PathBuf};
 use tracing::{error, warn};
 use crate::global_context::GlobalContext;
-use crate::integrations::DEFAULT_INTEGRATION_VALUES;
+use crate::integrations::{get_empty_integrations, get_integration_path};
+
 
 const DEFAULT_CHECKSUM_FILE: &str = "default-checksums.yaml";
+
 
 pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> String {
     let mut results = Vec::new();
@@ -39,10 +41,11 @@ pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> St
         results.push(format!("Error creating directory {:?}: {}", integrations_d, e));
     }
     let integrations_enabled = cache_dir.join("integrations-enabled.yaml");
-
-    for (file_name, content) in DEFAULT_INTEGRATION_VALUES {
-        let file_path = integrations_d.join(file_name);
-        if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, content).await {
+    let integrations = get_empty_integrations();
+    
+    for (file_name, content) in integrations.iter().map(|(k, v)| (k.clone(), v.default_value())) {
+        let file_path = get_integration_path(&cache_dir, &file_name);
+        if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, &content).await {
             warn!("{}", e);
             results.push(format!("Error processing {:?}: {}", file_path, e));
         } else {

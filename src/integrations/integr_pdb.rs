@@ -32,8 +32,9 @@ pub struct IntegrationPdb {
     pub python_path: Option<String>,
 }
 
+#[derive(Default)]
 pub struct ToolPdb {
-    integration_pdb: IntegrationPdb,
+    pub integration_pdb: IntegrationPdb,
 }
 
 pub struct PdbSession {
@@ -57,21 +58,38 @@ impl IntegrationSession for PdbSession
 }
 
 impl Integration for ToolPdb {
-    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
-        let integration_pdb = serde_yaml::from_value::<IntegrationPdb>(v.clone()).map_err(|e| {
+    fn name(&self) -> String {
+        "pdb".to_string()
+    }
+
+    fn update_from_json(&mut self, value: &Value) -> Result<(), String> {
+        let integration_pdb = serde_json::from_value::<IntegrationPdb>(value.clone())
+            .map_err(|e|e.to_string())?;
+        self.integration_pdb = integration_pdb;
+        Ok(())
+    }
+
+    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+        let integration_github = serde_yaml::from_value::<IntegrationPdb>(value.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
-        Ok(Self { integration_pdb })
+        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
     }
-    
+
+    fn to_tool(&self) -> Box<dyn Tool + Send> {
+        Box::new(ToolPdb {integration_pdb: self.integration_pdb.clone()}) as Box<dyn Tool + Send>
+    }
+
     fn to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_pdb).map_err(|e| e.to_string())
     }
 
-    fn to_schema_json() -> Result<Value, String> {
-        json_schema::<IntegrationPdb>().map_err(|e| e.to_string())
+    fn to_schema_json(&self) -> Value {
+        json_schema::<IntegrationPdb>().unwrap()
     }
+    fn default_value(&self) -> String { DEFAULT_PDB_INTEGRATION_YAML.to_string() }
+    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/919/919852.png".to_string() }
 }
 
 #[async_trait]
@@ -111,6 +129,15 @@ impl Tool for ToolPdb {
         ]))
     }
 
+    fn command_to_match_against_confirm_deny(
+        &self,
+        args: &HashMap<String, Value>,
+    ) -> Result<String, String> {
+        let commmand = parse_command(args)?; // todo: fix typo "commmand"
+        let command_args = split_command(&commmand)?;
+        Ok(command_args.join(" "))
+    }
+
     fn tool_description(&self) -> ToolDesc {
         ToolDesc {
             name: "pdb".to_string(),
@@ -126,15 +153,6 @@ impl Tool for ToolPdb {
             ],
             parameters_required: vec!["command".to_string()],
         }
-    }
-
-    fn command_to_match_against_confirm_deny(
-        &self,
-        args: &HashMap<String, Value>,
-    ) -> Result<String, String> {
-        let commmand = parse_command(args)?;
-        let command_args = split_command(&commmand)?;
-        Ok(command_args.join(" "))
     }
 }
 
@@ -281,7 +299,7 @@ fn format_error(error_title: &str, error: &str) -> String
     }
 }
 
-pub const DEFAULT_PDB_INTEGRATION_YAML: &str = r#"
+const DEFAULT_PDB_INTEGRATION_YAML: &str = r#"
 # Python debugger
 
 # python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"

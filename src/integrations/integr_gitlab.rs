@@ -24,26 +24,44 @@ pub struct IntegrationGitLab {
     pub GITLAB_TOKEN: String,
 }
 
+#[derive(Default)]
 pub struct ToolGitlab {
-    integration_gitlab: IntegrationGitLab,
+    pub integration_gitlab: IntegrationGitLab,
 }
 
 impl Integration for ToolGitlab{
-    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
-        let integration_gitlab = serde_yaml::from_value::<IntegrationGitLab>(v.clone()).map_err(|e| {
+    fn name(&self) -> String {
+        "gitlab".to_string()
+    }
+
+    fn update_from_json(&mut self, value: &Value) -> Result<(), String> {
+        let integration_gitlab = serde_json::from_value::<IntegrationGitLab>(value.clone())
+            .map_err(|e|e.to_string())?;
+        self.integration_gitlab = integration_gitlab;
+        Ok(())
+    }
+
+    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+        let integration_gitlab = serde_yaml::from_value::<IntegrationGitLab>(value.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
-        Ok(Self { integration_gitlab })
+        serde_json::to_value(&integration_gitlab).map_err(|e| e.to_string())
+    }
+
+    fn to_tool(&self) -> Box<dyn Tool + Send> {
+        Box::new(ToolGitlab {integration_gitlab: self.integration_gitlab.clone()}) as Box<dyn Tool + Send>
     }
 
     fn to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_gitlab).map_err(|e| e.to_string())
     }
     
-    fn to_schema_json() -> Result<Value, String> {
-        json_schema::<IntegrationGitLab>().map_err(|e| e.to_string())
+    fn to_schema_json(&self) -> Value {
+        json_schema::<IntegrationGitLab>().unwrap()
     }
+    fn default_value(&self) -> String { DEFAULT_GITLAB_INTEGRATION_YAML.to_string() }
+    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968853.png".to_string() }
 }
 
 #[async_trait]
@@ -134,7 +152,7 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
     Ok(parsed_args)
 }
 
-pub const DEFAULT_GITLAB_INTEGRATION_YAML: &str = r#"
+const DEFAULT_GITLAB_INTEGRATION_YAML: &str = r#"
 # GitLab integration: install on mac using "brew install glab"
 
 # GITLAB_TOKEN: "glpat-xxx"                   # To get a token, check out https://docs.gitlab.com/ee/user/profile/personal_access_tokens

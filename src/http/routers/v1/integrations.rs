@@ -11,14 +11,15 @@ use std::fs;
 use std::io::Read;
 #[allow(deprecated)]
 use base64::encode;
+use indexmap::IndexMap;
 use reqwest::Client;
 use tokio::fs as async_fs;
 use tracing::info;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::integrations::{integrations_paths, load_integration_schema_and_json, validate_integration_value, INTEGRATION_ICONS};
-use crate::yaml_configs::create_configs::{integrations_enabled_cfg, write_yaml_value};
+use crate::integrations::{get_empty_integrations, get_integration_path, get_integrations, json_for_integration, validate_integration_value};
+use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
 
 #[derive(Serialize, Deserialize)]
@@ -35,7 +36,24 @@ struct IntegrationIcon {
     value: String,
 }
 
-pub async fn get_image_base64(
+async fn load_integration_schema_and_json(
+    gcx: Arc<ARwLock<GlobalContext>>,
+) -> Result<IndexMap<String, (Value, Value)>, String> {
+    let integrations = get_empty_integrations();
+    let cache_dir = gcx.read().await.cache_dir.clone();
+    let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
+
+    let mut results = IndexMap::new();
+    for (i_name, i) in integrations.iter() {
+        let path = get_integration_path(&cache_dir, &i_name);
+        let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
+        results.insert(i_name.clone(), (i.to_schema_json(), j_value));
+    }
+    
+    Ok(results)
+}
+
+async fn get_image_base64(
     cache_dir: &PathBuf, 
     icon_name: &str, 
     icon_url: &str,
@@ -88,14 +106,17 @@ pub async fn handle_v1_integrations_icons(
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let cache_dir = gcx.read().await.cache_dir.clone();
+    let integrations = get_integrations(gcx.clone()).await.map_err(|e|{
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    })?;
     
     let mut results = vec![];
-    for (integr, icon_url) in INTEGRATION_ICONS {
-        let image_base64 = get_image_base64(&cache_dir, &integr, icon_url).await.map_err(|e|{
+    for (i_name, i) in integrations.iter() {
+        let image_base64 = get_image_base64(&cache_dir, i_name, &i.icon_link()).await.map_err(|e|{
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get image: {}", e))
         })?;
         results.push(IntegrationIcon {
-            name: integr.to_string(),
+            name: i_name.clone(),
             value: image_base64,
         });
     }
@@ -112,7 +133,6 @@ pub async fn handle_v1_integrations(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-
     let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
     })?;
@@ -168,14 +188,12 @@ pub async fn handle_v1_integrations_save(
             .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
             .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR converting JSON to YAML: {}", e)))?;
 
-        let yaml_value = validate_integration_value(&post.name, yaml_value)
+        let yaml_value = validate_integration_value(&post.name, yaml_value).await
             .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR validating integration value: {}", e)))?;
 
-        let integr_paths = integrations_paths(gcx.clone()).await;
-        let path = integr_paths.get(&post.name)
-            .ok_or(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("Integration {} not found", post.name)))?;
+        let path = get_integration_path(&cache_dir, &post.name);
 
-        write_yaml_value(path, &yaml_value).await.map_err(|e|{
+        write_yaml_value(&path, &yaml_value).await.map_err(|e|{
             ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e))
         })?;
     }

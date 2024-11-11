@@ -37,8 +37,9 @@ pub struct IntegrationChrome {
     pub headless: bool,
 }
 
+#[derive(Default)]
 pub struct ToolChrome {
-    integration_chrome: IntegrationChrome,
+    pub integration_chrome: IntegrationChrome,
 }
 
 fn default_headless() -> bool { true }
@@ -74,27 +75,40 @@ impl IntegrationSession for ChromeSession
     fn is_expired(&self) -> bool { false }
 }
 
-impl ToolChrome {
-    pub fn new_from_yaml(v: &serde_yaml::Value, supports_clicks: bool,) -> Result<Self, String> {
 impl Integration for ToolChrome {
-    fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
-        let integration_chrome = serde_yaml::from_value::<IntegrationChrome>(v.clone()).map_err(|e| {
+    fn name(&self) -> String {
+        "chrome".to_string()
+    }
+
+    fn update_from_json(&mut self, value: &Value) -> Result<(), String> {
+        let integration_github = serde_json::from_value::<IntegrationChrome>(value.clone())
+            .map_err(|e|e.to_string())?;
+        self.integration_chrome = integration_github;
+        Ok(())
+    }
+
+    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+        let integration_github = serde_yaml::from_value::<IntegrationChrome>(value.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
-        Ok(Self {
-            integration_chrome,
-            supports_clicks,
-        })
+        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    }
+
+    fn to_tool(&self) -> Box<dyn Tool + Send> {
+        Box::new(ToolChrome {integration_chrome: self.integration_chrome.clone()}) as Box<dyn Tool + Send>
     }
 
     fn to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_chrome).map_err(|e| e.to_string())
     }
 
-    fn to_schema_json() -> Result<Value, String> {
-        json_schema::<IntegrationChrome>().map_err(|e| e.to_string())
+    fn to_schema_json(&self) -> Value {
+        json_schema::<IntegrationChrome>().unwrap()
     }
+
+    fn default_value(&self) -> String { DEFAULT_CHROME_INTEGRATION_YAML.to_string() }
+    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/732/732205.png".to_string() }
 }
 
 #[async_trait]
@@ -554,7 +568,7 @@ async fn screenshot_jpeg_base64(tab: &Arc<Tab>, capture_beyond_viewport: bool) -
     MultimodalElement::new("image/jpeg".to_string(), jpeg_data)
 }
 
-pub const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
+const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
 # Chrome integration
 
 # This can be path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read
