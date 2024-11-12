@@ -245,7 +245,8 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             },
             "similar_models": [
-                "claude-3-5-sonnet-20240620"
+                "claude-3-5-sonnet-20240620",
+                "claude-3-5-sonnet-20241022"
             ]
         },
         "claude-3-5-sonnet-20241022": {

@@ -64,7 +64,7 @@ pub async fn run_at_commands(
             continue;
         }
         let mut content = msg.content.content_text_only();
-        let content_n_tokens = msg.content.count_tokens(tokenizer.clone(), &None).unwrap_or(0) as usize;
+        let content_n_tokens = msg.content.count_tokens(tokenizer.clone(), "openai").unwrap_or(0) as usize;
 
         let mut context_limit = reserve_for_context / messages_with_at.max(1);
         context_limit = context_limit.saturating_sub(content_n_tokens);
@@ -109,7 +109,7 @@ pub async fn run_at_commands(
                 plain_text_messages,
                 tokenizer.clone(),
                 tokens_limit_plain,
-                &None,
+                "openai",
             ).await;
             for m in pp_plain_text {
                 // OUTPUT: plain text after all custom messages
@@ -159,7 +159,7 @@ pub async fn run_at_commands(
 
     ccx.lock().await.pp_skeleton = false;
 
-    return (rebuilt_messages.clone(), user_msg_starts, any_context_produced)
+    (rebuilt_messages.clone(), user_msg_starts, any_context_produced)
 }
 
 pub async fn correct_at_arg(

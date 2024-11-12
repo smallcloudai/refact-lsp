@@ -61,7 +61,6 @@ async fn create_chat_post_and_scratchpad(
         subchat_tool_parameters: tconfig.subchat_tool_parameters.clone(),
         postprocess_parameters: PostprocessSettings::new(),
         chat_id: "".to_string(),
-        style: None,
     };
 
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality, supports_clicks) = lookup_chat_scratchpad(
@@ -187,7 +186,7 @@ async fn chat_interaction_non_stream(
             )
         };
 
-        let content = chat_content_raw_from_value(content_value).and_then(|c|c.to_internal_format())
+        let (content, _chat_messages) = chat_content_raw_from_value(content_value).and_then(|c|c.to_internal_format())
             .map_err(|e| format!("error parsing model's output: {}", e))?;
 
         let mut ch_results = vec![];
@@ -270,7 +269,7 @@ pub async fn subchat_single(
         error!("Error loading compiled_in_tools: {:?}", e);
         vec![]
     });
-    let tools = tools_desclist.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>();
+    let tools = tools_desclist.into_iter().map(|x|x.into_openai_style(true)).collect::<Vec<_>>();
     info!("tools_subset {:?}", tools_subset);
     info!("tools_turned_on_by_cmdline_set {:?}", tools_turned_on_by_cmdline_set);
     info!("tools_on_intersection {:?}", tools_on_intersection);

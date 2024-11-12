@@ -99,10 +99,11 @@ pub async fn run_tools_locally(
     ccx: Arc<AMutex<AtCommandsContext>>,
     at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool+Send>>>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
+    at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (new_messages, tools_runned) = run_tools( // todo: fix typo "runned"
         ccx, at_tools, tokenizer, maxgen, original_messages, style
@@ -164,16 +165,21 @@ pub async fn run_tools(
             }
         };
 
-        let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
-            Ok(args) => args,
-            Err(e) => {
-                let tool_failed_message = tool_answer(
-                    format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
-                );
-                generated_tool.push(tool_failed_message);
-                continue;
+        let args = if t_call.function.arguments.trim().is_empty() {
+            HashMap::new()
+        } else {
+            match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
+                Ok(args) => args,
+                Err(e) => {
+                    let tool_failed_message = tool_answer(
+                        format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
+                    );
+                    generated_tool.push(tool_failed_message);
+                    continue;
+                }
             }
         };
+        
         info!("tool use {}({:?})", &t_call.function.name, args);
 
         let command_to_match = match {
@@ -282,7 +288,7 @@ async fn pp_run_tools(
     context_files_for_pp: &mut Vec<ContextFile>,
     tokens_for_rag: usize,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    style: &Option<String>,
+    style: &str,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut generated_tool = generated_tool.to_vec();
     let mut generated_other = generated_other.to_vec();
