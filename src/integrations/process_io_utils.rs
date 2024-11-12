@@ -110,28 +110,3 @@ pub fn last_n_lines(msg: &str, n: usize) -> String {
 
     output
 }
-
-pub async fn kill_process_and_children(process: &Child, process_name4log: &str) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-
-        let process_id = process.id().ok_or("Failed to get process id")? as i32;
-        let pid = Pid::from_raw(process_id);
-        kill(pid, Signal::SIGTERM).map_err(|e| format!("Failed to kill '{process_name4log}' and its children. Error: {}", e))?;
-    }
-
-    // todo: test on windows
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        let pid = process.id().expect("Failed to get process id");
-        Command::new("taskkill")
-            .args(&["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .map_err(|e| format!("Failed to kill tool '{process_name4log}' and its children. Error: {}. Try Again", e))?;
-    }
-
-    Ok(())
-}
