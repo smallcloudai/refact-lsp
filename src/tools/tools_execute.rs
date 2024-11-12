@@ -51,7 +51,7 @@ pub async fn run_tools(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let gcx = ccx.lock().await.global_context.clone();
     let at_tools = crate::tools::tools_description::tools_merged_and_filtered(gcx.clone()).await?;
@@ -214,7 +214,7 @@ async fn pp_run_tools(
     context_files_for_pp: &mut Vec<ContextFile>,
     tokens_for_rag: usize,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    style: &Option<String>,
+    style: &str,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut generated_tool = generated_tool.to_vec();
     let mut generated_other = generated_other.to_vec();

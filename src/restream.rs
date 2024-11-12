@@ -17,8 +17,10 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::telemetry::telemetry_structs;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::caps::get_api_key;
+use crate::forward_to_anthropic_endpoint::{forward_to_anthropic_endpoint, forward_to_anthropic_endpoint_streaming};
 use crate::forward_to_hf_endpoint::{forward_to_hf_style_endpoint, forward_to_hf_style_endpoint_streaming};
 use crate::forward_to_openai_endpoint::{forward_to_openai_style_endpoint, forward_to_openai_style_endpoint_streaming};
+
 
 async fn _get_endpoint_and_stuff_from_model_name(
     gcx: Arc<ARwLock<crate::global_context::GlobalContext>>,
@@ -90,12 +92,14 @@ async fn get_model_says(
 
     match endpoint_style.as_str() {
         "hf" => forward_to_hf_style_endpoint(
-            save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &parameters,
+            save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &parameters
         ).await,
-        "anthropic" => unimplemented!(), // todo
+        "anthropic" => forward_to_anthropic_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, endpoint_chat_passthrough, &parameters
+        ).await,
         _ => {
             forward_to_openai_style_endpoint(
-                save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &endpoint_chat_passthrough, &parameters,  // includes n
+                save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &endpoint_chat_passthrough, &parameters  // includes n
             ).await
         }
     }
@@ -366,7 +370,15 @@ pub async fn scratchpad_interaction_stream(
                     &endpoint_template,
                     &parameters,
                 ).await,
-                "anthropic" => unimplemented!(), // todo
+                "anthropic" => forward_to_anthropic_endpoint_streaming(
+                    &mut save_url,
+                    bearer.clone(),
+                    &model_name,
+                    prompt.as_str(),
+                    &client,
+                    &endpoint_chat_passthrough,
+                    &parameters,
+                ).await,
                 _ => forward_to_openai_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),

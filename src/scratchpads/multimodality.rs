@@ -42,9 +42,8 @@ impl MultimodalElement {
         MultimodalElement::new("text".to_string(), openai_text.text)
     }
 
-    pub fn to_orig(&self, style: &Option<String>) -> ChatMultimodalElement {
-        let style = style.clone().unwrap_or("openai".to_string());
-        match style.as_str() {
+    pub fn to_orig(&self, style: &str) -> ChatMultimodalElement {
+        match style {
             "openai" => {
                 if self.is_text() {
                     self.to_openai_text()
@@ -76,16 +75,15 @@ impl MultimodalElement {
         })
     }
 
-    pub fn count_tokens(&self, tokenizer: Option<&RwLockReadGuard<Tokenizer>>, style: &Option<String>) -> Result<i32, String> {
+    pub fn count_tokens(&self, tokenizer: Option<&RwLockReadGuard<Tokenizer>>, style: &str) -> Result<i32, String> {
         if self.is_text() {
             if let Some(tokenizer) = tokenizer {
                 Ok(count_tokens_simple_text(&tokenizer, &self.m_content) as i32)
             } else {
-                return Err("count_tokens() received no tokenizer".to_string());
+                Err("count_tokens() received no tokenizer".to_string())
             }
         } else if self.is_image() {
-            let style = style.clone().unwrap_or("openai".to_string());
-            match style.as_str() {
+            match style {
                 "openai" => {
                     calculate_image_tokens_openai(&self.m_content, "high")
                 },
@@ -171,7 +169,7 @@ impl ChatContent {
         }
     }
 
-    pub fn size_estimate(&self, tokenizer: Arc<RwLock<Tokenizer>>, style: &Option<String>) -> usize {
+    pub fn size_estimate(&self, tokenizer: Arc<RwLock<Tokenizer>>, style: &str) -> usize {
         match self {
             ChatContent::SimpleText(text) => text.len(),
             ChatContent::Multimodal(_elements) => {
@@ -181,7 +179,7 @@ impl ChatContent {
         }
     }
 
-    pub fn count_tokens(&self, tokenizer: Arc<RwLock<Tokenizer>>, style: &Option<String>) -> Result<i32, String> {
+    pub fn count_tokens(&self, tokenizer: Arc<RwLock<Tokenizer>>, style: &str) -> Result<i32, String> {
         let tokenizer_lock = tokenizer.read().unwrap();
         match self {
             ChatContent::SimpleText(text) => Ok(count_tokens_simple_text(&tokenizer_lock, text) as i32),
@@ -192,7 +190,7 @@ impl ChatContent {
         }
     }
 
-    pub fn into_raw(&self, style: &Option<String>) -> ChatContentRaw {
+    pub fn into_raw(&self, style: &str) -> ChatContentRaw {
         match self {
             ChatContent::SimpleText(text) => ChatContentRaw::SimpleText(text.clone()),
             ChatContent::Multimodal(elements) => {
@@ -254,14 +252,17 @@ impl ChatMessage {
         }
     }
 
-    pub fn into_value(&self, style: &Option<String>) -> Value {
+    pub fn into_value(&self, style: &str) -> Value {
         let mut dict = serde_json::Map::new();
         let chat_content_raw = self.content.into_raw(style);
 
         dict.insert("role".to_string(), Value::String(self.role.clone()));
         dict.insert("content".to_string(), json!(chat_content_raw));
-        dict.insert("tool_calls".to_string(), json!(self.tool_calls.clone()));
-        dict.insert("tool_call_id".to_string(), Value::String(self.tool_call_id.clone()));
+        
+        if style == "openai" {
+            dict.insert("tool_calls".to_string(), json!(self.tool_calls.clone()));
+            dict.insert("tool_call_id".to_string(), Value::String(self.tool_call_id.clone()));
+        }
 
         Value::Object(dict)
     }

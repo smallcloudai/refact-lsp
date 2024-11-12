@@ -61,6 +61,7 @@ pub struct ChatPassthrough {
     pub global_context: Arc<ARwLock<GlobalContext>>,
     pub allow_at: bool,
     pub supports_tools: bool,
+    pub endpoint_style: String,
 }
 
 impl ChatPassthrough {
@@ -71,6 +72,7 @@ impl ChatPassthrough {
         global_context: Arc<ARwLock<GlobalContext>>,
         allow_at: bool,
         supports_tools: bool,
+        endpoint_style: &str,
     ) -> Self {
         ChatPassthrough {
             t: HasTokenizerAndEot::new(tokenizer),
@@ -82,6 +84,7 @@ impl ChatPassthrough {
             global_context,
             allow_at,
             supports_tools,
+            endpoint_style: endpoint_style.to_string(),
         }
     }
 }
@@ -107,7 +110,7 @@ impl ScratchpadAbstract for ChatPassthrough {
             let ccx_locked = ccx.lock().await;
             (ccx_locked.n_ctx, ccx_locked.global_context.clone())
         };
-        let style = self.post.style.clone();
+        let style = self.endpoint_style.clone();
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {

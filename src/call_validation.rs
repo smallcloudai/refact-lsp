@@ -182,8 +182,6 @@ pub struct ChatPost {
     #[allow(dead_code)]
     #[serde(default)]
     pub chat_id: String,
-    #[serde(default)]
-    pub style: Option<String>,
 }
 
 fn default_true() -> bool {

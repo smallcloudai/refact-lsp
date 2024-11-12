@@ -60,7 +60,6 @@ async fn create_chat_post_and_scratchpad(
         subchat_tool_parameters: tconfig.subchat_tool_parameters.clone(),
         postprocess_parameters: PostprocessSettings::new(),
         chat_id: "".to_string(),
-        style: None,
     };
 
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
