@@ -9,12 +9,13 @@ use serde::Deserialize;
 use async_trait::async_trait;
 use tokio::process::Command;
 use tracing::info;
-
+use process_wrap::tokio::{TokioChildWrapper, TokioCommandWrap, KillOnDrop, ProcessGroup};
+use similar::DiffableStr;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_description::{ToolParam, Tool, ToolDesc};
 use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
 use crate::global_context::GlobalContext;
-use crate::integrations::process_io_utils::{kill_process_and_children, blocking_read_until_token_or_timeout, is_someone_listening_on_that_tcp_port};
+use crate::integrations::process_io_utils::{blocking_read_until_token_or_timeout, is_someone_listening_on_that_tcp_port};
 use crate::integrations::sessions::IntegrationSession;
 use crate::postprocessing::pp_command_output::{CmdlineOutputFilter, output_mini_postprocessing};
 
@@ -94,7 +95,7 @@ pub fn cmdline_tool_from_yaml_value(
 pub struct CmdlineSession {
     cmdline_string: String,
     cmdline_workdir: String,
-    cmdline_process: tokio::process::Child,
+    cmdline_process: Box<dyn TokioChildWrapper>,
     #[allow(dead_code)]
     cmdline_stdout: BufReader<tokio::process::ChildStdout>,
     #[allow(dead_code)]
@@ -236,8 +237,8 @@ async fn execute_background_command(
             let session = session_locked.as_any_mut().downcast_mut::<CmdlineSession>().unwrap();
             actions_log.push_str(&format!("Stopping it...\n"));
             let t0 = tokio::time::Instant::now();
-            tracing::info!("SERVICE STOP workdir {}:\n{:?}", session.cmdline_workdir, session.cmdline_string);
-            match kill_process_and_children(&session.cmdline_process, service_name).await {
+            info!("SERVICE STOP workdir {}:\n{:?}", session.cmdline_workdir, session.cmdline_string);
+            match Box::into_pin(session.cmdline_process.kill()).await {
                 Ok(_) => {
                     actions_log.push_str(&format!("Success, it took {:.3}s to stop it.\n\n", t0.elapsed().as_secs_f64()));
                 },
@@ -262,18 +263,20 @@ async fn execute_background_command(
                 ));
             }
         }
-        tracing::info!("SERVICE START workdir {}:\n{:?}", cmdline_workdir, command_str);
+        info!("SERVICE START workdir {}:\n{:?}", cmdline_workdir, command_str);
         actions_log.push_str(&format!("Starting service with the following command line:\n{}\n", command_str));
 
         let mut command = create_command_from_string(&command_str, cmdline_workdir).await?;
-        let mut process = command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        let mut process = TokioCommandWrap::from(command)
+            .wrap(ProcessGroup::leader())
+            .wrap(KillOnDrop)
             .spawn()
             .map_err(|e| format!("failed to create process: {e}"))?;
 
-        let mut stdout_reader = BufReader::new(process.stdout.take().ok_or("Failed to open stdout")?);
-        let mut stderr_reader = BufReader::new(process.stderr.take().ok_or("Failed to open stderr")?);
+        let mut stdout_reader = BufReader::new(process.stdout().take().ok_or("Failed to open stdout")?);
+        let mut stderr_reader = BufReader::new(process.stderr().take().ok_or("Failed to open stderr")?);
 
         let t0 = tokio::time::Instant::now();
 
@@ -342,7 +345,7 @@ async fn execute_background_command(
             gcx.write().await.integration_sessions.insert(session_key.to_string(), Arc::new(AMutex::new(session)));
         }
 
-        tracing::info!("SERVICE START LOG:\n{}", actions_log);
+        info!("SERVICE START LOG:\n{}", actions_log);
     }
 
     Ok(actions_log)
