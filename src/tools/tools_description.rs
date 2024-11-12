@@ -12,6 +12,7 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_gitlab::ToolGitlab;
+use crate::integrations::integr_jira::ToolJira;
 use crate::integrations::integr_pdb::ToolPdb;
 use crate::integrations::integr_chrome::ToolChrome;
 use crate::integrations::integr_postgres::ToolPostgres;
@@ -107,6 +108,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Resu
         }
         if let Some(gl_config) = integrations_value.get("gitlab") {
             tools_all.insert("gitlab".to_string(), Arc::new(AMutex::new(Box::new(ToolGitlab::new_from_yaml(gl_config)?) as Box<dyn Tool + Send>)));
+        }
+        if let Some(gl_config) = integrations_value.get("jira") {
+            tools_all.insert("jira".to_string(), Arc::new(AMutex::new(Box::new(ToolJira::new_from_yaml(gl_config)?) as Box<dyn Tool + Send>)));
         }
         if let Some(pdb_config) = integrations_value.get("pdb") {
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(ToolPdb::new_from_yaml(pdb_config)?) as Box<dyn Tool + Send>)));
@@ -297,6 +301,29 @@ tools:
       - name: "command"
         type: "string"
         description: 'Examples:\nglab issue create --description "hello world" --title "Testing glab integration"\nglab issue list --author @me\n'
+    parameters_required:
+      - "project_dir"
+      - "command"
+
+  - name: "jira"
+    agentic: true
+    experimental: true
+    description: "Access to jira command line command, to manage issues."
+    parameters:
+      - name: "project_dir"
+        type: "string"
+        description: "Look at system prompt for location of version control (.git folder) of the active file."
+      - name: "command"
+        type: "string"
+        description: |
+            Don't forget --no-input flag at the end of "issue create" and "issue edit" commands. Examples:
+            jira issue create --type "Task" --summary "Test task by refact" --label backlog --body "this is a test task created by refact" --no-input
+            jira issue list --created -7d
+            jira issue assign ISSUE-1 $(jira me)
+            jira issue edit ISSUE-1 -s"New updated summary" --no-input
+            jira issue move ISSUE-1 "In Progress"
+            jira issue comment add ISSUE-1 "My comment body"
+            jira sprint add SPRINT_ID ISSUE-1
     parameters_required:
       - "project_dir"
       - "command"

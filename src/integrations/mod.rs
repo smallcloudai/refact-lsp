@@ -1,5 +1,6 @@
 pub mod integr_github;
 pub mod integr_gitlab;
+pub mod integr_jira;
 pub mod integr_pdb;
 pub mod integr_chrome;
 pub mod sessions;
@@ -16,6 +17,7 @@ pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure 
 commands_need_confirmation:
   - "gh * delete*"
   - "glab * delete*"
+  - "jira * delete*"
   - "psql*[!SELECT]*"
 commands_deny:
   - "gh auth token*"
@@ -32,6 +34,12 @@ commands_deny:
 #gitlab:
 #   GITLAB_TOKEN: "glpat-xxx"                   # To get a token, check out https://docs.gitlab.com/ee/user/profile/personal_access_tokens
 #   glab_binary_path: "/opt/homebrew/bin/glab"  # Uncomment to set a custom path for the glab binary, defaults to "glab"
+
+
+# Jira integration: install on mac using "brew tap ankitpokhrel/jira-cli && brew install jira-cli"
+#jira:
+#   JIRA_TOKEN: "ATAxxx"                      # To get a token, check out https://id.atlassian.com/manage-profile/security/api-tokens
+#   jira_binary_path: "/opt/homebrew/bin/jira"  # Uncomment to set a custom path for the jira binary, defaults to "jira"
 
 
 # Python debugger
