@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use async_stream::stream;
 use futures::StreamExt;
 use hyper::{Body, Response, StatusCode};
+use reqwest::Client;
 use reqwest_eventsource::Event;
 use serde_json::json;
 use tracing::{error, info};
@@ -16,7 +17,8 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::telemetry::telemetry_structs;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::caps::get_api_key;
-
+use crate::forward_to_hf_endpoint::{forward_to_hf_style_endpoint, forward_to_hf_style_endpoint_streaming};
+use crate::forward_to_openai_endpoint::{forward_to_openai_style_endpoint, forward_to_openai_style_endpoint_streaming};
 
 async fn _get_endpoint_and_stuff_from_model_name(
     gcx: Arc<ARwLock<crate::global_context::GlobalContext>>,
@@ -61,12 +63,42 @@ async fn _get_endpoint_and_stuff_from_model_name(
     if !custom_endpoint_template.is_empty() {
         endpoint_template = custom_endpoint_template;
     }
-    return (
+    (
         api_key,
         endpoint_template,
         endpoint_style,
         endpoint_chat_passthrough,
     )
+}
+
+async fn get_model_says(
+    only_deterministic_messages: bool,
+    endpoint_style: String,
+    bearer: String,
+    model_name: &String,
+    prompt: &str,
+    client: &Client,
+    endpoint_template: &String,
+    endpoint_chat_passthrough: &String,
+    parameters: &SamplingParameters,
+    save_url: &mut String,
+) -> Result<serde_json::Value, String> {
+    if only_deterministic_messages {
+        *save_url = "only-det-messages".to_string();
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+
+    match endpoint_style.as_str() {
+        "hf" => forward_to_hf_style_endpoint(
+            save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &parameters,
+        ).await,
+        "anthropic" => unimplemented!(), // todo
+        _ => {
+            forward_to_openai_style_endpoint(
+                save_url, bearer.clone(), model_name, prompt, client, &endpoint_template, &endpoint_chat_passthrough, &parameters,  // includes n
+            ).await
+        }
+    }
 }
 
 pub async fn scratchpad_interaction_not_stream_json(
@@ -100,39 +132,19 @@ pub async fn scratchpad_interaction_not_stream_json(
 
     let mut save_url: String = String::new();
     let _ = slowdown_arc.acquire().await;
-    let mut model_says = if only_deterministic_messages {
-        save_url = "only-det-messages".to_string();
-        Ok(serde_json::Value::Object(serde_json::Map::new()))
-    } else if endpoint_style == "hf" {
-        crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &parameters,
-        ).await
-    } else {
-        crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint(
-            &mut save_url,
-            bearer.clone(),
-            &model_name,
-            &prompt,
-            &client,
-            &endpoint_template,
-            &endpoint_chat_passthrough,
-            &parameters,  // includes n
-        ).await
-    }.map_err(|e| {
+    
+    let mut model_says = get_model_says(
+        only_deterministic_messages, endpoint_style, bearer, &model_name, prompt, &client, &endpoint_template, &endpoint_chat_passthrough, &parameters, &mut save_url
+    ).await.map_err(|e|{
         tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
-                save_url.clone(),
-                scope.clone(),
-                false,
-                e.to_string(),
-            ));
+            save_url.clone(),
+            scope.clone(),
+            false,
+            e.to_string(),
+        ));
         ScratchError::new_but_skip_telemetry(StatusCode::INTERNAL_SERVER_ERROR, format!("forward_to_endpoint: {}", e))
     })?;
+    
     tele_storage.write().unwrap().tele_net.push(telemetry_structs::TelemetryNetwork::new(
         save_url.clone(),
         scope.clone(),
@@ -343,9 +355,9 @@ pub async fn scratchpad_interaction_stream(
             if only_deterministic_messages {
                 break;
             }
-            // info!("prompt: {:?}", prompt);
-            let event_source_maybe = if endpoint_style == "hf" {
-                crate::forward_to_hf_endpoint::forward_to_hf_style_endpoint_streaming(
+            
+            let event_source = match endpoint_style.as_str() {
+                "hf" => forward_to_hf_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -353,9 +365,9 @@ pub async fn scratchpad_interaction_stream(
                     &client,
                     &endpoint_template,
                     &parameters,
-                ).await
-            } else {
-                crate::forward_to_openai_endpoint::forward_to_openai_style_endpoint_streaming(
+                ).await,
+                "anthropic" => unimplemented!(), // todo
+                _ => forward_to_openai_style_endpoint_streaming(
                     &mut save_url,
                     bearer.clone(),
                     &model_name,
@@ -366,7 +378,8 @@ pub async fn scratchpad_interaction_stream(
                     &parameters,
                 ).await
             };
-            let mut event_source = match event_source_maybe {
+            
+            let mut event_source = match event_source {
                 Ok(event_source) => event_source,
                 Err(e) => {
                     let e_str = format!("forward_to_endpoint: {:?}", e);
