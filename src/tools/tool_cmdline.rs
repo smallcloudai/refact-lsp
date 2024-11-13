@@ -10,7 +10,7 @@ use serde::Deserialize;
 use async_trait::async_trait;
 use tokio::process::Command;
 use tracing::info;
-use process_wrap::tokio::{TokioChildWrapper, TokioCommandWrap, ProcessGroup};
+use process_wrap::tokio::*;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_description::{ToolParam, Tool, ToolDesc};
@@ -277,10 +277,12 @@ async fn execute_background_command(
         let mut command = create_command_from_string(&command_str, cmdline_workdir).await?;
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
-        let mut process = TokioCommandWrap::from(command)
-            .wrap(ProcessGroup::leader())
-            .spawn()
-            .map_err(|e| format!("failed to create process: {e}"))?;
+        let mut command_wrap = TokioCommandWrap::from(command);
+        #[cfg(unix)]
+        command_wrap.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command_wrap.wrap(JobObject);
+        let mut process = command_wrap.spawn().map_err(|e| format!("failed to create process: {e}"))?;
 
         let mut stdout_reader = BufReader::new(process.stdout().take().ok_or("Failed to open stdout")?);
         let mut stderr_reader = BufReader::new(process.stderr().take().ok_or("Failed to open stderr")?);
