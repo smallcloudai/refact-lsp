@@ -134,7 +134,7 @@ fn scratchpad_result_not_stream(
         } 
         
     } else if let Some(_) = model_says.get("content") { // anthropic style
-        Ok(json!({
+        let mut response = json!({
             "choices": [{
                 "index": 0,
                 "messages": {
@@ -144,7 +144,11 @@ fn scratchpad_result_not_stream(
                 // todo: maybe provide real finish reason in else case
                 "finish_reason": if model_says["stop_reason"] == "end_turn" { "stop" } else { "length" },
             }]
-        }))
+        });
+        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+            response["deterministic_messages"] = json!(det_msgs);
+        }
+        Ok(response)
         
     } else if let Some(err) = model_says.get("error") {
         return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", err)));
@@ -414,20 +418,47 @@ pub async fn scratchpad_interaction_stream(
             let mut finished: bool = false;
             let mut problem_reported = false;
             let mut was_correct_output_even_if_error = false;
+            let mut message_start: serde_json::Value = serde_json::Value::Null;
             // let mut test_countdown = 250;
             while let Some(event) = event_source.next().await {
                 match event {
                     Ok(Event::Open) => {},
                     Ok(Event::Message(message)) => {
-                        // info!("Message: {:#?}", message);
+                        info!("Message:\n{:#?}", message);
                         if message.data.starts_with("[DONE]") {
                             break;
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
+                        
+                        // for anthropic
+                        match message.event.as_str() {
+                            "message_start" => {
+                                message_start = json!({
+                                    "id": json["message"]["id"],
+                                    "object": "chat.completion.chunk",
+                                    "model": json["message"]["model"],
+                                    // "usage": json["message"]["usage"], todo: implement usage (event: message_delta)
+                                    "choices": [
+                                        {"index": 0, "delta": {"role": json["message"]["role"], "content": ""}}
+                                    ]
+                                });
+                            },
+                            "message_stop" => {
+                                finished = true;
+                                break;
+                            },
+                            "ping" | "content_block_stop" => {
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        
                         crate::global_context::look_for_piggyback_fields(gcx.clone(), &json).await;
                         let value_maybe = _push_streaming_json_into_scratchpad(
                             my_scratchpad,
                             &json,
+                            &message_start,
+                            message.event.as_str(),
                             &mut model_name,
                             &mut finished,
                             &mut was_correct_output_even_if_error,
@@ -540,6 +571,8 @@ pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
 fn _push_streaming_json_into_scratchpad(
     scratch: &mut Box<dyn ScratchpadAbstract>,
     json: &serde_json::Value,
+    message_start: &serde_json::Value,
+    event_type: &str,
     model_name: &mut String,
     finished: &mut bool,
     was_correct_output_even_if_error: &mut bool,
@@ -551,6 +584,7 @@ fn _push_streaming_json_into_scratchpad(
         value["model"] = json!(model_name.clone());
         *was_correct_output_even_if_error |= json.get("generated_text").is_some();
         Ok(value)
+        
     } else if let Some(choices) = json.get("choices") { // openai style
         let choice0 = &choices[0];
         let mut value: serde_json::Value;
@@ -577,6 +611,20 @@ fn _push_streaming_json_into_scratchpad(
         }
         value["model"] = json!(model_name.clone());
         Ok(value)
+        
+    } else if message_start.is_object() { // anthropic
+        let mut value = message_start.clone();
+        if event_type == "message_start" {
+            Ok(value)
+        } else {
+            value["choices"][0]["delta"] = json!({});
+            let delta = json["delta"].clone();
+            if delta["type"] == "text_delta" {
+                value["choices"][0]["delta"]["content"] = delta["text"].clone();
+            }
+            Ok(value)
+        }
+        
     } else if let Some(err) = json.get("error") {
         Err(format!("{}", err))
     } else if let Some(msg) = json.get("human_readable_message") {
