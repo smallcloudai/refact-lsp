@@ -23,9 +23,9 @@ fn embed_messages_and_tools_from_prompt(
             .collect::<Vec<_>>()
             .join("\n");
 
-        // if !system_string.is_empty() {
-        //     data["system"] = Value::String(system_string);
-        // }
+        if !system_string.is_empty() {
+            data["system"] = Value::String(system_string);
+        }
 
     }
     
