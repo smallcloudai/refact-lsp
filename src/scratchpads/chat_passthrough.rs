@@ -18,7 +18,7 @@ use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, system_prompt_add_workspace_info};
-
+use crate::tools::tools_description::{tool_description_list_from_yaml, tools_merged_and_filtered};
 
 const DEBUG: bool = false;
 
@@ -111,13 +111,16 @@ impl ScratchpadAbstract for ChatPassthrough {
             (ccx_locked.n_ctx, ccx_locked.global_context.clone())
         };
         let style = self.endpoint_style.clone();
+        let allow_experimental = gcx.read().await.cmdline.experimental;
+        let at_tools = tools_merged_and_filtered(gcx.clone()).await?;
+
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {
             (self.messages.clone(), self.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?;
+            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), at_tools.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?;
         };
         let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
@@ -186,7 +189,23 @@ impl ScratchpadAbstract for ChatPassthrough {
             } else {
                 None
             };
-            big_json["tools"] = serde_json::json!(tools);
+            let tools_enabled = match tools {
+                Some(tools) => {
+                    tools.iter().map(|t|t["function"]["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+                },
+                None => vec![]
+            };
+            info!("tools_enabled: {:?}", tools_enabled);
+            let tools_desc_list = tool_description_list_from_yaml(at_tools, &tools_enabled, allow_experimental).await?;
+            let tools_filtered = tools_desc_list.iter().filter(|t|tools_enabled.contains(&t.name)).cloned().collect::<Vec<_>>();
+            info!("tools_filtered: {:?}", tools_filtered);
+            
+            if self.endpoint_style == "anthropic" {
+                big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_anthropic_style()).collect::<Vec<_>>());
+            } else {
+                big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_openai_style(false)).collect::<Vec<_>>());
+            }
+            
             big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
             if DEBUG {
                 info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());

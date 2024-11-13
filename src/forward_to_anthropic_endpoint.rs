@@ -29,10 +29,9 @@ fn embed_messages_and_tools_from_prompt(
 
     }
     
-    // if let Some(tools) = big_json.get("tools") {
-    //     // todo: convert to anthropic format
-    //     data["tools"] = tools.clone();
-    // }
+    if let Some(tools) = big_json.get("tools") {
+        data["tools"] = tools.clone();
+    }
 }
 
 fn make_headers(bearer: &str) -> Result<HeaderMap, String> {
@@ -114,14 +113,12 @@ pub async fn forward_to_anthropic_endpoint_streaming(
 
     embed_messages_and_tools_from_prompt(&mut data, prompt);
     
-    info!("data:\n{:#?}", data);
-
     let builder = client.post(save_url.as_str())
         .headers(headers)
         .body(data.to_string());
     let event_source: EventSource = EventSource::new(builder).map_err(|e|
         format!("can't stream from {}: {}", save_url, e)
     )?;
-    // todo: has its own format of streaming, fix
+    
     Ok(event_source)
 }

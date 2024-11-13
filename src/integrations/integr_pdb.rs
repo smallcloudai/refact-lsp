@@ -108,6 +108,7 @@ impl Tool for ToolPdb {
                     name: "command".to_string(),
                     param_type: "string".to_string(),
                     description: "Examples:\npython -m pdb script.py\nbreak module_name.function_name\nbreak 10\ncontinue\nprint(variable_name)\nlist\nquit\n".to_string(),
+                    ..Default::default()
                 },
             ],
             parameters_required: vec!["command".to_string()],

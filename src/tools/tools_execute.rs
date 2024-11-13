@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use glob::Pattern;
+use indexmap::IndexMap;
 use tokio::sync::Mutex as AMutex;
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
@@ -12,7 +13,7 @@ use crate::call_validation::{ChatMessage, ChatContent, ContextEnum, ContextFile,
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
-use crate::tools::tools_description::commands_require_confirmation_rules_from_integrations_yaml;
+use crate::tools::tools_description::{commands_require_confirmation_rules_from_integrations_yaml, Tool};
 use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
 
@@ -48,13 +49,13 @@ pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_nam
 pub async fn run_tools(
     ccx: Arc<AMutex<AtCommandsContext>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
+    at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
     style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let gcx = ccx.lock().await.global_context.clone();
-    let at_tools = crate::tools::tools_description::tools_merged_and_filtered(gcx.clone()).await?;
     let n_ctx = ccx.lock().await.n_ctx;
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let tokens_for_rag = reserve_for_context;
