@@ -8,7 +8,7 @@ use hyper::{Body, Response, StatusCode};
 use reqwest::Client;
 use reqwest_eventsource::Event;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::{error, info, Value};
 
 use crate::call_validation::SamplingParameters;
 use crate::custom_error::ScratchError;
@@ -105,6 +105,62 @@ async fn get_model_says(
     }
 }
 
+fn scratchpad_result_not_stream(
+    model_says: &mut serde_json::Value,
+    scratchpad: &mut Box<dyn ScratchpadAbstract>,
+    only_deterministic_messages: bool,
+) -> Result<serde_json::Value, ScratchError> {
+    let scratchpad_result = if only_deterministic_messages {
+        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+            model_says["deterministic_messages"] = json!(det_msgs);
+            model_says["choices"] = serde_json::Value::Array(vec![]);
+        }
+        Ok(model_says.clone())
+        
+    } else if let Some(hf_arr) = model_says.as_array() {
+        let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let stopped = vec![false; choices.len()];
+        scratchpad.response_n_choices(choices, stopped)
+
+    } else if let Some(oai_choices) = model_says.get("choices") {
+        let choice0 = oai_choices.as_array().unwrap().get(0).unwrap();
+        if let Some(_msg) = choice0.get("message") {
+            if let Ok(det_msgs) = scratchpad.response_spontaneous() {
+                model_says["deterministic_messages"] = json!(det_msgs);
+            }
+            Ok(model_says.clone())
+        } else {
+            unreachable!()
+        } 
+        
+    } else if let Some(_) = model_says.get("content") { // anthropic style
+        Ok(json!({
+            "choices": [{
+                "index": 0,
+                "messages": {
+                    "role": model_says["role"],
+                    "content": model_says["content"]
+                },
+                // todo: maybe provide real finish reason in else case
+                "finish_reason": if model_says["stop_reason"] == "end_turn" { "stop" } else { "length" },
+            }]
+        }))
+        
+    } else if let Some(err) = model_says.get("error") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", err)));
+    } else if let Some(msg) = model_says.get("human_readable_message") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", msg)));
+    } else if let Some(msg) = model_says.get("detail") {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", msg)));
+    } else {
+        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("unrecognized response (1): {:?}", model_says)));
+    };
+    match scratchpad_result { 
+        Ok(x) => Ok(x),
+        Err(e) => Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("scratchpad: {}", e)))
+    }
+}
+
 pub async fn scratchpad_interaction_not_stream_json(
     ccx: Arc<AMutex<AtCommandsContext>>,
     scratchpad: &mut Box<dyn ScratchpadAbstract>,
@@ -158,63 +214,11 @@ pub async fn scratchpad_interaction_not_stream_json(
     info!("forward to endpoint {:.2}ms, url was {}", t2.elapsed().unwrap().as_millis() as f64, save_url);
     crate::global_context::look_for_piggyback_fields(gcx.clone(), &model_says).await;
 
-    let scratchpad_result: Result<serde_json::Value, String>;
-    if only_deterministic_messages {
-        if let Ok(det_msgs) = scratchpad.response_spontaneous() {
-            model_says["deterministic_messages"] = json!(det_msgs);
-            model_says["choices"] = serde_json::Value::Array(vec![]);
-        }
-        scratchpad_result = Ok(model_says.clone());
-    } else if let Some(hf_arr) = model_says.as_array() {
-        let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-        let stopped = vec![false; choices.len()];
-        scratchpad_result = scratchpad.response_n_choices(choices, stopped);
-
-    } else if let Some(oai_choices) = model_says.get("choices") {
-        let choice0 = oai_choices.as_array().unwrap().get(0).unwrap();
-        if let Some(_msg) = choice0.get("message") {
-            if let Ok(det_msgs) = scratchpad.response_spontaneous() {
-                model_says["deterministic_messages"] = json!(det_msgs);
-            }
-            // new style openai response, used in passthrough
-            scratchpad_result = Ok(model_says.clone());
-        } else {
-            // TODO: restore order using 'index'
-            // for oai_choice in oai_choices.as_array().unwrap() {
-            //     let index = oai_choice.get("index").unwrap().as_u64().unwrap() as usize;
-            // }
-            let choices = oai_choices.as_array().unwrap().iter().map(|x| x.get("text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-            let stopped = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
-            scratchpad_result = scratchpad.response_n_choices(choices, stopped);
-        }
-
-    } else if let Some(err) = model_says.get("error") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", err)
-        ));
-
-    } else if let Some(msg) = model_says.get("human_readable_message") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", msg)
-        ));
-
-    } else if let Some(msg) = model_says.get("detail") {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{}", msg)
-        ));
-
-    } else {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("unrecognized response (1): {:?}", model_says))
-        );
-    }
-
-    if let Err(problem) = scratchpad_result {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR,
-            format!("scratchpad: {}", problem))
-        );
-    }
-    return Ok(scratchpad_result.unwrap());
+    scratchpad_result_not_stream(
+        &mut model_says,
+        scratchpad,
+        only_deterministic_messages,
+    )
 }
 
 pub async fn scratchpad_interaction_not_stream(
@@ -254,7 +258,7 @@ pub async fn scratchpad_interaction_not_stream(
         .header("Content-Type", "application/json")
         .body(Body::from(txt))
         .unwrap();
-    return Ok(response);
+    Ok(response)
 }
 
 pub async fn scratchpad_interaction_stream(

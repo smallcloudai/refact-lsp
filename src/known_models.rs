@@ -184,7 +184,8 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             },
             "similar_models": [
-                "claude-3-5-sonnet-20240620"
+                "claude-3-5-sonnet-20240620",
+                "claude-3-5-sonnet-20241022"
             ]
         },
         "llama3/8b/instruct": {
@@ -345,6 +346,7 @@ pub const KNOWN_MODELS: &str = r####"
         "openai/gpt-4o-mini":     "Xenova/gpt-4o",
         "claude-3-5-sonnet":          "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer",
+        "claude-3-5-sonnet-20241022": "Xenova/claude-tokenizer",
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
         "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer"
     }

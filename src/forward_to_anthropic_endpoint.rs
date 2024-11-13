@@ -35,14 +35,17 @@ fn embed_messages_and_tools_from_prompt(
     // }
 }
 
-fn embed_bearer(
-    headers: &mut HeaderMap, bearer: &str
-) -> Result<(), String> {
+fn make_headers(bearer: &str) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json").unwrap());
+    // see https://docs.anthropic.com/en/api/versioning
+    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+
     if !bearer.is_empty() {
         headers.insert("x-api-key", HeaderValue::from_str(bearer)
             .map_err(|e| format!("Failed to insert header: {}", e))?);
     }
-    Ok(())
+    Ok(headers)
 }
 
 pub async fn forward_to_anthropic_endpoint(
@@ -55,10 +58,7 @@ pub async fn forward_to_anthropic_endpoint(
     sampling_parameters: &SamplingParameters,
 ) -> Result<Value, String> {
     *save_url = endpoint_chat_passthrough.clone();
-    let mut headers = HeaderMap::new();
-    
-    headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json").unwrap());
-    embed_bearer(&mut headers, bearer.as_str())?;
+    let headers = make_headers(bearer.as_str())?;
     
     let mut data = json!({
         "model": model_name,
@@ -103,14 +103,12 @@ pub async fn forward_to_anthropic_endpoint_streaming(
     sampling_parameters: &SamplingParameters,
 ) -> Result<EventSource, String> {
     *save_url = endpoint_chat_passthrough.clone();
-    let mut headers = HeaderMap::new();
-    
-    embed_bearer(&mut headers, bearer.as_str())?;
+    let headers = make_headers(bearer.as_str())?;
     
     let mut data = json!({
         "model": model_name,
         "stream": true,
-        // "temperature": sampling_parameters.temperature,
+        "temperature": sampling_parameters.temperature,
         "max_tokens": sampling_parameters.max_new_tokens,
     });
 
