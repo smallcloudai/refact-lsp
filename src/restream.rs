@@ -10,7 +10,7 @@ use reqwest_eventsource::Event;
 use serde_json::json;
 use tracing::{error, info, Value};
 
-use crate::call_validation::SamplingParameters;
+use crate::call_validation::{ChatMessage, SamplingParameters};
 use crate::custom_error::ScratchError;
 use crate::nicer_logs;
 use crate::scratchpad_abstract::ScratchpadAbstract;
@@ -20,7 +20,7 @@ use crate::caps::get_api_key;
 use crate::forward_to_anthropic_endpoint::{forward_to_anthropic_endpoint, forward_to_anthropic_endpoint_streaming};
 use crate::forward_to_hf_endpoint::{forward_to_hf_style_endpoint, forward_to_hf_style_endpoint_streaming};
 use crate::forward_to_openai_endpoint::{forward_to_openai_style_endpoint, forward_to_openai_style_endpoint_streaming};
-
+use crate::scratchpads::multimodality::AnthropicInputElement;
 
 async fn _get_endpoint_and_stuff_from_model_name(
     gcx: Arc<ARwLock<crate::global_context::GlobalContext>>,
@@ -133,14 +133,27 @@ fn scratchpad_result_not_stream(
             unreachable!()
         } 
         
-    } else if let Some(_) = model_says.get("content") { // anthropic style
+    } else if let Some(content) = model_says.get("content") { // anthropic style
+        let content_elements = if let Some(content_arr) = content.as_array() {
+            content_arr.clone()
+        } else {
+            vec![content.clone()]
+        };
+        let multimodal_elements: Vec<AnthropicInputElement> = serde_json::from_value(serde_json::Value::Array(content_elements)).map_err(|e|{
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Anthropic: failed to deserialize content: {:?}", e))
+        })?;
+        let role = model_says["role"].as_str().unwrap();
+        let chat_message = ChatMessage::from_anthropic_input(multimodal_elements, role);
+        
+        let mut message = json!({"role": role, "content": chat_message.content});
+        if let Some(t_calls) = chat_message.tool_calls {
+            message["tool_calls"] = json!(t_calls);
+        }
+        
         let mut response = json!({
             "choices": [{
                 "index": 0,
-                "messages": {
-                    "role": model_says["role"],
-                    "content": model_says["content"]
-                },
+                "message": message,
                 // todo: maybe provide real finish reason in else case
                 "finish_reason": if model_says["stop_reason"] == "end_turn" { "stop" } else { "length" },
             }]
