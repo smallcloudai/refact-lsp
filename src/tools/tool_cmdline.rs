@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::process::Stdio;
 use indexmap::IndexMap;
@@ -9,8 +10,8 @@ use serde::Deserialize;
 use async_trait::async_trait;
 use tokio::process::Command;
 use tracing::info;
-use process_wrap::tokio::{TokioChildWrapper, TokioCommandWrap, KillOnDrop, ProcessGroup};
-use similar::DiffableStr;
+use process_wrap::tokio::{TokioChildWrapper, TokioCommandWrap, ProcessGroup};
+
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_description::{ToolParam, Tool, ToolDesc};
 use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
@@ -100,6 +101,7 @@ pub struct CmdlineSession {
     cmdline_stdout: BufReader<tokio::process::ChildStdout>,
     #[allow(dead_code)]
     cmdline_stderr: BufReader<tokio::process::ChildStderr>,
+    service_name: String,
 }
 
 impl IntegrationSession for CmdlineSession {
@@ -107,6 +109,21 @@ impl IntegrationSession for CmdlineSession {
         self
     }
     fn is_expired(&self) -> bool { false }
+    fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
+        Box::new(async {
+            info!("SERVICE STOP workdir {}:\n{:?}", self.cmdline_workdir, self.cmdline_string);
+            let t0 = tokio::time::Instant::now();
+            match Box::into_pin(self.cmdline_process.kill()).await {
+                Ok(_) => {
+                    format!("Success, it took {:.3}s to stop it.\n\n", t0.elapsed().as_secs_f64())
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to kill service '{}'. Error: {}. Assuming process died on its own.", self.service_name, e);
+                    format!("Failed to kill service. Error: {}.\nAssuming process died on its own, let's continue.\n\n", e)
+                }
+            }
+        })
+    }
 }
 
 fn _replace_args(x: &str, args_str: &HashMap<String, String>) -> String {
@@ -236,17 +253,8 @@ async fn execute_background_command(
             let mut session_locked = session_arc.lock().await;
             let session = session_locked.as_any_mut().downcast_mut::<CmdlineSession>().unwrap();
             actions_log.push_str(&format!("Stopping it...\n"));
-            let t0 = tokio::time::Instant::now();
-            info!("SERVICE STOP workdir {}:\n{:?}", session.cmdline_workdir, session.cmdline_string);
-            match Box::into_pin(session.cmdline_process.kill()).await {
-                Ok(_) => {
-                    actions_log.push_str(&format!("Success, it took {:.3}s to stop it.\n\n", t0.elapsed().as_secs_f64()));
-                },
-                Err(e) => {
-                    tracing::warn!("Failed to kill service '{}'. Error: {}. Assuming process died on its own.", service_name, e);
-                    actions_log.push_str(&format!("Failed to kill service. Error: {}.\nAssuming process died on its own, let's continue.\n\n", e));
-                }
-            }
+            let stop_log = Box::into_pin(session.try_stop()).await;
+            actions_log.push_str(&stop_log);
         }
         gcx.write().await.integration_sessions.remove(&session_key);
         session_mb = None;
@@ -271,7 +279,6 @@ async fn execute_background_command(
         command.stderr(Stdio::piped());
         let mut process = TokioCommandWrap::from(command)
             .wrap(ProcessGroup::leader())
-            .wrap(KillOnDrop)
             .spawn()
             .map_err(|e| format!("failed to create process: {e}"))?;
 
@@ -341,6 +348,7 @@ async fn execute_background_command(
                 cmdline_workdir: cmdline_workdir.clone(),
                 cmdline_stdout: stdout_reader,
                 cmdline_stderr: stderr_reader,
+                service_name: service_name.to_string(),
             });
             gcx.write().await.integration_sessions.insert(session_key.to_string(), Arc::new(AMutex::new(session)));
         }
