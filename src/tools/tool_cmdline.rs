@@ -42,7 +42,9 @@ struct CmdlineToolConfig {
     #[serde(default = "_default_startup_wait")]
     startup_wait: u64,
     #[serde(default)]
-    startup_wait_keyword: Option<String>,
+    startup_phrase_success: Option<String>,
+    #[serde(default)]
+    startup_phrase_failure: Option<String>,
 }
 
 fn _default_timeout() -> u64 {
@@ -291,11 +293,12 @@ async fn execute_background_command(
             accumulated_stdout.push_str(&stdout_out);
             accumulated_stderr.push_str(&stderr_out);
 
-            // XXX rename keyword to phrase or something
-            if let Some(keyword) = &cfg.startup_wait_keyword {
-                if accumulated_stdout.contains(keyword) || accumulated_stderr.contains(keyword) {
-                    actions_log.push_str(&format!("Startup keyword '{}' found in output, success!\n\n", keyword));
-                    break;
+            for (result, phrase) in [("success", &cfg.startup_phrase_success), ("failed", &cfg.startup_phrase_failure)] {
+                if let Some(keyword) = phrase {
+                    if accumulated_stdout.contains(keyword) || accumulated_stderr.contains(keyword) {
+                        actions_log.push_str(&format!("Startup phrase '{}' found in output, {}!\n\n", keyword, result));
+                        break;
+                    }
                 }
             }
 
