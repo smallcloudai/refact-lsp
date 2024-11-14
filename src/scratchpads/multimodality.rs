@@ -42,6 +42,34 @@ impl MultimodalElement {
         MultimodalElement::new("text".to_string(), openai_text.text)
     }
 
+    pub fn from_anthropic_tool_use(el: MultimodalElementToolUseAnthropic) -> ChatMessage {
+        ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::SimpleText("".to_string()),
+            tool_calls: Some(vec![ChatToolCall {
+                id: el.id.clone(),
+                tool_type: "function".to_string(),
+                function: ChatToolFunction {
+                    arguments: el.input.to_string(),
+                    name: el.name.clone(),
+                }
+            }
+            ]),
+            tool_call_id: "".to_string(),
+            usage: None,
+        }
+    }
+
+    pub fn from_anthropic_tool_result(el: MultimodalElementToolResultAnthropic) -> ChatMessage {
+        ChatMessage {
+            role: "tool".to_string(),
+            content: ChatContent::SimpleText("".to_string()),
+            tool_calls: None,
+            tool_call_id: el.tool_use_id.clone(),
+            usage: None,
+        }
+    }
+    
     pub fn to_orig(&self, style: &str) -> ChatMultimodalElement {
         match style {
             "openai" => {
@@ -119,7 +147,7 @@ pub struct MultimodalElementImageOpenAI {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
-pub struct MultimodalElementToolResult {
+pub struct MultimodalElementToolResultAnthropic {
     #[serde(rename = "type")]
     pub content_type: String, // type="tool_result"
     pub tool_use_id: String,
@@ -172,6 +200,8 @@ pub fn split_anthropic_input_elements(els: Vec<AnthropicInputElement>) -> (Vec<M
 pub enum ChatMultimodalElement {
     MultimodalElementText(MultimodalElementText),
     MultimodalElementImageOpenAI(MultimodalElementImageOpenAI),
+    MultimodalElementToolUseAnthropic(MultimodalElementToolUseAnthropic),
+    MultimodalElementToolResultAnthropic(MultimodalElementToolResultAnthropic),
     MultimodalElement(MultimodalElement),
 }
 
@@ -189,12 +219,12 @@ impl Default for ChatContentRaw {
 }
 
 impl ChatContentRaw {
-    pub fn to_internal_format(&self) -> Result<(ChatContent, Option<ChatMessage>), String> {
+    pub fn to_internal_format(&self) -> Result<(ChatContent, Vec<ChatMessage>), String> {
         match self {
-            ChatContentRaw::SimpleText(text) => Ok((ChatContent::SimpleText(text.clone()), None)),
+            ChatContentRaw::SimpleText(text) => Ok((ChatContent::SimpleText(text.clone()), vec![])),
             ChatContentRaw::Multimodal(elements) => {
                 let mut internal_elements = Vec::new();
-                let mut chat_message: Option<ChatMessage> = None;
+                let mut chat_messages: Vec<ChatMessage> = vec![];
 
                 for el in elements {
                     match el {
@@ -206,17 +236,27 @@ impl ChatContentRaw {
                             let element = MultimodalElement::from_openai_image(image_el.clone())?;
                             internal_elements.push(element);
                         },
+                        ChatMultimodalElement::MultimodalElementToolUseAnthropic(el) => {
+                            let message = MultimodalElement::from_anthropic_tool_use(el.clone());
+                            chat_messages.push(message);
+                        },
+                        ChatMultimodalElement::MultimodalElementToolResultAnthropic(el) => {
+                            let message = MultimodalElement::from_anthropic_tool_result(el.clone());
+                            chat_messages.push(message);
+                        },
+
                         ChatMultimodalElement::MultimodalElement(el) => {
                             internal_elements.push(el.clone());
                         },
                     }
                 }
 
-                Ok((ChatContent::Multimodal(internal_elements), chat_message))
+                Ok((ChatContent::Multimodal(internal_elements), chat_messages))
             }
         }
     }
 }
+
 impl ChatContent {
     pub fn content_text_only(&self) -> String {
         match self {
@@ -278,8 +318,10 @@ pub fn chat_content_raw_from_value(value: Value) -> Result<ChatContentRaw, Strin
                 if parse_image_b64_from_image_url_openai(&el.image_url.url).is_none() {
                     return Err("Invalid image URL in MultimodalElementImageOpenAI: must pass regexp `data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)`".to_string());
                 }
-            }
-            ChatMultimodalElement::MultimodalElement(_el) => {}
+            },
+            ChatMultimodalElement::MultimodalElementToolUseAnthropic(_el) => {},
+            ChatMultimodalElement::MultimodalElementToolResultAnthropic(_el) => {},
+            ChatMultimodalElement::MultimodalElement(_el) => {},
         };
         Ok(())
     }
@@ -326,13 +368,28 @@ impl ChatMessage {
             },
             "anthropic" => {
                 if self.role == "tool" {
-                    let content = json!({
+                    let content = vec![json!({
                         "type": "tool_result",
                         "tool_use_id": self.tool_call_id.clone(),
                         "content": self.content.clone().into_raw(style),
-                    });
+                    })];
                     dict.insert("role".to_string(), Value::String("user".to_string()));
-                    dict.insert("content".to_string(), content);
+                    dict.insert("content".to_string(), Value::Array(content));
+                }
+                
+                if self.role == "assistant" && self.tool_calls.is_some() {
+                    let tool_calls = self.tool_calls.clone().unwrap_or_default();
+                    let content = vec![json!({
+                        "type": "tool_use",
+                        "tool_calls": tool_calls.iter().map(|call| {
+                            json!({
+                                "id": call.id.clone(),
+                                "name": call.function.name.clone(),
+                                "input": call.function.arguments.clone(),
+                            })
+                        }).collect::<Vec<_>>(),
+                    })];
+                    dict.insert("content".to_string(), Value::Array(content));
                 }
             },
             _ => unreachable!(),
@@ -366,38 +423,54 @@ impl ChatMessage {
     }
 }
 
-impl<'de> Deserialize<'de> for ChatMessage {
-    // todo: won't work, find a workaround
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+#[derive(Debug, Serialize, Clone, PartialEq, Default)]
+pub struct ChatMessages(pub Vec<ChatMessage>);
+
+impl<'de> Deserialize<'de> for ChatMessages {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
         let value: Value = Deserialize::deserialize(deserializer)?;
-        let role = value.get("role")
-            .and_then(|s| s.as_str())
-            .ok_or_else(|| serde::de::Error::missing_field("role"))?
-            .to_string();
+        let mut messages = Vec::new();
 
-        let (content, chat_message_mb) = match value.get("content") {
-            Some(content_value) => {
-                let content_raw: ChatContentRaw = chat_content_raw_from_value(content_value.clone())
-                    .map_err(|e| serde::de::Error::custom(e))?;
-                content_raw.to_internal_format()
-                    .map_err(|e| serde::de::Error::custom(e))?
-            },
-            None => (ChatContent::SimpleText(String::new()), None),
-        };
+        if let Value::Array(array) = value {
+            for item in array {
+                let role = item.get("role")
+                    .and_then(|s| s.as_str())
+                    .ok_or_else(|| serde::de::Error::missing_field("role"))?
+                    .to_string();
 
-        let tool_calls: Option<Vec<ChatToolCall>> = value.get("tool_calls")
-            .and_then(|v| v.as_array())
-            .map(|v| v.iter().map(|v| serde_json::from_value(v.clone()).map_err(serde::de::Error::custom)).collect::<Result<Vec<_>, _>>())
-            .transpose()?;
-        let tool_call_id: Option<String> = value.get("tool_call_id")
-            .and_then(|s| s.as_str()).map(|s| s.to_string());
+                let (content, chat_messages) = match item.get("content") {
+                    Some(content_value) => {
+                        let content_raw: ChatContentRaw = chat_content_raw_from_value(content_value.clone())
+                            .map_err(|e| serde::de::Error::custom(e))?;
+                        content_raw.to_internal_format()
+                            .map_err(|e| serde::de::Error::custom(e))?
+                    },
+                    None => (ChatContent::SimpleText(String::new()), vec![]),
+                };
 
-        Ok(ChatMessage {
-            role,
-            content,
-            tool_calls,
-            tool_call_id: tool_call_id.unwrap_or_default(),
-            ..Default::default()
-        })
+                let tool_calls: Option<Vec<ChatToolCall>> = item.get("tool_calls")
+                    .and_then(|v| v.as_array())
+                    .map(|v| v.iter().map(|v| serde_json::from_value(v.clone()).map_err(serde::de::Error::custom)).collect::<Result<Vec<_>, _>>())
+                    .transpose()?;
+                let tool_call_id: Option<String> = item.get("tool_call_id")
+                    .and_then(|s| s.as_str()).map(|s| s.to_string());
+
+                messages.push(ChatMessage {
+                    role,
+                    content,
+                    tool_calls,
+                    tool_call_id: tool_call_id.unwrap_or_default(),
+                    ..Default::default()
+                });
+                messages.extend(chat_messages);
+            }
+        } else {
+            return Err(serde::de::Error::custom("Expected an array of chat messages"));
+        }
+
+        Ok(ChatMessages(messages))
     }
 }

@@ -183,7 +183,7 @@ async fn chat_interaction_non_stream(
             )
         };
 
-        let content = chat_content_raw_from_value(content_value).and_then(|c|c.to_internal_format())
+        let (content, _chat_messages) = chat_content_raw_from_value(content_value).and_then(|c|c.to_internal_format())
             .map_err(|e| format!("error parsing model's output: {}", e))?;
 
         let mut ch_results = vec![];

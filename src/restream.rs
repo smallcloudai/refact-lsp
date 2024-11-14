@@ -8,7 +8,7 @@ use hyper::{Body, Response, StatusCode};
 use reqwest::Client;
 use reqwest_eventsource::Event;
 use serde_json::json;
-use tracing::{error, info, Value};
+use tracing::{error, info};
 
 use crate::call_validation::{ChatMessage, SamplingParameters};
 use crate::custom_error::ScratchError;
@@ -431,7 +431,8 @@ pub async fn scratchpad_interaction_stream(
             let mut finished: bool = false;
             let mut problem_reported = false;
             let mut was_correct_output_even_if_error = false;
-            let mut message_start: serde_json::Value = serde_json::Value::Null;
+            let mut message_template: serde_json::Value = serde_json::Value::Null;
+            let mut ant_tool_call_index: i32 = -1;
             // let mut test_countdown = 250;
             while let Some(event) = event_source.next().await {
                 match event {
@@ -442,10 +443,12 @@ pub async fn scratchpad_interaction_stream(
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
                         
+                        info!("message:\n{:#?}", message);
+                        
                         // for anthropic
                         match message.event.as_str() {
                             "message_start" => {
-                                message_start = json!({
+                                message_template = json!({
                                     "id": json["message"]["id"],
                                     "object": "chat.completion.chunk",
                                     "model": json["message"]["model"],
@@ -454,6 +457,9 @@ pub async fn scratchpad_interaction_stream(
                                         {"index": 0, "delta": {"role": json["message"]["role"], "content": ""}}
                                     ]
                                 });
+                            },
+                            "content_block_start" => {
+                                
                             },
                             "message_stop" => {
                                 finished = true;
@@ -469,13 +475,18 @@ pub async fn scratchpad_interaction_stream(
                         let value_maybe = _push_streaming_json_into_scratchpad(
                             my_scratchpad,
                             &json,
-                            &message_start,
+                            &message_template,
                             message.event.as_str(),
                             &mut model_name,
                             &mut finished,
                             &mut was_correct_output_even_if_error,
+                            &mut ant_tool_call_index,
                         );
-                        if let Ok(mut value) = value_maybe {
+                        if let Ok(value) = value_maybe {
+                            let mut value = match value {
+                                Some(v) => v,
+                                None => continue
+                            };
                             try_insert_usage(&mut value);
                             value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                             let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
@@ -583,19 +594,20 @@ pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
 fn _push_streaming_json_into_scratchpad(
     scratch: &mut Box<dyn ScratchpadAbstract>,
     json: &serde_json::Value,
-    message_start: &serde_json::Value,
+    message_template: &serde_json::Value,
     event_type: &str,
     model_name: &mut String,
     finished: &mut bool,
     was_correct_output_even_if_error: &mut bool,
-) -> Result<serde_json::Value, String> {
+    ant_tool_call_index: &mut i32,
+) -> Result<Option<serde_json::Value>, String> {
     if let Some(token) = json.get("token") { // hf style produces this
         let text = token.get("text").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
         let mut value: serde_json::Value;
         (value, *finished) = scratch.response_streaming(text, false, false)?;
         value["model"] = json!(model_name.clone());
         *was_correct_output_even_if_error |= json.get("generated_text").is_some();
-        Ok(value)
+        Ok(Some(value))
         
     } else if let Some(choices) = json.get("choices") { // openai style
         let choice0 = &choices[0];
@@ -622,19 +634,68 @@ fn _push_streaming_json_into_scratchpad(
             model_name.clone_from(&model_value.as_str().unwrap_or("").to_string());
         }
         value["model"] = json!(model_name.clone());
-        Ok(value)
+        Ok(Some(value))
         
-    } else if message_start.is_object() { // anthropic
-        let mut value = message_start.clone();
-        if event_type == "message_start" {
-            Ok(value)
-        } else {
-            value["choices"][0]["delta"] = json!({});
-            let delta = json["delta"].clone();
-            if delta["type"] == "text_delta" {
-                value["choices"][0]["delta"]["content"] = delta["text"].clone();
+    } else if message_template.is_object() { // anthropic
+        let mut value = message_template.clone();
+
+        return match event_type {
+            "error" => {
+                let error_type = json.get("error")
+                    .and_then(|e| e.get("type"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Unknown error type");
+
+                let error_message = json.get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error message");
+
+                Err(format!("{}: {}", error_type, error_message))
+            },
+            "message_start" => {
+                Ok(Some(value))
+            },
+            "content_block_start" => {
+                if json["content_block"]["type"] == "tool_use" {
+                    let tool_id = json["content_block"]["id"].clone();
+                    let tool_name = json["content_block"]["name"].clone();
+                    *ant_tool_call_index += 1;
+                    value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": ""
+                            }
+                        }]
+                    });
+                    Ok(Some(value))
+                } else {
+                    Ok(None)
+                }
+            },
+            _ => {
+                value["choices"][0]["delta"] = json!({});
+                let delta = json["delta"].clone();
+                if delta["type"] == "text_delta" {
+                    value["choices"][0]["delta"]["content"] = delta["text"].clone();
+                } else if delta["type"] == "input_json_delta" {
+                    let partial_json = delta["partial_json"].clone();
+                    value["choices"][0]["delta"] = json!({
+                        "tool_calls": [{
+                            "index": *ant_tool_call_index,
+                            "function": {
+                                "arguments": partial_json
+                            }
+                        }]
+                    });
+                }
+                info!("value:\n {:#?}", value);
+                Ok(Some(value))
             }
-            Ok(value)
         }
         
     } else if let Some(err) = json.get("error") {

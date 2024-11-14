@@ -13,7 +13,7 @@ use crate::custom_error::ScratchError;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::global_context::SharedGlobalContext;
 use crate::{caps, scratchpads};
-
+use crate::scratchpads::multimodality::ChatMessages;
 
 pub const CHAT_TOP_N: usize = 7;
 
@@ -60,14 +60,14 @@ pub async fn handle_v1_chat(
 }
 
 pub fn deserialize_messages_from_post(messages: &Vec<serde_json::Value>) -> Result<Vec<ChatMessage>, ScratchError> {
-    let messages: Vec<ChatMessage> = messages.iter()
-        .map(|x| serde_json::from_value(x.clone()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            tracing::error!("can't deserialize ChatMessage: {}", e);
-            ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
-        })?;
-    Ok(messages)
+    let messages_value = serde_json::Value::Array(messages.clone());
+
+    let chat_messages: ChatMessages = serde_json::from_value(messages_value).map_err(|e| {
+        tracing::error!("can't deserialize ChatMessage: {}", e);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+    })?;
+
+    Ok(chat_messages.0)
 }
 
 async fn chat(

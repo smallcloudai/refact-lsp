@@ -114,6 +114,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         let allow_experimental = gcx.read().await.cmdline.experimental;
         let at_tools = tools_merged_and_filtered(gcx.clone()).await?;
 
+        info!("messages: {:#?}", self.messages);
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {
@@ -195,10 +196,9 @@ impl ScratchpadAbstract for ChatPassthrough {
                 },
                 None => vec![]
             };
-            info!("tools_enabled: {:?}", tools_enabled);
+            
             let tools_desc_list = tool_description_list_from_yaml(at_tools, &tools_enabled, allow_experimental).await?;
             let tools_filtered = tools_desc_list.iter().filter(|t|tools_enabled.contains(&t.name)).cloned().collect::<Vec<_>>();
-            info!("tools_filtered: {:?}", tools_filtered);
             
             if self.endpoint_style == "anthropic" {
                 big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_anthropic_style()).collect::<Vec<_>>());
