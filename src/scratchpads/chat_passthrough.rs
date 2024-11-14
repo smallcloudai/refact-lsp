@@ -10,14 +10,14 @@ use tracing::{error, info, warn};
 
 use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::tools::tools_execute::run_tools;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::scratchpad_abstract::HasTokenizerAndEot;
 use crate::scratchpad_abstract::ScratchpadAbstract;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
-use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, system_prompt_add_workspace_info};
+use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, get_default_system_prompt_from_remote, system_prompt_add_workspace_info};
+use crate::tools::tools_execute::{run_tools_locally, run_tools_remotely};
 
 
 const DEBUG: bool = false;
@@ -93,8 +93,13 @@ impl ScratchpadAbstract for ChatPassthrough {
         _patch: &Value,
         exploration_tools: bool,
         agentic_tools: bool,
+        should_execute_remotely: bool,
     ) -> Result<(), String> {
-        self.default_system_message = get_default_system_prompt(self.global_context.clone(), exploration_tools, agentic_tools).await;
+        self.default_system_message = if should_execute_remotely {
+            get_default_system_prompt_from_remote(self.global_context.clone(), exploration_tools, agentic_tools, &self.post.chat_id).await?
+        } else {
+            get_default_system_prompt(self.global_context.clone(), exploration_tools, agentic_tools).await
+        };
         Ok(())
     }
 
@@ -103,18 +108,24 @@ impl ScratchpadAbstract for ChatPassthrough {
         ccx: Arc<AMutex<AtCommandsContext>>,
         sampling_parameters_to_patch: &mut SamplingParameters,
     ) -> Result<String, String> {
-        let (n_ctx, gcx) = {
+        let (gcx, n_ctx, should_execute_remotely) = {
             let ccx_locked = ccx.lock().await;
-            (ccx_locked.n_ctx, ccx_locked.global_context.clone())
+            (ccx_locked.global_context.clone(), ccx_locked.n_ctx, ccx_locked.should_execute_remotely)
         };
         let style = self.post.style.clone();
-        let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
+        
+        // TODO? Maybe we should execute at commands remotely.
+        let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at && !should_execute_remotely {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {
             (self.messages.clone(), self.messages.len(), false)
         };
         if self.supports_tools {
-            (messages, _) = run_tools(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?;
+            (messages, _) = if should_execute_remotely {
+                run_tools_remotely(ccx.clone(), &self.post.model, sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
+            } else {
+                run_tools_locally(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
+            }
         };
         let mut limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &self.default_system_message).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);

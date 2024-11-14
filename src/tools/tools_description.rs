@@ -16,6 +16,7 @@ use crate::integrations::integr_pdb::ToolPdb;
 use crate::integrations::integr_chrome::ToolChrome;
 use crate::integrations::integr_postgres::ToolPostgres;
 
+use crate::integrations::docker::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfirmationConfig { // todo: fix typo
@@ -52,7 +53,7 @@ pub trait Tool: Send + Sync {
     }
 }
 
-async fn read_integrations_yaml(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
+pub async fn read_integrations_yaml(cache_dir: &PathBuf) -> Result<serde_yaml::Value, String> {
     let yaml_path = cache_dir.join("integrations.yaml");
 
     let file = std::fs::File::open(&yaml_path).map_err(
@@ -70,16 +71,15 @@ async fn read_integrations_yaml(cache_dir: &PathBuf) -> Result<serde_yaml::Value
 
 pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Result<IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>, String>
 {
-    let (ast_on, vecdb_on, allow_experimental) = {
+    let (ast_on, vecdb_on, allow_experimental, cache_dir) = {
         let gcx_locked = gcx.read().await;
         #[cfg(feature="vecdb")]
         let vecdb_on = gcx_locked.vec_db.lock().await.is_some();
         #[cfg(not(feature="vecdb"))]
         let vecdb_on = false;
-        (gcx_locked.ast_service.is_some(), vecdb_on, gcx_locked.cmdline.experimental)
+        (gcx_locked.ast_service.is_some(), vecdb_on, gcx_locked.cmdline.experimental, gcx_locked.cache_dir.clone())
     };
 
-    let cache_dir = gcx.read().await.cache_dir.clone();
     let integrations_value = match read_integrations_yaml(&cache_dir).await {
         Ok(value) => value,
         Err(e) => return Err(format!("Problem in integrations.yaml: {}", e)),
@@ -116,6 +116,9 @@ pub async fn tools_merged_and_filtered(gcx: Arc<ARwLock<GlobalContext>>) -> Resu
         }
         if let Some(postgres_config) = integrations_value.get("postgres") {
             tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(ToolPostgres::new_from_yaml(postgres_config)?) as Box<dyn Tool + Send>)));
+        }
+        if let Some(docker_config) = integrations_value.get("docker") {
+            tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(ToolDocker::new_from_yaml(docker_config)?) as Box<dyn Tool + Send>)));
         }
         #[cfg(feature="vecdb")]
         tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
@@ -331,6 +334,18 @@ tools:
     parameters_required:
       - "query"
 
+
+  - name: "docker"
+    agentic: true
+    experimental: true
+    description: "Access to docker cli, in a non-interactive way, don't open a shell."
+    parameters:
+      - name: "command"
+        type: "string"
+        description: "Examples: docker images"
+    parameters_required:
+      - "project_dir"
+      - "command"
 "####;
 
 #[allow(dead_code)]
