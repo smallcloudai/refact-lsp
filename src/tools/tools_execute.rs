@@ -94,16 +94,21 @@ pub async fn run_tools(
             }
         };
 
-        let args = match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
-            Ok(args) => args,
-            Err(e) => {
-                let tool_failed_message = tool_answer(
-                    format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
-                );
-                generated_tool.push(tool_failed_message);
-                continue;
+        let args = if t_call.function.arguments.trim().is_empty() {
+            HashMap::new()
+        } else {
+            match serde_json::from_str::<HashMap<String, Value>>(&t_call.function.arguments) {
+                Ok(args) => args,
+                Err(e) => {
+                    let tool_failed_message = tool_answer(
+                        format!("Tool use: couldn't parse arguments: {}. Error:\n{}", t_call.function.arguments, e), t_call.id.to_string()
+                    );
+                    generated_tool.push(tool_failed_message);
+                    continue;
+                }
             }
         };
+        
         info!("tool use {}({:?})", &t_call.function.name, args);
 
         let command_to_match = match {
