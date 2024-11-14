@@ -29,8 +29,10 @@ use crate::integrations::integr::{json_schema, Integration};
 pub struct IntegrationChrome {
     #[schemars(description = "Path to the Chrome binary or WebSocket URL for remote debugging.")]
     pub chrome_path: Option<String>,
-    #[schemars(description = "Window size for the Chrome browser in the format [width, height].")]
-    pub window_size: Option<Vec<u32>>,
+    #[schemars(description = "Window width for the Chrome browser.")]
+    pub window_width: Option<u32>,
+    #[schemars(description = "Window height for the Chrome browser.")]
+    pub window_height: Option<u32>,
     #[schemars(description = "Idle timeout for the Chrome browser in seconds.")]
     pub idle_browser_timeout: Option<u32>,
     #[serde(default = "default_headless")]
@@ -203,6 +205,25 @@ async fn setup_chrome_session(
     session_hashmap_key: &String,
 ) -> Result<Vec<String>, String> {
     let mut setup_log = vec![];
+    if !is_chrome_session_active(&session_hashmap_key, gcx.clone()).await {
+        let mut is_connection = false;
+        if let Some(chrome_path) = args.chrome_path.clone() {
+            is_connection = chrome_path.starts_with("ws://");
+        }
+
+        let window_size = if args.window_width.is_some() && args.window_height.is_some() {
+            Some((args.window_width.unwrap(), args.window_height.unwrap()))
+        } else if args.window_width.is_some() {
+            Some((args.window_width.unwrap(), args.window_width.unwrap()))
+        } else {
+            None
+        };
+
+        let mut idle_browser_timeout = Duration::from_secs(600);
+        if let Some(timeout) = args.idle_browser_timeout.clone() {
+            idle_browser_timeout = Duration::from_secs(timeout as u64);
+        }
+    }
 
     let session_entry  = {
         let gcx_locked = gcx.read().await;
@@ -577,6 +598,7 @@ const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
 # Or you can give it ws:// path, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
 # In that case start chrome with --remote-debugging-port
 # chrome_path: "ws://127.0.0.1:6006/"
-# window_size: [1024, 768]
+# window_width: 1024
+# window_height: 768
 # idle_browser_timeout: 600
 "#;
