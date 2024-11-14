@@ -332,8 +332,8 @@ pub fn chat_content_raw_from_value(value: Value) -> Result<ChatContentRaw, Strin
         Value::Array(array) => {
             let mut elements = vec![];
             for (idx, item) in array.into_iter().enumerate() {
-                let element: ChatMultimodalElement = serde_json::from_value(item)
-                    .map_err(|e| format!("Error deserializing element at index {}: {}", idx, e))?;
+                let element: ChatMultimodalElement = serde_json::from_value(item.clone())
+                    .map_err(|e| format!("Error deserializing element at index {}:\n{:#?}\n\nError: {}", idx, item, e))?;
                 validate_multimodal_element(&element)
                     .map_err(|e| format!("Validation error for element at index {}: {}", idx, e))?;
                 elements.push(element);
@@ -376,19 +376,19 @@ impl ChatMessage {
                     dict.insert("role".to_string(), Value::String("user".to_string()));
                     dict.insert("content".to_string(), Value::Array(content));
                 }
-                
+
                 if self.role == "assistant" && self.tool_calls.is_some() {
                     let tool_calls = self.tool_calls.clone().unwrap_or_default();
-                    let content = vec![json!({
-                        "type": "tool_use",
-                        "tool_calls": tool_calls.iter().map(|call| {
-                            json!({
-                                "id": call.id.clone(),
-                                "name": call.function.name.clone(),
-                                "input": call.function.arguments.clone(),
-                            })
-                        }).collect::<Vec<_>>(),
-                    })];
+                    let content = tool_calls.iter().map(|call| {
+                        let input_map: serde_json::Map<String, Value> = serde_json::from_str(&call.function.arguments)
+                            .unwrap_or_else(|_| serde_json::Map::new());
+                        json!({
+                            "type": "tool_use",
+                            "id": call.id.clone(),
+                            "name": call.function.name.clone(),
+                            "input": input_map,
+                        })
+                    }).collect::<Vec<_>>();
                     dict.insert("content".to_string(), Value::Array(content));
                 }
             },

@@ -443,8 +443,6 @@ pub async fn scratchpad_interaction_stream(
                         }
                         let json = serde_json::from_str::<serde_json::Value>(&message.data).unwrap();
                         
-                        info!("message:\n{:#?}", message);
-                        
                         // for anthropic
                         match message.event.as_str() {
                             "message_start" => {
@@ -693,7 +691,6 @@ fn _push_streaming_json_into_scratchpad(
                         }]
                     });
                 }
-                info!("value:\n {:#?}", value);
                 Ok(Some(value))
             }
         }

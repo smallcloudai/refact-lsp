@@ -3,7 +3,7 @@ cloud_name: Anthropic
 chat_endpoint: "https://api.anthropic.com/v1/messages"
 chat_endpoint_style: anthropic
 chat_apikey: "$ANTHROPIC_API_KEY"
-chat_model: claude-3-5-sonnet
+chat_model: claude-3-5-sonnet-20241022
 
 running_models:
-  - claude-3-5-sonnet
+  - claude-3-5-sonnet-20241022

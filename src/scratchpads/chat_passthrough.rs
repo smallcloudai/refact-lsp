@@ -114,7 +114,6 @@ impl ScratchpadAbstract for ChatPassthrough {
         let allow_experimental = gcx.read().await.cmdline.experimental;
         let at_tools = tools_merged_and_filtered(gcx.clone()).await?;
 
-        info!("messages: {:#?}", self.messages);
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &self.messages, &mut self.has_rag_results).await
         } else {
@@ -176,6 +175,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                 warn!("unknown role: {}", msg.role);
             }
         }
+        
         let mut big_json = serde_json::json!({
             "messages": filtered_msgs,
         });

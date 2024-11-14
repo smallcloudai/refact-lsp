@@ -63,8 +63,8 @@ pub fn deserialize_messages_from_post(messages: &Vec<serde_json::Value>) -> Resu
     let messages_value = serde_json::Value::Array(messages.clone());
 
     let chat_messages: ChatMessages = serde_json::from_value(messages_value).map_err(|e| {
-        tracing::error!("can't deserialize ChatMessage: {}", e);
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
+        tracing::error!("can't deserialize ChatMessages: {}", e);
+        ScratchError::new(StatusCode::BAD_REQUEST, format!("can't deserialize ChatMessages: {}", e))
     })?;
 
     Ok(chat_messages.0)
