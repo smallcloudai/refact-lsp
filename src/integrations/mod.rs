@@ -27,6 +27,8 @@ pub mod process_io_utils;
 pub mod integr_postgres;
 mod integr;
 
+pub mod yaml_schema;
+
 
 <<<<<<< HEAD
 // hint: when adding integration, update:
@@ -85,11 +87,10 @@ pub async fn get_integrations(
 
 pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
     let integrations = get_empty_integrations();
-
     match integrations.get(name) {
         Some(i) => {
-            let j_value = i.integr_yaml2json(&value)?;
-            let yaml_value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
+            let j_value: serde_json::Value = i.integr_yaml2json(&value)?;
+            let yaml_value: serde_yaml::Value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
             Ok(yaml_value)
         },
         None => Err(format!("Integration {} is not defined", name))
@@ -106,26 +107,26 @@ pub async fn load_integration_tools(
         read_yaml_into_value(&yaml_path).await?
     };
     let cache_dir = gcx.read().await.cache_dir.clone();
-    let enabled_path = cache_dir.join("integrations-enabled.yaml");
-    let enabled = match integrations_enabled_cfg(&enabled_path).await {
-        serde_yaml::Value::Mapping(map) => map.into_iter().filter_map(|(k, v)| {
-            if let (serde_yaml::Value::String(key), serde_yaml::Value::Bool(value)) = (k, v) {
-                Some((key, value))
-            } else {
-                None
-            }
-        }).collect::<std::collections::HashMap<String, bool>>(),
-        _ => std::collections::HashMap::new(),
-    };
+    // let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    // let enabled = match integrations_enabled_cfg(&enabled_path).await {
+    //     serde_yaml::Value::Mapping(map) => map.into_iter().filter_map(|(k, v)| {
+    //         if let (serde_yaml::Value::String(key), serde_yaml::Value::Bool(value)) = (k, v) {
+    //             Some((key, value))
+    //         } else {
+    //             None
+    //         }
+    //     }).collect::<std::collections::HashMap<String, bool>>(),
+    //     _ => std::collections::HashMap::new(),
+    // };
 
     let integrations = get_integrations(gcx.clone()).await?;
 
     let mut tools = IndexMap::new();
     for (i_name, i) in integrations.iter() {
-        if !enabled.get(i_name).unwrap_or(&false) {
-            info!("Integration {} is disabled", i_name);
-            continue;
-        }
+        // if !enabled.get(i_name).unwrap_or(&false) {
+        //     info!("Integration {} is disabled", i_name);
+        //     continue;
+        // }
         let tool = i.integr_upgrade_to_tool();
         tools.insert(i_name.clone(), Arc::new(AMutex::new(tool)));
     }

@@ -146,8 +146,74 @@ impl Tool for ToolPostgres {
 }
 
 const DEFAULT_POSTGRES_INTEGRATION_YAML: &str = r#"
-# Postgres database
+postgres:
+  psql_binary_path: "/path/to/psql"
+  host: "my_postgres_for_django"
+  user: "vasya1337"
+  password: "$POSTGRES_PASSWORD"
+  db: "mydjango"
+  available:
+    on_your_laptop:
+      - project_pattern: "*web_workspace/project1"
+        db: "mydjango2"
+        enable: true
+    when_isolated:
+      user: "vasya1338"
+      enable: true
+  docker:
+    my_postgres_for_django:
+      image: "postgres:13"
+      environment:
+        POSTGRES_DB: "mydjango"
+        POSTGRES_USER: "vasya1337"
+        POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
+"#;
 
-# psql_binary_path: "/path/to/psql"  # Uncomment to set a custom path for the psql binary, defaults to "psql"
-# connection_string: "postgresql://username:password@localhost/dbname"  # To get a connection string, check out https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
+
+const POSTGRES_INTEGRATION_SCHEMA: &str = r#"
+postgres:
+  fields:
+    host:
+      type: string
+      desc: "Connect to this host, for example 127.0.0.1 or docker container name."
+      placeholder: marketing_db_container
+    port:
+      type: int
+      desc: "Which port to use."
+      default: 5432
+    user:
+      type: string
+      placeholder: john_doe
+    password:
+      type: string
+      default: "$POSTGRES_PASSWORD"
+    db:
+      type: string
+      placeholder: marketing_db
+  smartlinks:
+    - label: "Test"
+      chat:
+        - role: "user"
+          content: |
+            Connect to the postgres database, list and briefly describe the tables available.
+            If it doesn't work, try to interpret why.
+  available:
+    on_your_laptop:
+      possible: true
+    when_isolated:
+      possible: true
+  docker:
+    add_new:
+      image: "postgres:13"
+      environment:
+        POSTGRES_DB: marketing_db
+        POSTGRES_USER: "john_doe"
+        POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
+    smartlinks:
+      - label: "✨ Wizard"
+        chat:
+          - role: "user"
+            content: |
+              Connect to the postgres database, list and briefly describe the tables available.
+              If it doesn't work, try to interpret why.
 "#;
