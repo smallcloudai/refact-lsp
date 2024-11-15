@@ -1,6 +1,18 @@
 use serde::Deserialize;
 use regex::Regex;
 
+#[derive(Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ValueableSection {
+    Top,
+    Bottom,
+}
+
+impl Default for ValueableSection {
+    fn default() -> Self {
+        ValueableSection::Top
+    }
+}
 
 #[derive(Deserialize)]
 pub struct CmdlineOutputFilter {
@@ -8,8 +20,8 @@ pub struct CmdlineOutputFilter {
     pub limit_lines: usize,
     #[serde(default = "default_limit_chars")]
     pub limit_chars: usize,
-    #[serde(default = "default_valuable_top_or_bottom")]
-    pub valuable_top_or_bottom: String,
+    #[serde(default)]
+    pub valuable_section: ValueableSection,
     #[serde(default = "default_grep")]
     pub grep: String,
     #[serde(default = "default_grep_context_lines")]
@@ -23,7 +35,7 @@ impl Default for CmdlineOutputFilter {
         CmdlineOutputFilter {
             limit_lines: default_limit_lines(),
             limit_chars: default_limit_chars(),
-            valuable_top_or_bottom: default_valuable_top_or_bottom(),
+            valuable_section: ValueableSection::default(),
             grep: default_grep(),
             grep_context_lines: default_grep_context_lines(),
             remove_from_output: default_remove_from_output(),
@@ -37,10 +49,6 @@ fn default_limit_lines() -> usize {
 
 fn default_limit_chars() -> usize {
     10000
-}
-
-fn default_valuable_top_or_bottom() -> String {
-    "top".to_string()
 }
 
 fn default_grep() -> String {
@@ -60,13 +68,16 @@ pub fn output_mini_postprocessing(filter: &CmdlineOutputFilter, output: &str) ->
     let mut ratings: Vec<f64> = vec![0.0; lines.len()];
     let mut approve: Vec<bool> = vec![false; lines.len()];
 
-    if filter.valuable_top_or_bottom == "bottom" {
-        for i in 0..lines.len() {
-            ratings[i] += 0.9 * (i as f64) / lines.len() as f64;
+    match filter.valuable_section {
+        ValueableSection::Bottom => {
+            for i in 0..lines.len() {
+                ratings[i] += 0.9 * (i as f64) / lines.len() as f64;
+            }
         }
-    } else {
-        for i in 0..lines.len() {
-            ratings[i] += 0.9 * (lines.len() - i) as f64 / lines.len() as f64;
+        ValueableSection::Top => {
+            for i in 0..lines.len() {
+                ratings[i] += 0.9 * (lines.len() - i) as f64 / lines.len() as f64;
+            }
         }
     }
 
@@ -147,7 +158,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
-            valuable_top_or_bottom: "top".to_string(),
+            valuable_section: ValueableSection::Top,
             grep: "".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
@@ -157,7 +168,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
-            valuable_top_or_bottom: "bottom".to_string(),
+            valuable_section: ValueableSection::Bottom,
             grep: "".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
@@ -167,7 +178,7 @@ line6
         let result = output_mini_postprocessing(&CmdlineOutputFilter {
             limit_lines: 2,
             limit_chars: 1000,
-            valuable_top_or_bottom: "".to_string(),
+            valuable_section: ValueableSection::Top, // Default value
             grep: "line4".to_string(),
             grep_context_lines: 1,
             remove_from_output: "".to_string(),
@@ -175,4 +186,3 @@ line6
         assert_eq!(result, "...2 lines skipped...\nline3\nline4\nline5\n...1 lines skipped...\n");
     }
 }
-

@@ -205,7 +205,7 @@ async fn get_stdout_and_stderr(
     Ok((stdout_out, stderr_out))
 }
 
-async fn execute_background_command(
+async fn call_service_action(
     gcx: Arc<ARwLock<GlobalContext>>,
     service_name: &str,
     command_str: &str,
@@ -383,22 +383,21 @@ impl Tool for ToolCmdline {
         let command = _replace_args(self.cfg.command.as_str(), &args_str);
         let workdir = _replace_args(self.cfg.command_workdir.as_str(), &args_str);
 
-        let tool_ouput = if self.a_service {
+        let is_service = if self.a_service {
             let action = args_str.get("action").cloned().unwrap_or("start".to_string());
             if !["start", "restart", "stop", "status"].contains(&action.as_str()) {
                 return Err("Tool call is invalid. Param 'action' must be one of 'start', 'restart', 'stop', 'status'. Try again".to_string());
             }
-            execute_background_command(
+            call_service_action(
                 gcx, &self.name, &command, &workdir, &self.cfg, action.as_str()
             ).await?
-
         } else {
             execute_blocking_command(&command, &self.cfg, &workdir).await?
         };
 
         let result = vec![ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
-            content: ChatContent::SimpleText(tool_ouput),
+            content: ChatContent::SimpleText(is_service),
             tool_calls: None,
             tool_call_id: tool_call_id.clone(),
             ..Default::default()
