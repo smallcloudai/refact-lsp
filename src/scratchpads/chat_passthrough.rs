@@ -89,6 +89,27 @@ impl ChatPassthrough {
     }
 }
 
+
+// for anthropic:
+// tool answers must be located in the same message.content (if tools executed in parallel)
+fn format_messages_anthropic(messages: Vec<Value>) -> Vec<Value> {
+    let mut res: Vec<Value> = vec![];
+    for m in messages {
+        if let Some(cont) = m["content"].as_array() {
+            if let Some(prev_el) = res.last_mut() {
+                if let Some(prev_cont) = prev_el["content"].as_array_mut() {
+                    if cont.iter().any(|c| c["type"] == "tool_result") && prev_cont.iter().any(|p| p["type"] == "tool_result") {
+                        prev_cont.extend(cont.iter().cloned());
+                        continue;
+                    }
+                }
+            }
+        }
+        res.push(m);
+    }
+    res
+}
+
 #[async_trait]
 impl ScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
@@ -175,7 +196,11 @@ impl ScratchpadAbstract for ChatPassthrough {
                 warn!("unknown role: {}", msg.role);
             }
         }
-        
+        let filtered_msgs = if self.endpoint_style == "anthropic" {
+            format_messages_anthropic(filtered_msgs)
+        } else {
+            filtered_msgs
+        };
         let mut big_json = serde_json::json!({
             "messages": filtered_msgs,
         });
