@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard};
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
 use crate::call_validation::{ChatContent, ChatMessage, ChatToolCall, ChatToolFunction};
-use crate::scratchpads::scratchpad_utils::{calculate_image_tokens_openai, count_tokens as count_tokens_simple_text, image_reader_from_b64string, parse_image_b64_from_image_url_openai};
+use crate::scratchpads::scratchpad_utils::{calculate_image_tokens_anthropic, calculate_image_tokens_openai, count_tokens as count_tokens_simple_text, image_reader_from_b64string, parse_image_b64_from_image_url_openai};
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -32,14 +32,20 @@ impl MultimodalElement {
         self.m_type.starts_with("image/")
     }
 
-    pub fn from_openai_image(openai_image: MultimodalElementImageOpenAI) -> Result<Self, String> {
-        let (image_type, _, image_content) = parse_image_b64_from_image_url_openai(&openai_image.image_url.url)
-            .ok_or(format!("Failed to parse image URL: {}", openai_image.image_url.url))?;
-        MultimodalElement::new(image_type, image_content)
+    pub fn from_openai_image(image: MultimodalElementImageOpenAI) -> Result<Self, String> {
+        let (m_type, _, m_content) = parse_image_b64_from_image_url_openai(&image.image_url.url)
+            .ok_or(format!("Failed to parse image URL: {}", image.image_url.url))?;
+        MultimodalElement::new(m_type, m_content)
     }
 
     pub fn from_text(openai_text: MultimodalElementText) -> Result<Self, String> {
         MultimodalElement::new("text".to_string(), openai_text.text)
+    }
+
+    pub fn from_anthropic_image(image: MultimodalElementImageAnthropic) -> Result<Self, String> {
+        let m_type = format!("image/{}", image.source.media_type);
+        let m_content = image.source.data;
+        MultimodalElement::new(m_type, m_content)
     }
 
     pub fn from_anthropic_tool_use(el: MultimodalElementToolUseAnthropic) -> ChatMessage {
@@ -85,7 +91,7 @@ impl MultimodalElement {
                 if self.is_text() {
                     self.to_text()
                 } else if self.is_image() {
-                    todo!()
+                    self.to_anthropic_image()
                 } else {
                     unreachable!()
                 }
@@ -102,6 +108,17 @@ impl MultimodalElement {
                 url: image_url.clone(),
                 detail: "high".to_string(),
             }
+        })
+    }
+
+    fn to_anthropic_image(&self) -> ChatMultimodalElement {
+        ChatMultimodalElement::MultimodalElementImageAnthropic(MultimodalElementImageAnthropic {
+            content_type: "image".to_string(),
+            source: MultimodalElementImageAnthropicSource {
+                content_type: "base64".to_string(),
+                media_type: self.m_type.clone(),
+                data: self.m_content.clone(),
+            },
         })
     }
 
@@ -124,7 +141,10 @@ impl MultimodalElement {
                 "openai" => {
                     calculate_image_tokens_openai(&self.m_content, "high")
                 },
-                _ => unreachable!(),
+                "anthropic" => {
+                    calculate_image_tokens_anthropic(&self.m_content)
+                },
+                _ => unreachable!()
             }
         } else {
             unreachable!()
@@ -144,6 +164,21 @@ pub struct MultimodalElementImageOpenAI {
     #[serde(rename = "type")]
     pub content_type: String,
     pub image_url: MultimodalElementImageOpenAIImageURL,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct MultimodalElementImageAnthropicSource {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub media_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct MultimodalElementImageAnthropic {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub source: MultimodalElementImageAnthropicSource,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -202,6 +237,8 @@ pub enum ChatMultimodalElement {
     MultimodalElementImageOpenAI(MultimodalElementImageOpenAI),
     MultimodalElementToolUseAnthropic(MultimodalElementToolUseAnthropic),
     MultimodalElementToolResultAnthropic(MultimodalElementToolResultAnthropic),
+    MultimodalElementImageAnthropic(MultimodalElementImageAnthropic),
+    
     MultimodalElement(MultimodalElement),
 }
 
@@ -244,6 +281,10 @@ impl ChatContentRaw {
                             let message = MultimodalElement::from_anthropic_tool_result(el.clone());
                             chat_messages.push(message);
                         },
+                        ChatMultimodalElement::MultimodalElementImageAnthropic(el) => {
+                            let element = MultimodalElement::from_anthropic_image(el.clone())?;
+                            internal_elements.push(element);
+                        }
 
                         ChatMultimodalElement::MultimodalElement(el) => {
                             internal_elements.push(el.clone());
@@ -321,6 +362,8 @@ pub fn chat_content_raw_from_value(value: Value) -> Result<ChatContentRaw, Strin
             },
             ChatMultimodalElement::MultimodalElementToolUseAnthropic(_el) => {},
             ChatMultimodalElement::MultimodalElementToolResultAnthropic(_el) => {},
+            ChatMultimodalElement::MultimodalElementImageAnthropic(_el) => {},
+
             ChatMultimodalElement::MultimodalElement(_el) => {},
         };
         Ok(())
