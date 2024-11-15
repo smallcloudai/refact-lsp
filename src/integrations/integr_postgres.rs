@@ -170,29 +170,32 @@ postgres:
 "#;
 
 
-const POSTGRES_INTEGRATION_SCHEMA: &str = r#"
+pub const POSTGRES_INTEGRATION_SCHEMA: &str = r#"
 postgres:
   fields:
     host:
-      type: string
-      desc: "Connect to this host, for example 127.0.0.1 or docker container name."
-      placeholder: marketing_db_container
+      f_type: string
+      f_desc: "Connect to this host, for example 127.0.0.1 or docker container name."
+      f_placeholder: marketing_db_container
     port:
-      type: int
-      desc: "Which port to use."
-      default: 5432
+      f_type: int
+      f_desc: "Which port to use."
+      f_default: 5432
     user:
-      type: string
-      placeholder: john_doe
+      f_type: string
+      f_placeholder: john_doe
     password:
-      type: string
-      default: "$POSTGRES_PASSWORD"
+      f_type: string
+      f_default: "$POSTGRES_PASSWORD"
+      smartlinks:
+        - sl_label: "Open passwords.yaml"
+          sl_goto: "IDE:passwords.yaml"
     db:
-      type: string
-      placeholder: marketing_db
+      f_type: string
+      f_placeholder: marketing_db
   smartlinks:
-    - label: "Test"
-      chat:
+    - sl_label: "Test"
+      sl_chat:
         - role: "user"
           content: |
             Connect to the postgres database, list and briefly describe the tables available.
@@ -203,15 +206,15 @@ postgres:
     when_isolated:
       possible: true
   docker:
-    add_new:
+    new_container_default:
       image: "postgres:13"
       environment:
         POSTGRES_DB: marketing_db
         POSTGRES_USER: "john_doe"
         POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
     smartlinks:
-      - label: "✨ Wizard"
-        chat:
+      - sl_label: "✨ Wizard"
+        sl_chat:
           - role: "user"
             content: |
               Connect to the postgres database, list and briefly describe the tables available.

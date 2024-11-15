@@ -25,7 +25,7 @@ pub mod docker;
 pub mod sessions;
 pub mod process_io_utils;
 pub mod integr_postgres;
-mod integr;
+pub mod integr;
 
 pub mod yaml_schema;
 

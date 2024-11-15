@@ -2,6 +2,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use crate::tools::tools_description::Tool;
+use indexmap::IndexMap;
 
 
 pub trait Integration: Send + Sync {
@@ -39,4 +40,14 @@ pub fn json_schema<T: JsonSchema + Serialize + DeserializeOwned + Default>() -> 
     }
 
     Ok(json_schema)
+}
+
+pub fn yaml_test1()
+{
+    let tmp = crate::integrations::integr_postgres::POSTGRES_INTEGRATION_SCHEMA;
+
+    match serde_yaml::from_slice::<IndexMap<String, crate::integrations::yaml_schema::ISchema>>(tmp.as_bytes()) {
+        Ok(post) => tracing::info!("AAAAAAA {:#?}", post),
+        Err(e) => tracing::error!("Failed to deserialize: {}", e),
+    }
 }

@@ -133,30 +133,33 @@ pub async fn handle_v1_integrations(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await.map_err(|e|{
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
-    })?;
+    // let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await.map_err(|e|{
+    //     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    // })?;
 
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let enabled_path = cache_dir.join("integrations-enabled.yaml");
-    let enabled_mapping = match integrations_enabled_cfg(&enabled_path).await {
-        serde_yaml::Value::Mapping(map) => map,
-        _ => serde_yaml::Mapping::new(),
-    };
+    // let cache_dir = gcx.read().await.cache_dir.clone();
+    // let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    // let enabled_mapping = match integrations_enabled_cfg(&enabled_path).await {
+    //     serde_yaml::Value::Mapping(map) => map,
+    //     _ => serde_yaml::Mapping::new(),
+    // };
+    // let mut items = vec![];
+    // for (name, (schema, value)) in schemas_and_json_dict {
+    //     let item = IntegrationItem {
+    //         name: name.clone(),
+    //         enabled: enabled_mapping.get(&name).and_then(|v| v.as_bool()).unwrap_or(false),
+    //         schema: Some(schema),
+    //         value: Some(value),
+    //     };
+    //     items.push(item);
+    // }
 
-    let mut items = vec![];
-    for (name, (schema, value)) in schemas_and_json_dict {
-        let item = IntegrationItem {
-            name: name.clone(),
-            enabled: enabled_mapping.get(&name).and_then(|v| v.as_bool()).unwrap_or(false),
-            schema: Some(schema),
-            value: Some(value),
-        };
+    crate::integrations::integr::yaml_test1();
+    let payload = "".to_string();
 
-        items.push(item);
-    }
+    // {get_empty_integrations, get_integration_path, get_integrations, json_for_integration, validate_integration_value};
 
-    let payload = serde_json::to_string_pretty(&json!(items)).expect("Failed to serialize items");
+    // let payload = serde_json::to_string_pretty(&json!(items)).expect("Failed to serialize items");
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
