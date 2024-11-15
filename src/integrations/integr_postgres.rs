@@ -28,18 +28,18 @@ pub struct ToolPostgres {
 }
 
 impl Integration for ToolPostgres {
-    fn name(&self) -> String {
+    fn integr_name(&self) -> String {
         "postgres".to_string()
     }
 
-    fn update_from_json(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
         let integration_postgres = serde_json::from_value::<IntegrationPostgres>(value.clone())
             .map_err(|e|e.to_string())?;
         self.integration_postgres = integration_postgres;
         Ok(())
     }
 
-    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
         let integration_github = serde_yaml::from_value::<IntegrationPostgres>(value.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
@@ -47,18 +47,19 @@ impl Integration for ToolPostgres {
         serde_json::to_value(&integration_github).map_err(|e| e.to_string())
     }
 
-    fn to_tool(&self) -> Box<dyn Tool + Send> {
+    fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
         Box::new(ToolPostgres {integration_postgres: self.integration_postgres.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn to_json(&self) -> Result<Value, String> {
+    fn integr_settings_to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
     }
 
-    fn to_schema_json(&self) -> Value {
+    fn integr_to_schema(&self) -> Value {
         json_schema::<IntegrationPostgres>().unwrap()
     }
-    fn default_value(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }
+
+    fn integr_settings_default(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }
     fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
 }
 

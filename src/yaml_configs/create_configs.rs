@@ -42,8 +42,8 @@ pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> St
     }
     let integrations_enabled = cache_dir.join("integrations-enabled.yaml");
     let integrations = get_empty_integrations();
-    
-    for (file_name, content) in integrations.iter().map(|(k, v)| (k.clone(), v.default_value())) {
+
+    for (file_name, content) in integrations.iter().map(|(k, v)| (k.clone(), v.integr_settings_default())) {
         let file_path = get_integration_path(&cache_dir, &file_name);
         if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, &content).await {
             warn!("{}", e);
@@ -68,7 +68,7 @@ pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> St
 }
 
 async fn _yaml_file_exists_or_create(
-    gcx: Arc<ARwLock<GlobalContext>>, 
+    gcx: Arc<ARwLock<GlobalContext>>,
     config_path: &PathBuf,
     the_default: &str
 ) -> Result<String, String>

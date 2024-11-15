@@ -27,14 +27,14 @@ const PDB_TOKEN: &str = "(Pdb)";
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
-pub struct IntegrationPdb {
+pub struct SettingsPdb {
     #[schemars(description = "Path to the Python binary.")]
     pub python_path: Option<String>,
 }
 
 #[derive(Default)]
 pub struct ToolPdb {
-    pub integration_pdb: IntegrationPdb,
+    pub settings_pdb: SettingsPdb,
 }
 
 pub struct PdbSession {
@@ -58,37 +58,38 @@ impl IntegrationSession for PdbSession
 }
 
 impl Integration for ToolPdb {
-    fn name(&self) -> String {
+    fn integr_name(&self) -> String {
         "pdb".to_string()
     }
 
-    fn update_from_json(&mut self, value: &Value) -> Result<(), String> {
-        let integration_pdb = serde_json::from_value::<IntegrationPdb>(value.clone())
+    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
+        let settings_pdb = serde_json::from_value::<SettingsPdb>(value.clone())
             .map_err(|e|e.to_string())?;
-        self.integration_pdb = integration_pdb;
+        self.settings_pdb = settings_pdb;
         Ok(())
     }
 
-    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_github = serde_yaml::from_value::<IntegrationPdb>(value.clone()).map_err(|e| {
+    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+        let integration_github = serde_yaml::from_value::<SettingsPdb>(value.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
         serde_json::to_value(&integration_github).map_err(|e| e.to_string())
     }
 
-    fn to_tool(&self) -> Box<dyn Tool + Send> {
-        Box::new(ToolPdb {integration_pdb: self.integration_pdb.clone()}) as Box<dyn Tool + Send>
+    fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
+        Box::new(ToolPdb {settings_pdb: self.settings_pdb.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn to_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_pdb).map_err(|e| e.to_string())
+    fn integr_settings_to_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.settings_pdb).map_err(|e| e.to_string())
     }
 
-    fn to_schema_json(&self) -> Value {
-        json_schema::<IntegrationPdb>().unwrap()
+    fn integr_to_schema(&self) -> Value {
+        json_schema::<SettingsPdb>().unwrap()
     }
-    fn default_value(&self) -> String { DEFAULT_PDB_INTEGRATION_YAML.to_string() }
+
+    fn integr_settings_default(&self) -> String { DEFAULT_PDB_INTEGRATION_YAML.to_string() }
     fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/919/919852.png".to_string() }
 }
 
@@ -109,7 +110,7 @@ impl Tool for ToolPdb {
         };
 
         let session_hashmap_key = get_session_hashmap_key("pdb", &chat_id);
-        let python_command = self.integration_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
+        let python_command = self.settings_pdb.python_path.clone().unwrap_or_else(|| "python3".to_string());
 
         let is_trying_to_open_pdb_session = command_args.windows(2).any(|w| w == ["-m", "pdb"]);
         let output = if is_trying_to_open_pdb_session {

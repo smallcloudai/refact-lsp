@@ -73,7 +73,7 @@ pub async fn get_integrations(
         if j_value.get("detail").is_some() {
             warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
         } else {
-            if let Err(e) = i.update_from_json(&j_value) {
+            if let Err(e) = i.integr_update_settings(&j_value) {
                 warn!("failed to load integration {}: {}", i_name, e);
             };
         }
@@ -88,7 +88,7 @@ pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) ->
 
     match integrations.get(name) {
         Some(i) => {
-            let j_value = i.from_yaml_validate_to_json(&value)?;
+            let j_value = i.integr_yaml2json(&value)?;
             let yaml_value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
             Ok(yaml_value)
         },
@@ -126,7 +126,7 @@ pub async fn load_integration_tools(
             info!("Integration {} is disabled", i_name);
             continue;
         }
-        let tool = i.to_tool();
+        let tool = i.integr_upgrade_to_tool();
         tools.insert(i_name.clone(), Arc::new(AMutex::new(tool)));
     }
     Ok(tools)
@@ -137,11 +137,11 @@ pub async fn json_for_integration(
     value_from_integrations: Option<&serde_yaml::Value>,
     integration: &Box<dyn Integration + Send + Sync>,
 ) -> Result<serde_json::Value, String> {
-    let tool_name = integration.name().clone();
+    let tool_name = integration.integr_name().clone();
 
     let value = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
-            Ok(value) => integration.from_yaml_validate_to_json(&value).unwrap_or_else(|e| {
+            Ok(value) => integration.integr_yaml2json(&value).unwrap_or_else(|e| {
                 let e = format!("Problem converting integration to JSON: {}", e);
                 json!({"detail": e.to_string()})
             }),
@@ -155,7 +155,7 @@ pub async fn json_for_integration(
     };
 
     let value_from_integrations = value_from_integrations.map_or(json!({"detail": format!("tool {tool_name} is not defined in integrations.yaml")}), |value| {
-        integration.from_yaml_validate_to_json(value).unwrap_or_else(|e| {
+        integration.integr_yaml2json(value).unwrap_or_else(|e| {
             let e = format!("Problem converting integration to JSON: {}", e);
             json!({"detail": e.to_string()})
         })

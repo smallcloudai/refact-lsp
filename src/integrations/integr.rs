@@ -5,13 +5,13 @@ use crate::tools::tools_description::Tool;
 
 
 pub trait Integration: Send + Sync {
-    fn name(&self) -> String;
-    fn update_from_json(&mut self, value: &serde_json::Value) -> Result<(), String>;
-    fn from_yaml_validate_to_json(&self, value: &serde_yaml::Value) -> Result<serde_json::Value, String>;
-    fn to_tool(&self) -> Box<dyn Tool + Send>;
-    fn to_json(&self) -> Result<serde_json::Value, String>;
-    fn to_schema_json(&self) -> serde_json::Value;
-    fn default_value(&self) -> String;
+    fn integr_name(&self) -> String;
+    fn integr_update_settings(&mut self, value: &serde_json::Value) -> Result<(), String>;
+    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<serde_json::Value, String>;
+    fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send>;
+    fn integr_settings_to_json(&self) -> Result<serde_json::Value, String>;
+    fn integr_to_schema(&self) -> serde_json::Value;
+    fn integr_settings_default(&self) -> String;
     fn icon_link(&self) -> String;
 }
 

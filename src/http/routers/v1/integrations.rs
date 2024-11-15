@@ -47,15 +47,15 @@ async fn load_integration_schema_and_json(
     for (i_name, i) in integrations.iter() {
         let path = get_integration_path(&cache_dir, &i_name);
         let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
-        results.insert(i_name.clone(), (i.to_schema_json(), j_value));
+        results.insert(i_name.clone(), (i.integr_to_schema(), j_value));
     }
-    
+
     Ok(results)
 }
 
 async fn get_image_base64(
-    cache_dir: &PathBuf, 
-    icon_name: &str, 
+    cache_dir: &PathBuf,
+    icon_name: &str,
     icon_url: &str,
 ) -> Result<String, String> {
     let assets_path = cache_dir.join("assets/integrations");
@@ -109,7 +109,7 @@ pub async fn handle_v1_integrations_icons(
     let integrations = get_integrations(gcx.clone()).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
     })?;
-    
+
     let mut results = vec![];
     for (i_name, i) in integrations.iter() {
         let image_base64 = get_image_base64(&cache_dir, i_name, &i.icon_link()).await.map_err(|e|{
@@ -136,14 +136,14 @@ pub async fn handle_v1_integrations(
     let schemas_and_json_dict = load_integration_schema_and_json(gcx.clone()).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
     })?;
-    
+
     let cache_dir = gcx.read().await.cache_dir.clone();
     let enabled_path = cache_dir.join("integrations-enabled.yaml");
     let enabled_mapping = match integrations_enabled_cfg(&enabled_path).await {
         serde_yaml::Value::Mapping(map) => map,
         _ => serde_yaml::Mapping::new(),
     };
-    
+
     let mut items = vec![];
     for (name, (schema, value)) in schemas_and_json_dict {
         let item = IntegrationItem {
@@ -152,10 +152,10 @@ pub async fn handle_v1_integrations(
             schema: Some(schema),
             value: Some(value),
         };
-        
+
         items.push(item);
     }
-    
+
     let payload = serde_json::to_string_pretty(&json!(items)).expect("Failed to serialize items");
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -182,7 +182,7 @@ pub async fn handle_v1_integrations_save(
     }
     write_yaml_value(&enabled_path, &enabled_value).await
         .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e)))?;
-    
+
     if let Some(post_value) = &post.value {
         let yaml_value: serde_yaml::Value = serde_json::to_string(post_value).map_err(|e|e.to_string())
             .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
