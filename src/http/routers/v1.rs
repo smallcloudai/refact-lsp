@@ -70,27 +70,28 @@ mod integrations;
 pub fn make_v1_router() -> Router {
     let builder = Router::new()
         .route("/ping", telemetry_get!(handle_v1_ping))
+        .route("/graceful-shutdown", telemetry_get!(handle_v1_graceful_shutdown))
 
         .route("/code-completion", telemetry_post!(handle_v1_code_completion_web))
         .route("/code-lens", telemetry_post!(handle_v1_code_lens))
 
         .route("/chat", telemetry_post!(handle_v1_chat))
         .route("/chat/completions", telemetry_post!(handle_v1_chat_completions))  // standard
+
         .route("/telemetry-network", telemetry_post!(handle_v1_telemetry_network))
         .route("/snippet-accepted", telemetry_post!(handle_v1_snippet_accepted))
 
         .route("/caps", telemetry_get!(handle_v1_caps))
-        .route("/graceful-shutdown", telemetry_get!(handle_v1_graceful_shutdown))
-
-        .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
-        .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
 
         .route("/tools", telemetry_get!(handle_v1_tools))
         .route("/tools-check-if-confirmation-needed", telemetry_post!(handle_v1_tools_check_if_confirmation_needed))
+<<<<<<< HEAD
         .route("/tools-execute", telemetry_post!(handle_v1_tools_execute))
         .route("/integrations", telemetry_get!(handle_v1_integrations))
         .route("/integrations-save", telemetry_post!(handle_v1_integrations_save))
         .route("/integrations-icons", telemetry_get!(handle_v1_integrations_icons))
+=======
+>>>>>>> e54e49b4 (move things around in /v1)
 
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
         .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
@@ -98,17 +99,16 @@ pub fn make_v1_router() -> Router {
         .route("/lsp-remove-folder", telemetry_post!(handle_v1_lsp_remove_folder))
         .route("/lsp-set-active-document", telemetry_post!(handle_v1_set_active_document))
 
-        .route("/get-dashboard-plots", telemetry_get!(get_dashboard_plots))
-
         .route("/ast-file-symbols", telemetry_post!(handle_v1_ast_file_symbols))
         .route("/ast-file-dump", telemetry_post!(handle_v1_ast_file_dump))
         .route("/ast-status", telemetry_get!(handle_v1_ast_status))
 
         .route("/rag-status", telemetry_get!(handle_v1_rag_status))
         .route("/config-path", telemetry_get!(handle_v1_config_path))
-        // experimental
+
         .route("/customization", telemetry_get!(handle_v1_customization))
 
+<<<<<<< HEAD
         .route("/sync-files-extract-tar", telemetry_post!(handle_v1_sync_files_extract_tar))
 
         .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
@@ -117,10 +117,28 @@ pub fn make_v1_router() -> Router {
 
         .route("/patch-single-file-from-ticket", telemetry_post!(handle_v1_patch_single_file_from_ticket))
 
+=======
+        .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
+        .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
+
+        .route("/fullpath", telemetry_post!(handle_v1_fullpath))
+
+        .route("/integrations", telemetry_get!(handle_v1_integrations))
+        .route("/integrations-save", telemetry_post!(handle_v1_integrations_save))
+        .route("/integrations-icons", telemetry_get!(handle_v1_integrations_icons))
+
+        .route("/patch-single-file-from-ticket", telemetry_post!(handle_v1_patch_single_file_from_ticket))
+        // .route("/patch-apply-all", telemetry_post!(handle_v1_patch_single_file_from_ticket))
+
+        // experimental
+        .route("/get-dashboard-plots", telemetry_get!(get_dashboard_plots))
+
+        .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
+
+>>>>>>> e54e49b4 (move things around in /v1)
         .route("/subchat", telemetry_post!(handle_v1_subchat))
         .route("/subchat-single", telemetry_post!(handle_v1_subchat_single))
-
-        .route("/fullpath", telemetry_post!(handle_v1_fullpath));
+        ;
 
     #[cfg(feature="vecdb")]
     let builder = builder
@@ -132,8 +150,9 @@ pub fn make_v1_router() -> Router {
         .route("/mem-update-used", telemetry_post!(handle_mem_update_used))
         .route("/mem-block-until-vectorized", telemetry_get!(handle_mem_block_until_vectorized))
         .route("/mem-list", telemetry_get!(handle_mem_list))
-        .route("/ongoing-update", telemetry_post!(handle_ongoing_update_or_create))
-        .route("/ongoing-dump", telemetry_get!(handle_ongoing_dump));
+        // .route("/ongoing-update", telemetry_post!(handle_ongoing_update_or_create))
+        // .route("/ongoing-dump", telemetry_get!(handle_ongoing_dump))
+        ;
 
     builder.layer(CorsLayer::very_permissive())
 }

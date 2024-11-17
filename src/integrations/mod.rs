@@ -30,12 +30,9 @@ pub mod integr;
 pub mod yaml_schema;
 
 
-<<<<<<< HEAD
 // hint: when adding integration, update:
 // DEFAULT_INTEGRATION_VALUES, INTEGRATION_ICONS, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
-=======
 // when adding integration, update: get_empty_integrations (2 occurrences)
->>>>>>> 9b1345a1 (simplified code)
 
 
 pub fn get_empty_integrations() -> IndexMap<String, Box<dyn Integration + Send + Sync>> {
@@ -176,7 +173,6 @@ pub async fn json_for_integration(
             Ok(value)
         }
     }
-<<<<<<< HEAD
 
     Ok(())
 }
@@ -234,8 +230,6 @@ async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
     }
 
     Ok(())
-=======
->>>>>>> 9b1345a1 (simplified code)
 }
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.
