@@ -226,10 +226,7 @@ async fn _chat(
         false,
         messages.clone(),
         chat_post.chat_id.clone(),
-<<<<<<< HEAD
         should_execute_remotely,
-=======
->>>>>>> be8aae31 (config_chat.rs)
     ).await;
     ccx.subchat_tool_parameters = chat_post.subchat_tool_parameters.clone();
     ccx.postprocess_parameters = chat_post.postprocess_parameters.clone();
