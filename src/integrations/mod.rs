@@ -26,6 +26,7 @@ pub mod process_io_utils;
 pub mod integr_postgres;
 pub mod integr;
 
+pub mod config_chat;
 pub mod yaml_schema;
 
 

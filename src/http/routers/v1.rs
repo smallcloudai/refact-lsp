@@ -18,7 +18,7 @@ use crate::http::routers::v1::at_commands::{handle_v1_command_completion, handle
 use crate::http::routers::v1::at_tools::{handle_v1_tools, handle_v1_tools_check_if_confirmation_needed, handle_v1_tools_execute};
 use crate::http::routers::v1::caps::handle_v1_caps;
 use crate::http::routers::v1::caps::handle_v1_ping;
-use crate::http::routers::v1::chat::{handle_v1_chat, handle_v1_chat_completions};
+use crate::http::routers::v1::chat::{handle_v1_chat, handle_v1_chat_completions, handle_v1_chat_configuration};
 use crate::http::routers::v1::dashboard::get_dashboard_plots;
 use crate::http::routers::v1::graceful_shutdown::handle_v1_graceful_shutdown;
 use crate::http::routers::v1::snippet_accepted::handle_v1_snippet_accepted;
@@ -36,7 +36,7 @@ use crate::http::routers::v1::system_prompt::handle_v1_system_prompt;
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 #[cfg(feature="vecdb")]
-use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list, handle_ongoing_update_or_create, handle_ongoing_dump};
+use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list};
 use crate::http::routers::v1::integrations::{handle_v1_integrations, handle_v1_integrations_icons, handle_v1_integrations_save};
 use crate::http::utils::telemetry_wrapper;
 
@@ -77,6 +77,7 @@ pub fn make_v1_router() -> Router {
 
         .route("/chat", telemetry_post!(handle_v1_chat))
         .route("/chat/completions", telemetry_post!(handle_v1_chat_completions))  // standard
+        .route("/chat-configuration", telemetry_post!(handle_v1_chat_configuration))
 
         .route("/telemetry-network", telemetry_post!(handle_v1_telemetry_network))
         .route("/snippet-accepted", telemetry_post!(handle_v1_snippet_accepted))
@@ -150,8 +151,6 @@ pub fn make_v1_router() -> Router {
         .route("/mem-update-used", telemetry_post!(handle_mem_update_used))
         .route("/mem-block-until-vectorized", telemetry_get!(handle_mem_block_until_vectorized))
         .route("/mem-list", telemetry_get!(handle_mem_list))
-        // .route("/ongoing-update", telemetry_post!(handle_ongoing_update_or_create))
-        // .route("/ongoing-dump", telemetry_get!(handle_ongoing_dump))
         ;
 
     builder.layer(CorsLayer::very_permissive())
