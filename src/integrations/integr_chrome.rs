@@ -195,25 +195,6 @@ async fn setup_chrome_session(
     session_hashmap_key: &String,
 ) -> Result<Vec<String>, String> {
     let mut setup_log = vec![];
-    // if !is_chrome_session_active(&session_hashmap_key, gcx.clone()).await {
-    //     let mut is_connection = false;
-    //     if let Some(chrome_path) = args.chrome_path.clone() {
-    //         is_connection = chrome_path.starts_with("ws://");
-    //     }
-
-    //     let window_size = if args.window_width.is_some() && args.window_height.is_some() {
-    //         Some((args.window_width.unwrap(), args.window_height.unwrap()))
-    //     } else if args.window_width.is_some() {
-    //         Some((args.window_width.unwrap(), args.window_width.unwrap()))
-    //     } else {
-    //         None
-    //     };
-
-    //     let mut idle_browser_timeout = Duration::from_secs(600);
-    //     if let Some(timeout) = args.idle_browser_timeout.clone() {
-    //         idle_browser_timeout = Duration::from_secs(timeout as u64);
-    //     }
-    // }
 
     let session_entry  = {
         let gcx_locked = gcx.read().await;
@@ -231,11 +212,6 @@ async fn setup_chrome_session(
         }
     }
 
-    // let window_size = match args.window_size.as_deref() {
-    //     Some([width, height]) => Some((*width, *height)),
-    //     Some([size]) => Some((*size, *size)),
-    //     _ => None,
-    // };
     let window_size = if args.window_width.is_some() && args.window_height.is_some() {
         Some((args.window_width.unwrap(), args.window_height.unwrap()))
     } else if args.window_width.is_some() {

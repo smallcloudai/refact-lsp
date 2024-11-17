@@ -105,11 +105,7 @@ pub fn make_v1_router() -> Router {
 
         .route("/sync-files-extract-tar", telemetry_post!(handle_v1_sync_files_extract_tar))
 
-        .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
-
-        .route("/system-prompt", telemetry_post!(handle_v1_system_prompt))
-
-        .route("/patch-single-file-from-ticket", telemetry_post!(handle_v1_patch_single_file_from_ticket))
+        .route("/system-prompt", telemetry_post!(handle_v1_system_prompt))  // because it works remotely
 
         .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
