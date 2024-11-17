@@ -37,7 +37,7 @@ use crate::http::routers::v1::system_prompt::handle_v1_system_prompt;
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list};
-use crate::http::routers::v1::v1_integrations::{handle_v1_integrations, handle_v1_integrations_icons, handle_v1_integrations_save};
+use crate::http::routers::v1::v1_integrations::{handle_v1_integrations, handle_v1_integrations_icons, handle_v1_integrations_save, handle_v1_integrations_all_with_icons};
 use crate::http::utils::telemetry_wrapper;
 
 pub mod code_completion;
@@ -113,6 +113,7 @@ pub fn make_v1_router() -> Router {
         .route("/fullpath", telemetry_post!(handle_v1_fullpath))
 
         .route("/integrations", telemetry_get!(handle_v1_integrations))
+        .route("/integrations-all-with-icons", telemetry_get!(handle_v1_integrations_all_with_icons))
         .route("/integrations-save", telemetry_post!(handle_v1_integrations_save))
         .route("/integrations-icons", telemetry_get!(handle_v1_integrations_icons))
 

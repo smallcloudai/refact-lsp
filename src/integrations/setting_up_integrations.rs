@@ -2,20 +2,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use indexmap::IndexMap;
-use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
 use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Default)]
 pub struct YamlError {
     pub integr_config_path: String,
     pub error_line: usize,  // starts with 1, zero if invalid
+    pub error_msg: String,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Default)]
 pub struct IntegrationWithIconRecord {
     pub integr_name: String,
     pub integr_icon: String,
@@ -23,7 +24,7 @@ pub struct IntegrationWithIconRecord {
     pub integr_enable: bool,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Default)]
 pub struct IntegrationWithIconResult {
     pub integrations: Vec<IntegrationWithIconRecord>,
     pub error_log: Vec<YamlError>,
@@ -49,6 +50,7 @@ fn _load_everything_in_integrations_d(
                         error_log.push(YamlError {
                             integr_config_path: path.display().to_string(),
                             error_line: e.location().map(|loc| loc.line()).unwrap_or(0),
+                            error_msg: e.to_string(),
                         });
                         tracing::warn!("failed to parse {}{}: {}", path.display(), location, e.to_string());
                     }
@@ -57,6 +59,7 @@ fn _load_everything_in_integrations_d(
                     error_log.push(YamlError {
                         integr_config_path: path.display().to_string(),
                         error_line: 0,
+                        error_msg: e.to_string(),
                     });
                     tracing::warn!("failed to read {}: {}", path.display(), e.to_string());
                 }
@@ -85,14 +88,14 @@ fn _calc_integr_config_path(config_dir: &PathBuf, integr_name: &str) -> String {
     config_dir.join("integrations.d").join(format!("{}.yaml", integr_name)).to_string_lossy().into_owned()
 }
 
-pub async fn all_integrations_with_icon(
+pub async fn integrations_all_with_icons(
     gcx: Arc<ARwLock<GlobalContext>>,
-) {
+) -> IntegrationWithIconResult {
     let config_dir = gcx.read().await.config_dir.clone();
     let lst: Vec<&str> = crate::integrations::integrations_list();
     let mut error_log: Vec<YamlError> = Vec::new();
+    let mut integrations = Vec::new();
     let name2cfg = _load_everything_in_integrations_d(&config_dir, &mut error_log, &lst);
-
     for n in lst.iter() {
         let mut rec: IntegrationWithIconRecord = Default::default();
         rec.integr_name = n.to_string();
@@ -103,17 +106,22 @@ pub async fn all_integrations_with_icon(
                 if enable {
                     true
                 } else {
-                    tracing::info!("disabled {}", n);
+                    tracing::info!("disabled `{}`", n);
                     false
                 }
             } else {
-                tracing::info!("no enable field {}", n);
+                tracing::info!("no enable field `{}`", n);
                 false
             }
         } else {
-            tracing::info!("no config file {}", n);
+            tracing::info!("no config file `{}`", n);
             false
         };
+        integrations.push(rec);
+    }
+    IntegrationWithIconResult {
+        integrations,
+        error_log,
     }
 }
 

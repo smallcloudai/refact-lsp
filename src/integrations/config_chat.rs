@@ -16,7 +16,6 @@ pub async fn mix_config_messages(
     let file_path = config_dir.join("integrations.d");
 
     let mut context_file_vec = Vec::new();
-
     if let Ok(entries) = fs::read_dir(&file_path) {
         for entry in entries {
             if let Ok(entry) = entry {

@@ -4,8 +4,8 @@ use axum::Extension;
 use axum::http::{Response, StatusCode};
 use tokio::sync::RwLock as ARwLock;
 use hyper::Body;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+// use serde::{Deserialize, Serialize};
+// use serde_json::Value;
 use url::Url;
 use std::fs;
 use std::io::Read;
@@ -22,18 +22,33 @@ use crate::global_context::GlobalContext;
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
 
-#[derive(Serialize, Deserialize)]
-struct IntegrationItem {
-    name: String,
-    enabled: bool,
-    schema: Option<Value>,
-    value: Option<Value>,
-}
+// #[derive(Serialize, Deserialize)]
+// struct IntegrationItem {
+//     name: String,
+//     enabled: bool,
+//     schema: Option<Value>,
+//     value: Option<Value>,
+// }
 
-#[derive(Serialize)]
-struct IntegrationIcon {
-    name: String,
-    value: String,
+// #[derive(Serialize)]
+// struct IntegrationIcon {
+//     name: String,
+//     value: String,
+// }
+
+pub async fn handle_v1_integrations_all_with_icons(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    _: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let with_icons: crate::integrations::setting_up_integrations::IntegrationWithIconResult = crate::integrations::setting_up_integrations::integrations_all_with_icons(gcx.clone()).await;
+    let payload = serde_json::to_string_pretty(&with_icons).map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
+    })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(Body::from(payload))
+        .unwrap())
 }
 
 // async fn load_integration_schema_and_json(
@@ -173,8 +188,8 @@ pub async fn handle_v1_integrations_save(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<IntegrationItem>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+    // let post = serde_json::from_slice::<IntegrationItem>(&body_bytes)
+    //     .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
     // let cache_dir = gcx.read().await.cache_dir.clone();
     // let enabled_path = cache_dir.join("integrations-enabled.yaml");
@@ -205,6 +220,6 @@ pub async fn handle_v1_integrations_save(
     Ok(Response::builder()
        .status(StatusCode::OK)
        .header("Content-Type", "application/json")
-       .body(Body::from(format!("Integration {} updated", post.name)))
+       .body(Body::from(format!("")))
        .unwrap())
 }
