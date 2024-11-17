@@ -37,15 +37,34 @@ pub async fn mix_config_messages(
         }
     }
 
+    let custom: crate::yaml_configs::customization_loader::CustomizationYaml = match crate::yaml_configs::customization_loader::load_customization(gcx, true).await {
+        Ok(x) => x,
+        Err(why) => {
+            tracing::error!("Failed to load customization.yaml, will use compiled-in default for the configurator system prompt:\n{:?}", why);
+            crate::yaml_configs::customization_loader::load_and_mix_with_users_config(
+                crate::yaml_configs::customization_compiled_in::COMPILED_IN_INITIAL_USER_YAML,
+                "", "", true, true
+            ).unwrap()
+        }
+    };
+    let sp: &crate::yaml_configs::customization_loader::SystemPrompt = custom.system_prompts.get("configurator").unwrap();
+
+    messages.push(ChatMessage {
+        role: "system".to_string(),
+        content: ChatContent::SimpleText(sp.text.clone()),
+        tool_calls: None,
+        tool_call_id: String::new(),
+        usage: None,
+    });
     // let json_vec = context_file_vec.iter().map(|p| serde_json::json!(p)).collect::<Vec<_>>();
-    let message = ChatMessage {
+    messages.push(ChatMessage {
         role: "context_file".to_string(),
         content: ChatContent::SimpleText(serde_json::to_string(&context_file_vec).unwrap()),
         tool_calls: None,
         tool_call_id: String::new(),
         usage: None,
-    };
+    });
 
-    messages.push(message);
+    tracing::info!("AAAAA\n{:#?}", messages);
 }
 

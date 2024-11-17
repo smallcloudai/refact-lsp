@@ -200,6 +200,9 @@ system_prompts:
   agentic_tools:
     text: "%PROMPT_AGENTIC_TOOLS%"
     show: never
+  configurator:
+    text: "%PROMPT_CONFIGURATOR%"
+    show: experimental
   agentic_experimental_knowledge:
     text: "%PROMPT_AGENTIC_EXPERIMENTAL_KNOWLEDGE%"
     show: experimental
