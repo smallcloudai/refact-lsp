@@ -11,7 +11,7 @@ use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

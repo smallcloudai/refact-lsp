@@ -5,7 +5,7 @@ use serde_json::json;
 // use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use crate::global_context::GlobalContext;
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 use crate::integrations::integr_chrome::ToolChrome;
 use crate::integrations::integr_github::ToolGithub;
 use crate::integrations::integr_gitlab::ToolGitlab;
@@ -14,7 +14,7 @@ use crate::integrations::integr_postgres::ToolPostgres;
 use crate::tools::tools_description::Tool;
 use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
-pub mod integr;
+pub mod integr_abstract;
 pub mod integr_github;
 pub mod integr_gitlab;
 pub mod integr_pdb;

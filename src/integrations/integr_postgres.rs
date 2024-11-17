@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

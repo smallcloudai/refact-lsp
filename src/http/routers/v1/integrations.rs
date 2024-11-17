@@ -155,7 +155,7 @@ pub async fn handle_v1_integrations(
     //     items.push(item);
     // }
 
-    crate::integrations::integr::yaml_test1();
+    crate::integrations::integr_abstract::yaml_test1();
     let payload = "".to_string();
 
     // {get_empty_integrations, get_integration_path, get_integrations, json_for_integration, validate_integration_value};

@@ -16,7 +16,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_lines, write_to_stdin_and_flush, blocking_read_until_token_or_timeout};
 

@@ -21,7 +21,7 @@ use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use serde::{Deserialize, Serialize};
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

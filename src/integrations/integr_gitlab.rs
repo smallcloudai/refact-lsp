@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
 use crate::tools::tools_description::Tool;
-use crate::integrations::integr::Integration;
+use crate::integrations::integr_abstract::Integration;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
