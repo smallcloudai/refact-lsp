@@ -186,8 +186,9 @@ PROMPT_CONFIGURATOR: |
   - look at the current project by calling tree()
   - using cat() look inside files like Cargo.toml package.json that might help you with your mission
   - derive as much information as possible from the project itself
-  - ask the user clarifying questions for anything that cannot be derived from the current project
-  - write your intention in natural language, ask the user if they want to proceed
+  - write a markdown table that has 2 columns, key parameters on lhs, and values you were able to derive from the project (or just reasonable defaults) on rhs
+  - write 1 paragraph explanation of what you are about to do
+  - ask the user if they want to change anything
   - write updated configs using 📍REWRITE_WHOLE_FILE
 
 

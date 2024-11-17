@@ -69,7 +69,7 @@ pub async fn handle_v1_chat_configuration(
     })?;
     let mut messages = deserialize_messages_from_post(&chat_post.messages)?;
     crate::integrations::config_chat::mix_config_messages(gcx.clone(), &mut messages).await;
-    _chat(gcx, &mut chat_post, &mut messages, false).await
+    _chat(gcx, &mut chat_post, &mut messages, true).await
 }
 
 pub async fn handle_v1_chat(
