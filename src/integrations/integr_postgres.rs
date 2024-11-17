@@ -57,7 +57,6 @@ impl IntegrationTrait for ToolPostgres {
         j
     }
 
-    // fn integr_settings_default(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }
     // fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
 }
 

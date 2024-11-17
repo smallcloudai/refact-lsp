@@ -7,7 +7,6 @@
 // use crate::tools::tools_description::Tool;
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
-pub mod integrations_list;
 
 pub mod integr_abstract;
 // pub mod integr_github;
@@ -22,9 +21,31 @@ pub mod sessions;
 pub mod config_chat;
 pub mod yaml_schema;
 
-// use crate::integrations::integr_abstract::IntegrationTrait;
+
+use integr_abstract::IntegrationTrait;
 
 
+pub fn integration_from_name(n: &String) -> Box<dyn IntegrationTrait + Send + Sync>
+{
+    match n.as_str() {
+        // "github" => Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+        // "gitlab" => Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+        // "pdb" => Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+        "postgres" => Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+        // "chrome" => Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+        _ => panic!("Unknown integration name: {}", n),
+    }
+}
+
+pub fn integrations_list() -> Vec<&'static str> {
+    vec![
+        // "github",
+        // "gitlab",
+        // "pdb",
+        "postgres",
+        // "chrome"
+    ]
+}
 
 
 
