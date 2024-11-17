@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use indexmap::IndexMap;
 use std::collections::HashMap;
-use std::sync::Arc;
 use crate::call_validation::ChatMessage;
 
 
@@ -45,6 +43,7 @@ pub struct ISchemaAvailable {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISchemaDocker {
     pub new_container_default: DockerService,
+    pub smartlinks: Vec<ISmartLink>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]

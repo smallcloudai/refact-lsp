@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use indexmap::IndexMap;
 use serde_json::json;
-use tracing::{info, warn};
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 use crate::global_context::GlobalContext;
@@ -70,10 +69,10 @@ pub async fn get_integrations(
         let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
 
         if j_value.get("detail").is_some() {
-            warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
+            tracing::warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
         } else {
             if let Err(e) = i.integr_update_settings(&j_value) {
-                warn!("failed to load integration {}: {}", i_name, e);
+                tracing::warn!("failed to load integration {}: {}", i_name, e);
             };
         }
         results.insert(i_name.clone(), i);

@@ -189,7 +189,7 @@ postgres:
       f_default: "$POSTGRES_PASSWORD"
       smartlinks:
         - sl_label: "Open passwords.yaml"
-          sl_goto: "IDE:passwords.yaml"
+          sl_goto: "EDITOR:passwords.yaml"
     db:
       f_type: string
       f_placeholder: marketing_db
@@ -198,8 +198,9 @@ postgres:
       sl_chat:
         - role: "user"
           content: |
-            Connect to the postgres database, list and briefly describe the tables available.
-            If it doesn't work, try to interpret why.
+            🔧 Use postgres database to briefly list the tables available, express satisfaction and relief if it works, and change nothing.
+            If it doesn't work, go through the usual plan in the system prompt.
+            The current config file is @file %CURRENT_CONFIG%
   available:
     on_your_laptop:
       possible: true
@@ -209,14 +210,13 @@ postgres:
     new_container_default:
       image: "postgres:13"
       environment:
-        POSTGRES_DB: marketing_db
+        POSTGRES_DB: "marketing_db"
         POSTGRES_USER: "john_doe"
         POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
     smartlinks:
-      - sl_label: "✨ Wizard"
+      - sl_label: "Add Database Container"
         sl_chat:
           - role: "user"
             content: |
-              Connect to the postgres database, list and briefly describe the tables available.
-              If it doesn't work, try to interpret why.
+              🔧 Your job is to create a new section under "docker" that will define a new postgres container. Follow the system prompt.
 "#;
