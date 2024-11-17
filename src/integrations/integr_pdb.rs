@@ -60,7 +60,7 @@ impl Integration for ToolPdb {
         "pdb".to_string()
     }
 
-    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let settings_pdb = serde_json::from_value::<SettingsPdb>(value.clone())
             .map_err(|e|e.to_string())?;
         self.settings_pdb = settings_pdb;
@@ -79,7 +79,7 @@ impl Integration for ToolPdb {
         Box::new(ToolPdb {settings_pdb: self.settings_pdb.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn integr_settings_to_json(&self) -> Result<Value, String> {
+    fn integr_settings_as_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.settings_pdb).map_err(|e| e.to_string())
     }
 

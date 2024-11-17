@@ -1,18 +1,42 @@
-// use serde::Serialize;
+use serde::Serialize;
+use serde::Deserialize;
 // use serde::de::DeserializeOwned;
-use crate::tools::tools_description::Tool;
 use indexmap::IndexMap;
 
+use crate::tools::tools_description::Tool;
 
-pub trait Integration: Send + Sync {
+
+// on_laptop_project: &String,
+// when_isolated_image: &String,
+
+pub trait IntegrationTrait: Send + Sync {
     fn integr_name(&self) -> String;
-    fn integr_update_settings(&mut self, value: &serde_json::Value) -> Result<(), String>;
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<serde_json::Value, String>;
+    fn integr_schema(&self) -> serde_json::Value;
+
+    fn integr_settings_apply(&mut self, value: &serde_json::Value) -> Result<(), String>;
+    fn integr_settings_as_json(&self) -> Result<serde_json::Value, String>;
+
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send>;
-    fn integr_settings_to_json(&self) -> Result<serde_json::Value, String>;
-    // fn integr_to_schema(&self) -> serde_json::Value;
-    fn integr_settings_default(&self) -> String;
-    fn icon_link(&self) -> String;
+
+    // fn integr_icon_base64(&self) -> String;
+    // fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<serde_json::Value, String>;
+    // fn icon_link(&self) -> String;
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct IntegrationAvailableLaptop {
+    pub project_pattern: String,
+    pub enable: bool,
+}
+
+pub struct IntegrationAvailableDocker {
+    pub image_pattern: String,
+    pub enable: bool,
+}
+
+pub struct IntegrationAvailable {
+    pub on_your_laptop: Vec<IntegrationAvailableLaptop>,
+    pub when_isolated: Vec<IntegrationAvailableDocker>,
 }
 
 // pub fn json_schema<T: JsonSchema + Serialize + DeserializeOwned + Default>() -> Result<serde_json::Value, String> {

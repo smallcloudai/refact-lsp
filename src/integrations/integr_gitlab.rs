@@ -30,7 +30,7 @@ impl Integration for ToolGitlab{
         "gitlab".to_string()
     }
 
-    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_gitlab = serde_json::from_value::<IntegrationGitLab>(value.clone())
             .map_err(|e|e.to_string())?;
         self.integration_gitlab = integration_gitlab;
@@ -49,7 +49,7 @@ impl Integration for ToolGitlab{
         Box::new(ToolGitlab {integration_gitlab: self.integration_gitlab.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn integr_settings_to_json(&self) -> Result<Value, String> {
+    fn integr_settings_as_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_gitlab).map_err(|e| e.to_string())
     }
 

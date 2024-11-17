@@ -31,7 +31,7 @@ impl Integration for ToolGithub {
         "github".to_string()
     }
 
-    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_github = serde_json::from_value::<IntegrationGitHub>(value.clone())
             .map_err(|e|e.to_string())?;
         self.integration_github = integration_github;
@@ -50,7 +50,7 @@ impl Integration for ToolGithub {
         Box::new(ToolGithub {integration_github: self.integration_github.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn integr_settings_to_json(&self) -> Result<Value, String> {
+    fn integr_settings_as_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_github).map_err(|e| e.to_string())
     }
 

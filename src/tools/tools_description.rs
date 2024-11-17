@@ -11,10 +11,9 @@ use tokio::sync::Mutex as AMutex;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
-
 use crate::yaml_configs::create_configs::read_yaml_into_value;
+// use crate::integrations::docker::integr_docker::ToolDocker;
 
-use crate::integrations::docker::integr_docker::ToolDocker;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandsRequireConfirmationConfig {
@@ -78,7 +77,7 @@ pub async fn read_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<
 
 pub async fn tools_merged_and_filtered(
     gcx: Arc<ARwLock<GlobalContext>>,
-    supports_clicks: bool,
+    _supports_clicks: bool,  // XXX
 ) -> Result<IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>, String> {
     let (ast_on, vecdb_on, allow_experimental) = {
         let gcx_locked = gcx.read().await;
@@ -194,7 +193,8 @@ pub async fn tools_merged_and_filtered(
 
 pub async fn commands_require_confirmation_rules_from_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<CommandsRequireConfirmationConfig, String>
 {
-    let integrations_value = read_integrations_yaml(gcx.clone()).await?;
+    // XXX
+    // let integrations_value = read_integrations_yaml(gcx.clone()).await?;
     let cache_dir = gcx.read().await.cache_dir.clone();
     let yaml_path = cache_dir.join("integrations.yaml");
     let integrations_value = read_yaml_into_value(&yaml_path).await?;

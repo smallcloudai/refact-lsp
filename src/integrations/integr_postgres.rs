@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
-use crate::integrations::integr_abstract::Integration;
+use crate::integrations::integr_abstract::IntegrationTrait;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -24,36 +24,41 @@ pub struct ToolPostgres {
     pub integration_postgres: IntegrationPostgres,
 }
 
-impl Integration for ToolPostgres {
-    fn integr_name(&self) -> String {
-        "postgres".to_string()
-    }
+impl IntegrationTrait for ToolPostgres {
+    fn integr_name(&self) -> String { "postgres".to_string() }
 
-    fn integr_update_settings(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_postgres = serde_json::from_value::<IntegrationPostgres>(value.clone())
             .map_err(|e|e.to_string())?;
         self.integration_postgres = integration_postgres;
         Ok(())
     }
 
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_github = serde_yaml::from_value::<IntegrationPostgres>(value.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
     }
+
+    // fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+    //     let integration_github = serde_yaml::from_value::<IntegrationPostgres>(value.clone()).map_err(|e| {
+    //         let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
+    //         format!("{}{}", e.to_string(), location)
+    //     })?;
+    //     serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    // }
 
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
         Box::new(ToolPostgres {integration_postgres: self.integration_postgres.clone()}) as Box<dyn Tool + Send>
     }
 
-    fn integr_settings_to_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
+    fn integr_schema(&self) -> serde_json::Value
+    {
+        let y: serde_yaml::Value = serde_yaml::from_str(POSTGRES_INTEGRATION_SCHEMA).unwrap();
+        let j = serde_json::to_value(y).unwrap();
+        j
     }
 
-    fn integr_settings_default(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }
-    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
+    // fn integr_settings_default(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }
+    // fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
 }
 
 impl ToolPostgres {

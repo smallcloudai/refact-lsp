@@ -6,9 +6,8 @@ use tokio::io::AsyncWriteExt;
 use sha2::{Sha256, Digest};
 use serde_yaml;
 use std::path::{Path, PathBuf};
-use tracing::{error, warn};
 use crate::global_context::GlobalContext;
-use crate::integrations::{get_empty_integrations, get_integration_path};
+// use crate::integrations::{get_empty_integrations, get_integration_path};
 
 
 const DEFAULT_CHECKSUM_FILE: &str = "default-checksums.yaml";
@@ -28,7 +27,7 @@ pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> St
     for (file_name, content) in files {
         let file_path = cache_dir.join(file_name);
         if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, content).await {
-            warn!("{}", e);
+            tracing::warn!("{}", e);
             results.push(format!("Error processing {:?}: {}", file_path, e));
         } else {
             results.push(file_path.to_string_lossy().to_string());
@@ -37,32 +36,33 @@ pub async fn yaml_configs_try_create_all(gcx: Arc<ARwLock<GlobalContext>>) -> St
 
     let integrations_d = cache_dir.join("integrations.d");
     if let Err(e) = tokio::fs::create_dir_all(&integrations_d).await {
-        warn!("Failed to create directory {:?}: {}", integrations_d, e);
+        tracing::warn!("Failed to create directory {:?}: {}", integrations_d, e);
         results.push(format!("Error creating directory {:?}: {}", integrations_d, e));
     }
-    let integrations_enabled = cache_dir.join("integrations-enabled.yaml");
-    let integrations = get_empty_integrations();
 
-    for (file_name, content) in integrations.iter().map(|(k, v)| (k.clone(), v.integr_settings_default())) {
-        let file_path = get_integration_path(&cache_dir, &file_name);
-        if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, &content).await {
-            warn!("{}", e);
-            results.push(format!("Error processing {:?}: {}", file_path, e));
-        } else {
-            results.push(file_path.to_string_lossy().to_string());
-        }
-        let integr_name = file_path.file_stem().unwrap().to_string_lossy().to_string();
-        let mut enabled_cfg = integrations_enabled_cfg(&integrations_enabled).await;
-        if let None = enabled_cfg.get(&integr_name) {
-            if let serde_yaml::Value::Mapping(ref mut map) = enabled_cfg {
-                map.insert(serde_yaml::Value::String(integr_name), serde_yaml::Value::Bool(false));
-            }
-            if let Err(e) = write_yaml_value(&integrations_enabled, &enabled_cfg).await {
-                error!("Failed to write {}: {}", integrations_enabled.display(), e);
-                panic!("{}", e);
-            }
-        }
-    }
+    // let integrations_enabled = cache_dir.join("integrations-enabled.yaml");
+    // let integrations = get_empty_integrations();
+
+    // for (file_name, content) in integrations.iter().map(|(k, v)| (k.clone(), v.integr_settings_default())) {
+    //     let file_path = get_integration_path(&cache_dir, &file_name);
+    //     if let Err(e) = _yaml_file_exists_or_create(gcx.clone(), &file_path, &content).await {
+    //         tracing::warn!("{}", e);
+    //         results.push(format!("Error processing {:?}: {}", file_path, e));
+    //     } else {
+    //         results.push(file_path.to_string_lossy().to_string());
+    //     }
+    //     let integr_name = file_path.file_stem().unwrap().to_string_lossy().to_string();
+    //     let mut enabled_cfg = integrations_enabled_cfg(&integrations_enabled).await;
+    //     if let None = enabled_cfg.get(&integr_name) {
+    //         if let serde_yaml::Value::Mapping(ref mut map) = enabled_cfg {
+    //             map.insert(serde_yaml::Value::String(integr_name), serde_yaml::Value::Bool(false));
+    //         }
+    //         if let Err(e) = write_yaml_value(&integrations_enabled, &enabled_cfg).await {
+    //             error!("Failed to write {}: {}", integrations_enabled.display(), e);
+    //             panic!("{}", e);
+    //         }
+    //     }
+    // }
 
     results.get(0).cloned().unwrap_or_default()
 }

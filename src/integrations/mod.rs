@@ -1,63 +1,40 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use indexmap::IndexMap;
-use serde_json::json;
+// use std::path::PathBuf;
+// use std::sync::Arc;
+// use indexmap::IndexMap;
 // use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 
 // use crate::global_context::GlobalContext;
-use crate::integrations::integr_abstract::Integration;
-use crate::integrations::integr_chrome::ToolChrome;
-use crate::integrations::integr_github::ToolGithub;
-use crate::integrations::integr_gitlab::ToolGitlab;
-use crate::integrations::integr_pdb::ToolPdb;
-use crate::integrations::integr_postgres::ToolPostgres;
 // use crate::tools::tools_description::Tool;
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
+pub mod integrations_list;
+
 pub mod integr_abstract;
-pub mod integr_github;
-pub mod integr_gitlab;
-pub mod integr_pdb;
-pub mod integr_chrome;
+// pub mod integr_github;
+// pub mod integr_gitlab;
+// pub mod integr_pdb;
+// pub mod integr_chrome;
 pub mod integr_postgres;
 
+pub mod process_io_utils;
 pub mod docker;
 pub mod sessions;
-pub mod process_io_utils;
-
 pub mod config_chat;
 pub mod yaml_schema;
 
-
-// hint: when adding integration, update:
-// DEFAULT_INTEGRATION_VALUES, INTEGRATION_ICONS, integrations_paths, validate_integration_value, load_integration_tools, load_integration_schema_and_json
-// when adding integration, update: get_empty_integrations (2 occurrences)
+// use crate::integrations::integr_abstract::IntegrationTrait;
 
 
-pub fn get_empty_integrations() -> IndexMap<String, Box<dyn Integration + Send + Sync>> {
-    let integration_names = ["github", "gitlab", "pdb", "postgres", "chrome"];
-    let mut integrations = IndexMap::new();
-    for i_name in integration_names {
-        let i = match i_name {
-            "github" => Box::new(ToolGithub {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
-            "gitlab" => Box::new(ToolGitlab {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
-            "pdb" => Box::new(ToolPdb {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
-            "postgres" => Box::new(ToolPostgres {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
-            "chrome" => Box::new(ToolChrome {..Default::default()} ) as Box<dyn Integration + Send + Sync>,
-            _ => panic!("Unknown integration name: {}", i_name)
-        };
-        integrations.insert(i_name.to_string(), i);
-    }
-    integrations
-}
 
-pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
-    cache_dir.join("integrations.d").join(format!("{}.yaml", name))
-}
+
+
+// pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
+//     cache_dir.join("integrations.d").join(format!("{}.yaml", name))
+// }
 
 // pub async fn get_integrations(
 //     gcx: Arc<ARwLock<GlobalContext>>,
-// ) -> Result<IndexMap<String, Box<dyn Integration + Send + Sync>>, String> {
+// ) -> Result<IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>>, String> {
 //     let integrations = get_empty_integrations();
 //     let cache_dir = gcx.read().await.cache_dir.clone();
 
@@ -71,7 +48,7 @@ pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
 //         if j_value.get("detail").is_some() {
 //             tracing::warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
 //         } else {
-//             if let Err(e) = i.integr_update_settings(&j_value) {
+//             if let Err(e) = i.integr_settings_apply(&j_value) {
 //                 tracing::warn!("failed to load integration {}: {}", i_name, e);
 //             };
 //         }
@@ -132,7 +109,7 @@ pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
 // pub async fn json_for_integration(
 //     yaml_path: &PathBuf,
 //     value_from_integrations: Option<&serde_yaml::Value>,
-//     integration: &Box<dyn Integration + Send + Sync>,
+//     integration: &Box<dyn IntegrationTrait + Send + Sync>,
 // ) -> Result<serde_json::Value, String> {
 //     let tool_name = integration.integr_name().clone();
 
@@ -176,7 +153,7 @@ pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
 //     Ok(())
 // }
 
-// async fn load_tool_from_yaml<T: Tool + Integration + Send + 'static>(
+// async fn load_tool_from_yaml<T: Tool + IntegrationTrait + Send + 'static>(
 //     yaml_path: Option<&PathBuf>,
 //     tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
 //     value_from_integrations: Option<&serde_yaml::Value>,
