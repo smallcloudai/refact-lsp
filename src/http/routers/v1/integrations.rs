@@ -5,7 +5,7 @@ use axum::http::{Response, StatusCode};
 use tokio::sync::RwLock as ARwLock;
 use hyper::Body;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use url::Url;
 use std::fs;
 use std::io::Read;
@@ -18,7 +18,7 @@ use tracing::info;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::integrations::{get_empty_integrations, get_integration_path, get_integrations, json_for_integration, validate_integration_value};
+use crate::integrations::{get_empty_integrations, get_integration_path};
 use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
 
@@ -36,22 +36,22 @@ struct IntegrationIcon {
     value: String,
 }
 
-async fn load_integration_schema_and_json(
-    gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<IndexMap<String, (Value, Value)>, String> {
-    let integrations = get_empty_integrations();
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
+// async fn load_integration_schema_and_json(
+//     gcx: Arc<ARwLock<GlobalContext>>,
+// ) -> Result<IndexMap<String, (Value, Value)>, String> {
+//     let integrations = get_empty_integrations();
+//     let cache_dir = gcx.read().await.cache_dir.clone();
+//     let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
 
-    let mut results = IndexMap::new();
-    for (i_name, i) in integrations.iter() {
-        let path = get_integration_path(&cache_dir, &i_name);
-        let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
-        results.insert(i_name.clone(), (i.integr_to_schema(), j_value));
-    }
+//     let mut results = IndexMap::new();
+//     for (i_name, i) in integrations.iter() {
+//         let path = get_integration_path(&cache_dir, &i_name);
+//         let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
+//         results.insert(i_name.clone(), (i.integr_to_schema(), j_value));
+//     }
 
-    Ok(results)
-}
+//     Ok(results)
+// }
 
 async fn get_image_base64(
     cache_dir: &PathBuf,
@@ -106,22 +106,23 @@ pub async fn handle_v1_integrations_icons(
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let cache_dir = gcx.read().await.cache_dir.clone();
-    let integrations = get_integrations(gcx.clone()).await.map_err(|e|{
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
-    })?;
+    // let integrations = get_integrations(gcx.clone()).await.map_err(|e|{
+    //     ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    // })?;
 
-    let mut results = vec![];
-    for (i_name, i) in integrations.iter() {
-        let image_base64 = get_image_base64(&cache_dir, i_name, &i.icon_link()).await.map_err(|e|{
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get image: {}", e))
-        })?;
-        results.push(IntegrationIcon {
-            name: i_name.clone(),
-            value: image_base64,
-        });
-    }
+    // let mut results = vec![];
+    // for (i_name, i) in integrations.iter() {
+    //     let image_base64 = get_image_base64(&cache_dir, i_name, &i.icon_link()).await.map_err(|e|{
+    //         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get image: {}", e))
+    //     })?;
+    //     results.push(IntegrationIcon {
+    //         name: i_name.clone(),
+    //         value: image_base64,
+    //     });
+    // }
 
-    let payload = serde_json::to_string_pretty(&json!(results)).expect("Failed to serialize results");
+    // let payload = serde_json::to_string_pretty(&json!(results)).expect("Failed to serialize results");
+    let payload = String::new();
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -175,31 +176,31 @@ pub async fn handle_v1_integrations_save(
     let post = serde_json::from_slice::<IntegrationItem>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let cache_dir = gcx.read().await.cache_dir.clone();
-    let enabled_path = cache_dir.join("integrations-enabled.yaml");
-    let mut enabled_value = integrations_enabled_cfg(&enabled_path).await;
-    if let serde_yaml::Value::Mapping(ref mut map) = enabled_value {
-        map.insert(serde_yaml::Value::String(post.name.clone()), serde_yaml::Value::Bool(post.enabled));
-    } else {
-        return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse {:?} as YAML::Mapping", enabled_path)));
-    }
-    write_yaml_value(&enabled_path, &enabled_value).await
-        .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e)))?;
+    // let cache_dir = gcx.read().await.cache_dir.clone();
+    // let enabled_path = cache_dir.join("integrations-enabled.yaml");
+    // let mut enabled_value = integrations_enabled_cfg(&enabled_path).await;
+    // if let serde_yaml::Value::Mapping(ref mut map) = enabled_value {
+    //     map.insert(serde_yaml::Value::String(post.name.clone()), serde_yaml::Value::Bool(post.enabled));
+    // } else {
+    //     return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse {:?} as YAML::Mapping", enabled_path)));
+    // }
+    // write_yaml_value(&enabled_path, &enabled_value).await
+    //     .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e)))?;
 
-    if let Some(post_value) = &post.value {
-        let yaml_value: serde_yaml::Value = serde_json::to_string(post_value).map_err(|e|e.to_string())
-            .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
-            .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR converting JSON to YAML: {}", e)))?;
+    // if let Some(post_value) = &post.value {
+    //     let yaml_value: serde_yaml::Value = serde_json::to_string(post_value).map_err(|e|e.to_string())
+    //         .and_then(|s|serde_yaml::from_str(&s).map_err(|e|e.to_string()))
+    //         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR converting JSON to YAML: {}", e)))?;
 
-        let yaml_value = validate_integration_value(&post.name, yaml_value).await
-            .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR validating integration value: {}", e)))?;
+    //     let yaml_value = validate_integration_value(&post.name, yaml_value).await
+    //         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("ERROR validating integration value: {}", e)))?;
 
-        let path = get_integration_path(&cache_dir, &post.name);
+    //     let path = get_integration_path(&cache_dir, &post.name);
 
-        write_yaml_value(&path, &yaml_value).await.map_err(|e|{
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e))
-        })?;
-    }
+    //     write_yaml_value(&path, &yaml_value).await.map_err(|e|{
+    //         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write YAML: {}", e))
+    //     })?;
+    // }
 
     Ok(Response::builder()
        .status(StatusCode::OK)

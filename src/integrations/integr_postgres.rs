@@ -8,17 +8,14 @@ use serde_json::Value;
 use serde_yaml;
 use std::collections::HashMap;
 use std::sync::Arc;
-use schemars::JsonSchema;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
-use crate::integrations::integr::{json_schema, Integration};
+use crate::integrations::integr::Integration;
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct IntegrationPostgres {
-    #[schemars(description = "Path to the psql binary.")]
     pub psql_binary_path: Option<String>,
-    #[schemars(description = "Connection string for the PSQL database.")]
     pub connection_string: String,
 }
 
@@ -53,10 +50,6 @@ impl Integration for ToolPostgres {
 
     fn integr_settings_to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
-    }
-
-    fn integr_to_schema(&self) -> Value {
-        json_schema::<IntegrationPostgres>().unwrap()
     }
 
     fn integr_settings_default(&self) -> String { DEFAULT_POSTGRES_INTEGRATION_YAML.to_string() }

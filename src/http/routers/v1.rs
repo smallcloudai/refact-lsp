@@ -86,13 +86,7 @@ pub fn make_v1_router() -> Router {
 
         .route("/tools", telemetry_get!(handle_v1_tools))
         .route("/tools-check-if-confirmation-needed", telemetry_post!(handle_v1_tools_check_if_confirmation_needed))
-<<<<<<< HEAD
         .route("/tools-execute", telemetry_post!(handle_v1_tools_execute))
-        .route("/integrations", telemetry_get!(handle_v1_integrations))
-        .route("/integrations-save", telemetry_post!(handle_v1_integrations_save))
-        .route("/integrations-icons", telemetry_get!(handle_v1_integrations_icons))
-=======
->>>>>>> e54e49b4 (move things around in /v1)
 
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
         .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
@@ -109,7 +103,6 @@ pub fn make_v1_router() -> Router {
 
         .route("/customization", telemetry_get!(handle_v1_customization))
 
-<<<<<<< HEAD
         .route("/sync-files-extract-tar", telemetry_post!(handle_v1_sync_files_extract_tar))
 
         .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
@@ -118,7 +111,6 @@ pub fn make_v1_router() -> Router {
 
         .route("/patch-single-file-from-ticket", telemetry_post!(handle_v1_patch_single_file_from_ticket))
 
-=======
         .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
 
@@ -136,7 +128,6 @@ pub fn make_v1_router() -> Router {
 
         .route("/code-completion-prompt", telemetry_post!(handle_v1_code_completion_prompt))
 
->>>>>>> e54e49b4 (move things around in /v1)
         .route("/subchat", telemetry_post!(handle_v1_subchat))
         .route("/subchat-single", telemetry_post!(handle_v1_subchat_single))
         ;

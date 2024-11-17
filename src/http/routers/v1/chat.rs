@@ -102,12 +102,6 @@ async fn _chat(
     messages: &mut Vec<ChatMessage>,
     allow_at: bool,
 ) -> Result<Response<Body>, ScratchError> {
-    let mut chat_post = serde_json::from_slice::<ChatPost>(&body_bytes).map_err(|e| {
-        info!("chat handler cannot parse input:\n{:?}", body_bytes);
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
-    })?;
-    let mut messages = deserialize_messages_from_post(&chat_post.messages)?;
-
     // converts tools into openai style
     if let Some(tools) = &mut chat_post.tools {
         for tool in tools {
@@ -117,7 +111,7 @@ async fn _chat(
         }
     }
 
-    let caps = crate::global_context::try_load_caps_quickly_if_not_present(global_context.clone(), 0).await?;
+    let caps = crate::global_context::try_load_caps_quickly_if_not_present(gcx.clone(), 0).await?;
     let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, supports_multimodality, supports_clicks) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
@@ -178,15 +172,15 @@ async fn _chat(
         }
     }
 
-    let docker_tool_maybe = docker_tool_load(global_context.clone()).await
+    let docker_tool_maybe = docker_tool_load(gcx.clone()).await
         .map_err(|e| info!("No docker tool available: {e}")).ok().map(Arc::new);
     let run_chat_threads_inside_container = docker_tool_maybe.clone()
         .map(|docker_tool| docker_tool.integration_docker.run_chat_threads_inside_container)
         .unwrap_or(false);
-    let should_execute_remotely = run_chat_threads_inside_container && !global_context.read().await.cmdline.inside_container;
+    let should_execute_remotely = run_chat_threads_inside_container && !gcx.read().await.cmdline.inside_container;
 
     if should_execute_remotely {
-        docker_container_check_status_or_start(global_context.clone(), docker_tool_maybe.clone(), &chat_post.chat_id).await
+        docker_container_check_status_or_start(gcx.clone(), docker_tool_maybe.clone(), &chat_post.chat_id).await
             .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     }
 

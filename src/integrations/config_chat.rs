@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::fs;
 use tokio::sync::RwLock as ARwLock;
+use std::collections::HashMap;
 
 use crate::global_context::GlobalContext;
 use crate::call_validation::{ChatContent, ChatMessage, ContextFile};
@@ -43,7 +44,7 @@ pub async fn mix_config_messages(
             tracing::error!("Failed to load customization.yaml, will use compiled-in default for the configurator system prompt:\n{:?}", why);
             crate::yaml_configs::customization_loader::load_and_mix_with_users_config(
                 crate::yaml_configs::customization_compiled_in::COMPILED_IN_INITIAL_USER_YAML,
-                "", "", true, true
+                "", "", true, true, &HashMap::new(),
             ).unwrap()
         }
     };

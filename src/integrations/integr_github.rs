@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
@@ -12,15 +11,13 @@ use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
-use crate::integrations::integr::{json_schema, Integration};
+use crate::integrations::integr::Integration;
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitHub {
-    #[schemars(description = "Path to the GitHub CLI binary.")]
     pub gh_binary_path: Option<String>,
-    #[schemars(description = "GitHub token for authentication.")]
     pub GH_TOKEN: String,
 }
 
@@ -55,10 +52,6 @@ impl Integration for ToolGithub {
 
     fn integr_settings_to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.integration_github).map_err(|e| e.to_string())
-    }
-
-    fn integr_to_schema(&self) -> Value {
-        json_schema::<IntegrationGitHub>().unwrap()
     }
 
     fn integr_settings_default(&self) -> String { DEFAULT_GITHUB_INTEGRATION_YAML.to_string() }

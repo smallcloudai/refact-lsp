@@ -9,7 +9,6 @@ use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use tokio::time::Duration;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +16,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
-use crate::integrations::integr::{json_schema, Integration};
+use crate::integrations::integr::Integration;
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_lines, write_to_stdin_and_flush, blocking_read_until_token_or_timeout};
 
@@ -26,9 +25,8 @@ const SESSION_TIMEOUT_AFTER_INACTIVITY: Duration = Duration::from_secs(30 * 60);
 const PDB_TOKEN: &str = "(Pdb)";
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SettingsPdb {
-    #[schemars(description = "Path to the Python binary.")]
     pub python_path: Option<String>,
 }
 
@@ -83,10 +81,6 @@ impl Integration for ToolPdb {
 
     fn integr_settings_to_json(&self) -> Result<Value, String> {
         serde_json::to_value(&self.settings_pdb).map_err(|e| e.to_string())
-    }
-
-    fn integr_to_schema(&self) -> Value {
-        json_schema::<SettingsPdb>().unwrap()
     }
 
     fn integr_settings_default(&self) -> String { DEFAULT_PDB_INTEGRATION_YAML.to_string() }

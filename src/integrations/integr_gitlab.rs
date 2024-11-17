@@ -3,24 +3,20 @@ use std::collections::HashMap;
 use tokio::sync::Mutex as AMutex;
 use tokio::process::Command;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
-
 use crate::tools::tools_description::Tool;
-use serde_json::Value;
-use crate::integrations::integr::{json_schema, Integration};
+use crate::integrations::integr::Integration;
 
 
-#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitLab {
-    #[schemars(description = "Path to the GitLab CLI binary.")]
     pub glab_binary_path: Option<String>,
-    #[schemars(description = "GitLab token for authentication.")]
     pub GITLAB_TOKEN: String,
 }
 
@@ -57,9 +53,6 @@ impl Integration for ToolGitlab{
         serde_json::to_value(&self.integration_gitlab).map_err(|e| e.to_string())
     }
 
-    fn integr_to_schema(&self) -> Value {
-        json_schema::<IntegrationGitLab>().unwrap()
-    }
     fn integr_settings_default(&self) -> String { DEFAULT_GITLAB_INTEGRATION_YAML.to_string() }
     fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968853.png".to_string() }
 }
