@@ -211,5 +211,5 @@ postgres:
         sl_chat:
           - role: "user"
             content: |
-              🔧 Your job is to create a new section under "docker" that will define a new postgres container. Follow the system prompt.
+              🔧 Your job is to create a new section under "docker" that will define a new postgres container, inside the current config file %CURRENT_CONFIG%. Follow the system prompt.
 "#;

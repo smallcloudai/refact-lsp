@@ -68,7 +68,7 @@ pub async fn handle_v1_chat_configuration(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
     let mut messages = deserialize_messages_from_post(&chat_post.messages)?;
-    crate::integrations::config_chat::mix_config_messages(gcx.clone(), &mut messages).await;
+    crate::integrations::config_chat::mix_config_messages(gcx.clone(), &mut messages, &chat_post.current_config_file).await;
     _chat(gcx, &mut chat_post, &mut messages, true).await
 }
 
