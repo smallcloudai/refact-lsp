@@ -20,14 +20,15 @@ pub mod docker;
 pub mod sessions;
 pub mod config_chat;
 pub mod yaml_schema;
+pub mod setting_up_integrations;
 
 
 use integr_abstract::IntegrationTrait;
 
 
-pub fn integration_from_name(n: &String) -> Box<dyn IntegrationTrait + Send + Sync>
+pub fn integration_from_name(n: &str) -> Box<dyn IntegrationTrait + Send + Sync>
 {
-    match n.as_str() {
+    match n {
         // "github" => Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
         // "gitlab" => Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
         // "pdb" => Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
@@ -35,6 +36,19 @@ pub fn integration_from_name(n: &String) -> Box<dyn IntegrationTrait + Send + Sy
         // "chrome" => Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
         _ => panic!("Unknown integration name: {}", n),
     }
+}
+
+pub fn icon_from_name(n: &str) -> String
+{
+    // match n {
+    //     // "github" => Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+    //     // "gitlab" => Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+    //     // "pdb" => Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+    //     "postgres" => Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+    //     // "chrome" => Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
+    //     _ => panic!("Unknown integration name: {}", n),
+    // }
+    return "".to_string();
 }
 
 pub fn integrations_list() -> Vec<&'static str> {
@@ -53,31 +67,6 @@ pub fn integrations_list() -> Vec<&'static str> {
 //     cache_dir.join("integrations.d").join(format!("{}.yaml", name))
 // }
 
-// pub async fn get_integrations(
-//     gcx: Arc<ARwLock<GlobalContext>>,
-// ) -> Result<IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>>, String> {
-//     let integrations = get_empty_integrations();
-//     let cache_dir = gcx.read().await.cache_dir.clone();
-
-//     let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
-
-//     let mut results = IndexMap::new();
-//     for (i_name, mut i) in integrations {
-//         let path = get_integration_path(&cache_dir, &i_name);
-//         let j_value = json_for_integration(&path, integrations_yaml_value.get(&i_name), &i).await?;
-
-//         if j_value.get("detail").is_some() {
-//             tracing::warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
-//         } else {
-//             if let Err(e) = i.integr_settings_apply(&j_value) {
-//                 tracing::warn!("failed to load integration {}: {}", i_name, e);
-//             };
-//         }
-//         results.insert(i_name.clone(), i);
-//     }
-
-//     Ok(results)
-// }
 
 // pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
 //     let integrations = get_empty_integrations();

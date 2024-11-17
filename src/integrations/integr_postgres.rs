@@ -144,6 +144,7 @@ impl Tool for ToolPostgres {
 
 // const DEFAULT_POSTGRES_INTEGRATION_YAML: &str = r#"
 // postgres:
+//   enable: true
 //   psql_binary_path: "/path/to/psql"
 //   host: "my_postgres_for_django"
 //   user: "vasya1337"
