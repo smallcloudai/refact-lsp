@@ -13,8 +13,8 @@ pub trait IntegrationTrait: Send + Sync {
     fn integr_name(&self) -> String;
     fn integr_schema(&self) -> serde_json::Value;
 
-    fn integr_settings_apply(&mut self, value: &serde_json::Value) -> Result<(), String>;
-    fn integr_settings_as_json(&self) -> Result<serde_json::Value, String>;
+    fn integr_settings_apply(&mut self, value: &serde_json::Value);
+    fn integr_settings_as_json(&self) -> serde_json::Value;
 
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send>;
 

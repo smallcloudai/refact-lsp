@@ -4,7 +4,7 @@ use axum::Extension;
 use axum::http::{Response, StatusCode};
 use tokio::sync::RwLock as ARwLock;
 use hyper::Body;
-// use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 // use serde_json::Value;
 use url::Url;
 use std::fs;
@@ -40,8 +40,37 @@ pub async fn handle_v1_integrations_all_with_icons(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let with_icons: crate::integrations::setting_up_integrations::IntegrationWithIconResult = crate::integrations::setting_up_integrations::integrations_all_with_icons(gcx.clone()).await;
+    let with_icons = crate::integrations::setting_up_integrations::integrations_all_with_icons(gcx.clone()).await;
     let payload = serde_json::to_string_pretty(&with_icons).map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
+    })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(Body::from(payload))
+        .unwrap())
+}
+
+#[derive(Deserialize)]
+struct IntegrationFilenamePost {
+    pub integr_config_path: String,
+}
+
+pub async fn handle_v1_integration_get(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let post = serde_json::from_slice::<IntegrationFilenamePost>(&body_bytes)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+
+    let the_get = crate::integrations::setting_up_integrations::integration_config_get(
+        gcx.clone(),
+        post.integr_config_path,
+    ).await.map_err(|e|{
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    })?;
+
+    let payload = serde_json::to_string_pretty(&the_get).map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
     })?;
     Ok(Response::builder()

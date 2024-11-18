@@ -137,9 +137,20 @@ pub struct ChatUsage {
 pub struct ChatMessage {
     pub role: String,
     pub content: ChatContent,
+    #[serde(default, skip_serializing_if="is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(default, skip_serializing_if="is_empty_string")]
     pub tool_call_id: String,
+    #[serde(default, skip_serializing_if="is_none")]
     pub usage: Option<ChatUsage>,
+}
+
+fn is_none<T>(opt: &Option<T>) -> bool {
+    opt.is_none()
+}
+
+fn is_empty_string(something: &String) -> bool {
+    something.is_empty()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -26,15 +26,15 @@ pub mod setting_up_integrations;
 use integr_abstract::IntegrationTrait;
 
 
-pub fn integration_from_name(n: &str) -> Box<dyn IntegrationTrait + Send + Sync>
+pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String>
 {
     match n {
-        // "github" => Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-        // "gitlab" => Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-        // "pdb" => Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-        "postgres" => Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-        // "chrome" => Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-        _ => panic!("Unknown integration name: {}", n),
+        // "github" => Ok(Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "gitlab" => Ok(Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "pdb" => Ok(Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "chrome" => Ok(Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        _ => Err(format!("Unknown integration name: {}", n)),
     }
 }
 

@@ -14,32 +14,37 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct IntegrationPostgres {
-    pub psql_binary_path: Option<String>,
-    pub connection_string: String,
+pub struct SettingsPostgres {
+    pub psql_binary_path: String,
+    // pub connection_string: String,
+    pub host: String,
+    pub port: String,
+    pub user: String,
+    pub password: String,
+    pub database: String,
 }
 
 #[derive(Default)]
 pub struct ToolPostgres {
-    pub integration_postgres: IntegrationPostgres,
+    pub integration_postgres: SettingsPostgres,
 }
 
 impl IntegrationTrait for ToolPostgres {
     fn integr_name(&self) -> String { "postgres".to_string() }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
-        let integration_postgres = serde_json::from_value::<IntegrationPostgres>(value.clone())
-            .map_err(|e|e.to_string())?;
-        self.integration_postgres = integration_postgres;
-        Ok(())
+    fn integr_settings_apply(&mut self, value: &Value) {
+        match serde_json::from_value::<SettingsPostgres>(value.clone()) {
+            Ok(integration_postgres) => self.integration_postgres = integration_postgres,
+            Err(e) => tracing::error!("Failed to apply settings: {}", e),
+        }
     }
 
-    fn integr_settings_as_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_postgres).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Value {
+        serde_json::to_value(&self.integration_postgres).unwrap()
     }
 
     // fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-    //     let integration_github = serde_yaml::from_value::<IntegrationPostgres>(value.clone()).map_err(|e| {
+    //     let integration_github = serde_yaml::from_value::<SettingsPostgres>(value.clone()).map_err(|e| {
     //         let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
     //         format!("{}{}", e.to_string(), location)
     //     })?;
@@ -61,11 +66,17 @@ impl IntegrationTrait for ToolPostgres {
 }
 
 impl ToolPostgres {
-
     async fn run_psql_command(&self, query: &str) -> Result<String, String> {
-        let psql_command = self.integration_postgres.psql_binary_path.as_deref().unwrap_or("psql");
+        let mut psql_command = self.integration_postgres.psql_binary_path.clone();
+        if psql_command.is_empty() {
+            psql_command = "psql".to_string();
+        }
         let output_future = Command::new(psql_command)
-            .arg(&self.integration_postgres.connection_string)
+            .env("PGPASSWORD", &self.integration_postgres.password)
+            .env("PGHOST", &self.integration_postgres.host)
+            .env("PGUSER", &self.integration_postgres.user)
+            .env("PGPORT", &self.integration_postgres.port)
+            .env("PGDATABASE", &self.integration_postgres.database)
             .arg("ON_ERROR_STOP=1")
             .arg("-c")
             .arg(query)
@@ -73,7 +84,7 @@ impl ToolPostgres {
         if let Ok(output) = tokio::time::timeout(tokio::time::Duration::from_millis(10_000), output_future).await {
             if output.is_err() {
                 let err_text = format!("{}", output.unwrap_err());
-                tracing::error!("psql didn't work:\n{}\n{}\n{}", self.integration_postgres.connection_string, query, err_text);
+                tracing::error!("psql didn't work:\n{}\n{}", query, err_text);
                 return Err(format!("psql failed:\n{}", err_text));
             }
             let output = output.unwrap();
@@ -82,11 +93,11 @@ impl ToolPostgres {
             } else {
                 // XXX: limit stderr, can be infinite
                 let stderr_string = String::from_utf8_lossy(&output.stderr);
-                tracing::error!("psql didn't work:\n{}\n{}\n{}", self.integration_postgres.connection_string, query, stderr_string);
+                tracing::error!("psql didn't work:\n{}\n{}", query, stderr_string);
                 Err(format!("psql failed:\n{}", stderr_string))
             }
         } else {
-            tracing::error!("psql timed out:\n{}\n{}", self.integration_postgres.connection_string, query);
+            tracing::error!("psql timed out:\n{}", query);
             Err("psql command timed out".to_string())
         }
     }
@@ -169,52 +180,53 @@ impl Tool for ToolPostgres {
 
 
 pub const POSTGRES_INTEGRATION_SCHEMA: &str = r#"
-postgres:
-  fields:
-    host:
-      f_type: string
-      f_desc: "Connect to this host, for example 127.0.0.1 or docker container name."
-      f_placeholder: marketing_db_container
-    port:
-      f_type: int
-      f_desc: "Which port to use."
-      f_default: 5432
-    user:
-      f_type: string
-      f_placeholder: john_doe
-    password:
-      f_type: string
-      f_default: "$POSTGRES_PASSWORD"
-      smartlinks:
-        - sl_label: "Open passwords.yaml"
-          sl_goto: "EDITOR:passwords.yaml"
-    db:
-      f_type: string
-      f_placeholder: marketing_db
+fields:
+  host:
+    f_type: string
+    f_desc: "Connect to this host, for example 127.0.0.1 or docker container name."
+    f_placeholder: marketing_db_container
+  port:
+    f_type: int
+    f_desc: "Which port to use."
+    f_default: "5432"
+  user:
+    f_type: string
+    f_placeholder: john_doe
+  password:
+    f_type: string
+    f_default: "$POSTGRES_PASSWORD"
+    smartlinks:
+      - sl_label: "Open passwords.yaml"
+        sl_goto: "EDITOR:passwords.yaml"
+  database:
+    f_type: string
+    f_placeholder: marketing_db
+smartlinks:
+  - sl_label: "Test"
+    sl_chat:
+      - role: "user"
+        content: |
+          🔧 Use postgres database to briefly list the tables available, express satisfaction and relief if it works, and change nothing.
+          If it doesn't work, go through the usual plan in the system prompt.
+          The current config file is @file %CURRENT_CONFIG%
+docker:
+  new_container_default:
+    image: "postgres:13"
+    environment:
+      POSTGRES_DB: "marketing_db"
+      POSTGRES_USER: "john_doe"
+      POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
   smartlinks:
-    - sl_label: "Test"
+    - sl_label: "Add Database Container"
       sl_chat:
         - role: "user"
           content: |
-            🔧 Use postgres database to briefly list the tables available, express satisfaction and relief if it works, and change nothing.
-            If it doesn't work, go through the usual plan in the system prompt.
-            The current config file is @file %CURRENT_CONFIG%
-  available:
-    on_your_laptop:
-      possible: true
-    when_isolated:
-      possible: true
-  docker:
-    new_container_default:
-      image: "postgres:13"
-      environment:
-        POSTGRES_DB: "marketing_db"
-        POSTGRES_USER: "john_doe"
-        POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
-    smartlinks:
-      - sl_label: "Add Database Container"
-        sl_chat:
-          - role: "user"
-            content: |
-              🔧 Your job is to create a new section under "docker" that will define a new postgres container, inside the current config file %CURRENT_CONFIG%. Follow the system prompt.
+            🔧 Your job is to create a new section under "docker" that will define a new postgres container, inside the current config file %CURRENT_CONFIG%. Follow the system prompt.
 "#;
+
+
+// available:
+//   on_your_laptop:
+//     possible: true
+//   when_isolated:
+//     possible: true

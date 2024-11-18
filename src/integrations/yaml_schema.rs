@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use indexmap::IndexMap;
-use std::collections::HashMap;
 use crate::call_validation::ChatMessage;
 
 
@@ -9,29 +8,27 @@ pub struct DockerService {
     pub image: String,
     #[serde(default)]
     pub environment: IndexMap<String, String>,
-    #[serde(default)]
-    pub smartlinks: Vec<ISmartLink>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISchemaField {
     pub f_type: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_default")]
     pub f_desc: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_default")]
     pub f_default: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_default")]
     pub f_placeholder: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_empty")]
     pub smartlinks: Vec<ISmartLink>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISmartLink {
     pub sl_label: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_empty")]
     pub sl_chat: Vec<ChatMessage>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if="is_default")]
     pub sl_goto: String,
 }
 
@@ -48,9 +45,16 @@ pub struct ISchemaDocker {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISchema {
-    pub fields: HashMap<String, ISchemaField>,
-    pub available: HashMap<String, ISchemaAvailable>,
-    pub docker: ISchemaDocker,
-    #[serde(default)]
+    pub fields: IndexMap<String, ISchemaField>,
+    // pub available: IndexMap<String, ISchemaAvailable>,
     pub smartlinks: Vec<ISmartLink>,
+    pub docker: ISchemaDocker,
+}
+
+fn is_default<T: Default + PartialEq>(t: &T) -> bool {
+    t == &T::default()
+}
+
+fn is_empty<T>(t: &Vec<T>) -> bool {
+    t.is_empty()
 }
