@@ -27,10 +27,6 @@ pub struct ToolGithub {
 }
 
 impl Integration for ToolGithub {
-    fn integr_name(&self) -> String {
-        "github".to_string()
-    }
-
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_github = serde_json::from_value::<IntegrationGitHub>(value.clone())
             .map_err(|e|e.to_string())?;

@@ -159,17 +159,17 @@ pub async fn read_yaml_into_value(yaml_path: &PathBuf) -> Result<serde_yaml::Val
     )
 }
 
-pub async fn write_yaml_value(path: &Path, value: &serde_yaml::Value) -> Result<(), String> {
-    let content = serde_yaml::to_string(value).map_err(|e| format!("Failed to serialize YAML: {}", e))?;
+// pub async fn write_yaml_value(path: &Path, value: &serde_yaml::Value) -> Result<(), String> {
+//     let content = serde_yaml::to_string(value).map_err(|e| format!("Failed to serialize YAML: {}", e))?;
 
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open(path)
-        .await
-        .map_err(|e| format!("Failed to open file {}: {}", path.display(), e))?;
+//     let mut file = tokio::fs::OpenOptions::new()
+//         .write(true)
+//         .truncate(true)
+//         .create(true)
+//         .open(path)
+//         .await
+//         .map_err(|e| format!("Failed to open file {}: {}", path.display(), e))?;
 
-    AsyncWriteExt::write_all(&mut file, content.as_bytes()).await
-        .map_err(|e| format!("Failed to write to file {}: {}", path.display(), e))
-}
+//     AsyncWriteExt::write_all(&mut file, content.as_bytes()).await
+//         .map_err(|e| format!("Failed to write to file {}: {}", path.display(), e))
+// }

@@ -56,10 +56,6 @@ impl IntegrationSession for PdbSession
 }
 
 impl Integration for ToolPdb {
-    fn integr_name(&self) -> String {
-        "pdb".to_string()
-    }
-
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let settings_pdb = serde_json::from_value::<SettingsPdb>(value.clone())
             .map_err(|e|e.to_string())?;

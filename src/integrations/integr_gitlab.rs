@@ -26,10 +26,6 @@ pub struct ToolGitlab {
 }
 
 impl Integration for ToolGitlab{
-    fn integr_name(&self) -> String {
-        "gitlab".to_string()
-    }
-
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_gitlab = serde_json::from_value::<IntegrationGitLab>(value.clone())
             .map_err(|e|e.to_string())?;

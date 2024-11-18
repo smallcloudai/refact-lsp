@@ -69,10 +69,6 @@ impl IntegrationSession for ChromeSession
 }
 
 impl Integration for ToolChrome {
-    fn integr_name(&self) -> String {
-        "chrome".to_string()
-    }
-
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_github = serde_json::from_value::<IntegrationChrome>(value.clone())
             .map_err(|e|e.to_string())?;

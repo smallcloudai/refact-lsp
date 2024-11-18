@@ -1,13 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use indexmap::IndexMap;
 use serde::Serialize;
 use tokio::sync::RwLock as ARwLock;
 
 use crate::global_context::GlobalContext;
-use crate::tools::tools_description::Tool;
-use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
+// use crate::tools::tools_description::Tool;
+// use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
 
 #[derive(Serialize, Default)]
@@ -42,16 +41,17 @@ fn _read_integrations_d(
     let mut integrations = Vec::new();
     for config_dir in config_folders {
         for integr_name in lst.iter() {
-            let path_str = _calc_integr_config_path(config_dir, integr_name);
+            let path_str = join_config_path(config_dir, integr_name);
             let path = PathBuf::from(path_str.clone());
             let mut rec: IntegrationWithIconRecord = Default::default();
-            rec.project_path = match project_path_from_config_path(&path) {
-                Ok(path) => path,
+            let (_integr_name, project_path) = match split_config_path(&path) {
+                Ok(x) => x,
                 Err(e) => {
                     tracing::error!("error deriving project path: {}", e);
                     continue;
                 }
             };
+            rec.project_path = project_path.clone();
             rec.integr_name = integr_name.to_string();
             rec.integr_config_path = path_str.clone();
             rec.integr_config_exists = path.exists();
@@ -94,7 +94,7 @@ fn _read_integrations_d(
     integrations
 }
 
-fn _calc_integr_config_path(config_dir: &PathBuf, integr_name: &str) -> String {
+pub fn join_config_path(config_dir: &PathBuf, integr_name: &str) -> String {
     config_dir.join("integrations.d").join(format!("{}.yaml", integr_name)).to_string_lossy().into_owned()
 }
 
@@ -111,8 +111,12 @@ pub async fn config_dirs(
     config_folders
 }
 
-pub fn project_path_from_config_path(cfg_path: &PathBuf) -> Result<String, String>
+pub fn split_config_path(cfg_path: &PathBuf) -> Result<(String, String), String>
 {
+    let integr_name = cfg_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+    if integr_name.is_empty() {
+        return Err(format!("can't derive integration name from file name"));
+    }
     let project_path = if let Some(parent) = cfg_path.parent() {
         let parent_str = parent.to_string_lossy();
         if parent_str.contains(".refact/integrations.d") {
@@ -125,7 +129,11 @@ pub fn project_path_from_config_path(cfg_path: &PathBuf) -> Result<String, Strin
     } else {
         return Err(format!("invalid path: {}", cfg_path.display()));
     };
-    Ok(project_path)
+    let extension = cfg_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
+    if extension != "yaml" {
+        return Err(format!("invalid file extension: {}", extension));
+    }
+    Ok((integr_name, project_path))
 }
 
 pub async fn integrations_all_with_icons(
@@ -153,7 +161,6 @@ pub struct IntegrationGetResult {
 }
 
 pub async fn integration_config_get(
-    gcx: Arc<ARwLock<GlobalContext>>,
     integr_config_path: String,
 ) -> Result<IntegrationGetResult, String> {
     let sanitized_path = PathBuf::from(&integr_config_path);
@@ -162,7 +169,7 @@ pub async fn integration_config_get(
         return Err(format!("can't derive integration name from file name"));
     }
 
-    let project_path = project_path_from_config_path(&sanitized_path)?;
+    let (integr_name, project_path) = split_config_path(&sanitized_path)?;
     let mut result = IntegrationGetResult {
         project_path: project_path.clone(),
         integr_name: integr_name.clone(),
@@ -173,7 +180,12 @@ pub async fn integration_config_get(
     };
 
     let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str())?;
-    result.integr_schema = integration_box.integr_schema();
+    result.integr_schema = {
+        let y: serde_yaml::Value = serde_yaml::from_str(integration_box.integr_schema()).unwrap();
+        let j = serde_json::to_value(y).unwrap();
+        j
+    };
+
     if sanitized_path.exists() {
         match fs::read_to_string(&sanitized_path) {
             Ok(content) => {
@@ -181,7 +193,7 @@ pub async fn integration_config_get(
                     Ok(y) => {
                         // XXX: wrong way to read, use _read_integrations_d
                         let j = serde_json::to_value(y).unwrap();
-                        integration_box.integr_settings_apply(&j);
+                        let _ = integration_box.integr_settings_apply(&j);
                     }
                     Err(e) => {
                         return Err(format!("failed to parse: {}", e.to_string()));
@@ -213,7 +225,11 @@ mod tests {
         let integrations = crate::integrations::integrations_list();
         for name in integrations {
             let mut integration_box = crate::integrations::integration_from_name(name).unwrap();
-            let schema_json = integration_box.integr_schema();
+            let schema_json = {
+                let y: serde_yaml::Value = serde_yaml::from_str(integration_box.integr_schema()).unwrap();
+                let j = serde_json::to_value(y).unwrap();
+                j
+            };
             let schema_yaml: serde_yaml::Value = serde_json::from_value(schema_json.clone()).unwrap();
             let compare_me1 = serde_yaml::to_string(&schema_yaml).unwrap();
             let schema_struct: ISchema = serde_json::from_value(schema_json).unwrap();
