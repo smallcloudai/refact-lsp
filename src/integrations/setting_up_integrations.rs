@@ -19,10 +19,13 @@ pub struct YamlError {
 
 #[derive(Serialize, Default)]
 pub struct IntegrationWithIconRecord {
+    pub project_path: String,
     pub integr_name: String,
-    pub integr_icon: String,
     pub integr_config_path: String,
-    pub integr_enable: bool,
+    pub integr_config_exists: bool,
+    pub on_your_laptop: bool,
+    pub when_isolated: bool,
+    // pub unparsed:
 }
 
 #[derive(Serialize, Default)]
@@ -32,94 +35,107 @@ pub struct IntegrationWithIconResult {
 }
 
 fn _read_integrations_d(
-    config_dir: &PathBuf,
-    error_log: &mut Vec<YamlError>,
+    config_folders: &Vec<PathBuf>,
     lst: &[&str],
-) -> IndexMap<String, serde_yaml::Value> {
-    let mut context_file_map = IndexMap::new();
-
-    for integr_name in lst.iter() {
-        let path = PathBuf::from(_calc_integr_config_path(config_dir, integr_name));
-        if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            match fs::read_to_string(&path) {
-                Ok(file_content) => match serde_yaml::from_str(&file_content) {
-                    Ok(yaml_value) => {
-                        context_file_map.insert(integr_name.to_string(), yaml_value);
-                    }
+    error_log: &mut Vec<YamlError>,
+) -> Vec<IntegrationWithIconRecord> {
+    let mut integrations = Vec::new();
+    for config_dir in config_folders {
+        for integr_name in lst.iter() {
+            let path_str = _calc_integr_config_path(config_dir, integr_name);
+            let path = PathBuf::from(path_str.clone());
+            let mut rec: IntegrationWithIconRecord = Default::default();
+            rec.project_path = match project_path_from_config_path(&path) {
+                Ok(path) => path,
+                Err(e) => {
+                    tracing::error!("error deriving project path: {}", e);
+                    continue;
+                }
+            };
+            rec.integr_name = integr_name.to_string();
+            rec.integr_config_path = path_str.clone();
+            rec.integr_config_exists = path.exists();
+            if rec.integr_config_exists {
+                match fs::read_to_string(&path) {
+                    Ok(file_content) => match serde_yaml::from_str::<serde_yaml::Value>(&file_content) {
+                        Ok(yaml_value) => {
+                            if let Some(available) = yaml_value.get("available").and_then(|v| v.as_mapping()) {
+                                rec.on_your_laptop = available.get("on_your_laptop").and_then(|v| v.as_bool()).unwrap_or(false);
+                                rec.when_isolated = available.get("when_isolated").and_then(|v| v.as_bool()).unwrap_or(false);
+                            } else {
+                                tracing::info!("no 'available' mapping in `{}`", integr_name);
+                            }
+                        }
+                        Err(e) => {
+                            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
+                            error_log.push(YamlError {
+                                integr_config_path: path_str.to_string(),
+                                error_line: e.location().map(|loc| loc.line()).unwrap_or(0),
+                                error_msg: e.to_string(),
+                            });
+                            tracing::warn!("failed to parse {}{}: {}", path_str, location, e.to_string());
+                        }
+                    },
                     Err(e) => {
-                        let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
                         error_log.push(YamlError {
-                            integr_config_path: path.display().to_string(),
-                            error_line: e.location().map(|loc| loc.line()).unwrap_or(0),
+                            integr_config_path: path_str.to_string(),
+                            error_line: 0,
                             error_msg: e.to_string(),
                         });
-                        tracing::warn!("failed to parse {}{}: {}", path.display(), location, e.to_string());
+                        tracing::warn!("failed to read {}: {}", path_str, e.to_string());
                     }
-                },
-                Err(e) => {
-                    error_log.push(YamlError {
-                        integr_config_path: path.display().to_string(),
-                        error_line: 0,
-                        error_msg: e.to_string(),
-                    });
-                    tracing::warn!("failed to read {}: {}", path.display(), e.to_string());
                 }
+            } else {
+                tracing::info!("no config file `{}`", integr_name);
             }
+            integrations.push(rec);
         }
     }
-
-    // let d_path = config_dir.join("integrations.d");
-    // if let Ok(entries) = fs::read_dir(&d_path) {
-    //     for entry in entries {
-    //         if let Ok(entry) = entry {
-    //             let path = entry.path();
-    //             if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-    //                 if !lst.iter().any(|&name| path.ends_with(format!("{}.yaml", name))) {
-    //                     tracing::warn!("unrecognized file: {}", path.display());
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    context_file_map
+    integrations
 }
 
 fn _calc_integr_config_path(config_dir: &PathBuf, integr_name: &str) -> String {
     config_dir.join("integrations.d").join(format!("{}.yaml", integr_name)).to_string_lossy().into_owned()
 }
 
+pub async fn config_dirs(
+    gcx: Arc<ARwLock<GlobalContext>>,
+) -> Vec<PathBuf> {
+    let (config_dir, workspace_folders_arc) = {
+        let gcx_locked = gcx.read().await;
+        (gcx_locked.config_dir.clone(), gcx_locked.documents_state.workspace_folders.clone())
+    };
+    let mut config_folders = workspace_folders_arc.lock().unwrap().clone();
+    config_folders = config_folders.iter().map(|folder| folder.join(".refact")).collect();
+    config_folders.push(config_dir);
+    config_folders
+}
+
+pub fn project_path_from_config_path(cfg_path: &PathBuf) -> Result<String, String>
+{
+    let project_path = if let Some(parent) = cfg_path.parent() {
+        let parent_str = parent.to_string_lossy();
+        if parent_str.contains(".refact/integrations.d") {
+            parent_str.split(".refact/integrations.d").next().unwrap().to_string()
+        } else if parent_str.contains(".config/refact/integrations.d") {
+            String::new()
+        } else {
+            return Err(format!("invalid path: {}", cfg_path.display()));
+        }
+    } else {
+        return Err(format!("invalid path: {}", cfg_path.display()));
+    };
+    Ok(project_path)
+}
+
 pub async fn integrations_all_with_icons(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> IntegrationWithIconResult {
-    let config_dir = gcx.read().await.config_dir.clone();
+    let config_folders = config_dirs(gcx).await;
     let lst: Vec<&str> = crate::integrations::integrations_list();
     let mut error_log: Vec<YamlError> = Vec::new();
-    let mut integrations = Vec::new();
-    let name2cfg = _read_integrations_d(&config_dir, &mut error_log, &lst);
-    for n in lst.iter() {
-        let mut rec: IntegrationWithIconRecord = Default::default();
-        rec.integr_name = n.to_string();
-        rec.integr_config_path = _calc_integr_config_path(&config_dir, n);
-        rec.integr_icon = crate::integrations::icon_from_name(n);
-        rec.integr_enable = if let Some(cfg) = name2cfg.get(*n) {
-            if let Some(enable) = cfg.get("enable").and_then(|v| v.as_bool()) {
-                if enable {
-                    true
-                } else {
-                    tracing::info!("disabled `{}`", n);
-                    false
-                }
-            } else {
-                tracing::info!("no enable field `{}`", n);
-                false
-            }
-        } else {
-            tracing::info!("no config file `{}`", n);
-            false
-        };
-        integrations.push(rec);
-    }
+    let integrations = _read_integrations_d(&config_folders, &lst, &mut error_log);
+    // rec.integr_icon = crate::integrations::icon_from_name(integr_name);
     IntegrationWithIconResult {
         integrations,
         error_log,
@@ -128,6 +144,7 @@ pub async fn integrations_all_with_icons(
 
 #[derive(Serialize, Default)]
 pub struct IntegrationGetResult {
+    pub project_path: String,
     pub integr_name: String,
     pub integr_config_path: String,
     pub integr_schema: serde_json::Value,
@@ -145,7 +162,9 @@ pub async fn integration_config_get(
         return Err(format!("can't derive integration name from file name"));
     }
 
+    let project_path = project_path_from_config_path(&sanitized_path)?;
     let mut result = IntegrationGetResult {
+        project_path: project_path.clone(),
         integr_name: integr_name.clone(),
         integr_config_path: integr_config_path.clone(),
         integr_schema: serde_json::Value::Null,
@@ -153,13 +172,6 @@ pub async fn integration_config_get(
         error_log: Vec::new(),
     };
 
-    // let config_dir = gcx.read().await.config_dir.clone();
-    // let name2cfg = _read_integrations_d(&config_dir, &mut result.error_log, &vec![integr_name.as_str()]);
-    // let cfg = if let Some(cfg) = name2cfg.get(integr_name.as_str()) {
-    //     cfg
-    // } else {
-    //     return Err(format!("No configuration found for integration: {}", integr_name));
-    // };
     let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str())?;
     result.integr_schema = integration_box.integr_schema();
     if sanitized_path.exists() {
@@ -167,6 +179,7 @@ pub async fn integration_config_get(
             Ok(content) => {
                 match serde_yaml::from_str::<serde_yaml::Value>(&content) {
                     Ok(y) => {
+                        // XXX: wrong way to read, use _read_integrations_d
                         let j = serde_json::to_value(y).unwrap();
                         integration_box.integr_settings_apply(&j);
                     }

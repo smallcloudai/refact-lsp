@@ -34,7 +34,8 @@ pub struct ISmartLink {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISchemaAvailable {
-    pub possible: bool,
+    pub on_your_laptop_possible: bool,
+    pub when_isolated_possible: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -46,7 +47,7 @@ pub struct ISchemaDocker {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ISchema {
     pub fields: IndexMap<String, ISchemaField>,
-    // pub available: IndexMap<String, ISchemaAvailable>,
+    pub available: ISchemaAvailable,
     pub smartlinks: Vec<ISmartLink>,
     pub docker: ISchemaDocker,
 }

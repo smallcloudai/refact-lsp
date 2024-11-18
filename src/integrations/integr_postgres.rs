@@ -16,9 +16,8 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SettingsPostgres {
     pub psql_binary_path: String,
-    // pub connection_string: String,
     pub host: String,
-    pub port: String,
+    pub port: usize,
     pub user: String,
     pub password: String,
     pub database: String,
@@ -35,7 +34,7 @@ impl IntegrationTrait for ToolPostgres {
     fn integr_settings_apply(&mut self, value: &Value) {
         match serde_json::from_value::<SettingsPostgres>(value.clone()) {
             Ok(integration_postgres) => self.integration_postgres = integration_postgres,
-            Err(e) => tracing::error!("Failed to apply settings: {}", e),
+            Err(e) => tracing::error!("Failed to apply settings: {}\n{:?}", e, value),
         }
     }
 
@@ -75,8 +74,9 @@ impl ToolPostgres {
             .env("PGPASSWORD", &self.integration_postgres.password)
             .env("PGHOST", &self.integration_postgres.host)
             .env("PGUSER", &self.integration_postgres.user)
-            .env("PGPORT", &self.integration_postgres.port)
+            .env("PGPORT", &format!("{}", self.integration_postgres.port))
             .env("PGDATABASE", &self.integration_postgres.database)
+            .arg("-v")
             .arg("ON_ERROR_STOP=1")
             .arg("-c")
             .arg(query)
@@ -201,6 +201,9 @@ fields:
   database:
     f_type: string
     f_placeholder: marketing_db
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
 smartlinks:
   - sl_label: "Test"
     sl_chat:
