@@ -85,6 +85,13 @@ pub async fn handle_v1_integration_save(
     tracing::info!("writing to {}:\n{}", config_path.display(), serde_json::to_string_pretty(&sanitized_json).unwrap());
     let sanitized_yaml = serde_yaml::to_value(sanitized_json).unwrap();
 
+    let config_dir = config_path.parent().ok_or_else(|| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get parent directory".to_string())
+    })?;
+    async_fs::create_dir_all(config_dir).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create directories: {}", e))
+    })?;
+
     let mut file = async_fs::File::create(&config_path).await.map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create file: {}", e))
     })?;
