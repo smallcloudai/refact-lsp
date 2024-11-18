@@ -1,40 +1,21 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use axum::Extension;
 use axum::http::{Response, StatusCode};
-use tokio::sync::RwLock as ARwLock;
 use hyper::Body;
 use serde::Deserialize;
-// use serde_json::Value;
 use url::Url;
-use std::fs;
-use std::io::Read;
-#[allow(deprecated)]
-use base64::encode;
+// #[allow(deprecated)]
+// use base64::encode;
 // use indexmap::IndexMap;
-use reqwest::Client;
+use tokio::sync::RwLock as ARwLock;
 use tokio::fs as async_fs;
-use tracing::info;
+use tokio::io::AsyncWriteExt;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 // use crate::integrations::{get_empty_integrations, get_integration_path};
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
-
-// #[derive(Serialize, Deserialize)]
-// struct IntegrationItem {
-//     name: String,
-//     enabled: bool,
-//     schema: Option<Value>,
-//     value: Option<Value>,
-// }
-
-// #[derive(Serialize)]
-// struct IntegrationIcon {
-//     name: String,
-//     value: String,
-// }
 
 pub async fn handle_v1_integrations(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
@@ -92,7 +73,7 @@ pub async fn handle_v1_integration_save(
     let post = serde_json::from_slice::<IntegrationSavePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     let config_path = crate::files_correction::canonical_path(&post.integr_config_path);
-    let (integr_name, project_path) = crate::integrations::setting_up_integrations::split_config_path(&config_path).map_err(|e|{
+    let (integr_name, _project_path) = crate::integrations::setting_up_integrations::split_config_path(&config_path).map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to split path: {}", e))
     })?;
     let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str()).map_err(|e|{
