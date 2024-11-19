@@ -76,7 +76,6 @@ pub async fn handle_v1_code_completion(
     if code_completion_post.scratchpad == "" {
         code_completion_post.scratchpad = scratchpad_name.clone();
     }
-    let using_passthrough = scratchpad_name.contains("PASSTHROUGH");
     code_completion_post.parameters.temperature = Some(code_completion_post.parameters.temperature.unwrap_or(0.2));
     let (cache_arc, tele_storage) = {
         let gcx_locked = gcx.write().await;

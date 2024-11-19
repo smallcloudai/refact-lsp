@@ -463,7 +463,7 @@ pub async fn scratchpad_interaction_stream(
             } else if !finished {
                 let (mut value, _) = match my_scratchpad {
                     ScratchpadAbstract::Text(s) => s.response_streaming("".to_string(), false, true)?,
-                    ScratchpadAbstract::Messages(s) => {
+                    ScratchpadAbstract::Messages(_) => {
                         // Why do we need to do this?
                         // s.response_streaming("".to_string(), false, true)?
                         (json!(""), false)
@@ -563,7 +563,6 @@ fn _push_streaming_json_into_scratchpad(
             // passthrough messages case
             let stop_toks = !finish_reason.is_empty() && finish_reason.starts_with("stop");
             let stop_length = !finish_reason.is_empty() && !finish_reason.starts_with("stop");
-            let delta = _delta.as_str().unwrap_or("").to_string();
             info!("JSON: {:?}", json);
             (value, *finished) = match scratch {
                 ScratchpadAbstract::Messages(s) => s.response_streaming(&json, stop_toks, stop_length)?,
