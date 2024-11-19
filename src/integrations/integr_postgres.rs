@@ -5,7 +5,6 @@ use crate::tools::tools_description::Tool;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_yaml;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;

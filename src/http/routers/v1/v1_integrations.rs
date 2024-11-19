@@ -3,13 +3,11 @@ use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
 use serde::Deserialize;
-use url::Url;
+// use url::Url;
 // #[allow(deprecated)]
 // use base64::encode;
 // use indexmap::IndexMap;
 use tokio::sync::RwLock as ARwLock;
-use tokio::fs as async_fs;
-use tokio::io::AsyncWriteExt;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
@@ -72,32 +70,9 @@ pub async fn handle_v1_integration_save(
 ) -> axum::response::Result<Response<Body>, ScratchError> {
     let post = serde_json::from_slice::<IntegrationSavePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    let config_path = crate::files_correction::canonical_path(&post.integr_config_path);
-    let (integr_name, _project_path) = crate::integrations::setting_up_integrations::split_config_path(&config_path).map_err(|e|{
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to split path: {}", e))
-    })?;
-    let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str()).map_err(|e|{
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
-    })?;
-    integration_box.integr_settings_apply(&post.integr_values);
-    let sanitized_json: serde_json::Value = integration_box.integr_settings_as_json();
-    tracing::info!("posted values:\n{}", serde_json::to_string_pretty(&post.integr_values).unwrap());
-    tracing::info!("writing to {}:\n{}", config_path.display(), serde_json::to_string_pretty(&sanitized_json).unwrap());
-    let sanitized_yaml = serde_yaml::to_value(sanitized_json).unwrap();
 
-    let config_dir = config_path.parent().ok_or_else(|| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get parent directory".to_string())
-    })?;
-    async_fs::create_dir_all(config_dir).await.map_err(|e| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create directories: {}", e))
-    })?;
-
-    let mut file = async_fs::File::create(&config_path).await.map_err(|e| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create file: {}", e))
-    })?;
-    let sanitized_yaml_string = serde_yaml::to_string(&sanitized_yaml).unwrap();
-    file.write_all(sanitized_yaml_string.as_bytes()).await.map_err(|e| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write to file: {}", e))
+    crate::integrations::setting_up_integrations::integration_config_save(&post.integr_config_path, &post.integr_values).await.map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
     })?;
 
     Ok(Response::builder()
@@ -106,6 +81,7 @@ pub async fn handle_v1_integration_save(
        .body(Body::from(format!("")))
        .unwrap())
 }
+
 
 // async fn get_image_base64(
 //     cache_dir: &PathBuf,

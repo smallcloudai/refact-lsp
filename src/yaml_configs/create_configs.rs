@@ -139,11 +139,11 @@ async fn update_checksum(cache_dir: &Path, config_name: String, checksum: &str) 
     Ok(())
 }
 
-pub async fn integrations_enabled_cfg(
-    integrations_enabled_path: &PathBuf,
-) -> serde_yaml::Value {
-    read_yaml_into_value(integrations_enabled_path).await.unwrap_or_else(|_| serde_yaml::Value::Mapping(Default::default()))
-}
+// pub async fn integrations_enabled_cfg(
+//     integrations_enabled_path: &PathBuf,
+// ) -> serde_yaml::Value {
+//     read_yaml_into_value(integrations_enabled_path).await.unwrap_or_else(|_| serde_yaml::Value::Mapping(Default::default()))
+// }
 
 pub async fn read_yaml_into_value(yaml_path: &PathBuf) -> Result<serde_yaml::Value, String> {
     let file = std::fs::File::open(&yaml_path).map_err(

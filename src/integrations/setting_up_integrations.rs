@@ -4,6 +4,8 @@ use std::sync::Arc;
 use regex::Regex;
 use serde::Serialize;
 use tokio::sync::RwLock as ARwLock;
+use tokio::fs as async_fs;
+use tokio::io::AsyncWriteExt;
 
 use crate::global_context::GlobalContext;
 // use crate::tools::tools_description::Tool;
@@ -52,6 +54,7 @@ fn _read_integrations_d(
                     continue;
                 }
             };
+            let short_pp = crate::nicer_logs::last_n_chars(&project_path, 10);
             rec.project_path = project_path.clone();
             rec.integr_name = integr_name.to_string();
             rec.integr_config_path = path_str.clone();
@@ -64,7 +67,7 @@ fn _read_integrations_d(
                                 rec.on_your_laptop = available.get("on_your_laptop").and_then(|v| v.as_bool()).unwrap_or(false);
                                 rec.when_isolated = available.get("when_isolated").and_then(|v| v.as_bool()).unwrap_or(false);
                             } else {
-                                tracing::info!("no 'available' mapping in `{}`", integr_name);
+                                tracing::info!("{} no 'available' mapping in `{}`", short_pp, integr_name);
                             }
                         }
                         Err(e) => {
@@ -87,7 +90,7 @@ fn _read_integrations_d(
                     }
                 }
             } else {
-                tracing::info!("no config file `{}`", integr_name);
+                tracing::info!("{} no config file `{}`", short_pp, integr_name);
             }
             integrations.push(rec);
         }
@@ -179,14 +182,19 @@ pub async fn integration_config_get(
         j
     };
 
+    let mut available = serde_json::json!({
+        "on_your_laptop": false,
+        "when_isolated": false
+    });
     if sanitized_path.exists() {
         match fs::read_to_string(&sanitized_path) {
             Ok(content) => {
                 match serde_yaml::from_str::<serde_yaml::Value>(&content) {
                     Ok(y) => {
-                        // XXX: wrong way to read, use _read_integrations_d
                         let j = serde_json::to_value(y).unwrap();
-                        let _ = integration_box.integr_settings_apply(&j);
+                        available["on_your_laptop"] = j.get("available").and_then(|v| v.get("on_your_laptop")).and_then(|v| v.as_bool()).unwrap_or(false).into();
+                        available["when_isolated"] = j.get("available").and_then(|v| v.get("when_isolated")).and_then(|v| v.as_bool()).unwrap_or(false).into();
+                        let did_it_work = integration_box.integr_settings_apply(&j);
                     }
                     Err(e) => {
                         return Err(format!("failed to parse: {}", e.to_string()));
@@ -198,10 +206,51 @@ pub async fn integration_config_get(
             }
         };
     }
+
     result.integr_values = integration_box.integr_settings_as_json();
+    result.integr_values["available"] = available;
     Ok(result)
 }
 
+pub async fn integration_config_save(
+    integr_config_path: &String,
+    integr_values: &serde_json::Value,
+) -> Result<(), String> {
+    let config_path = crate::files_correction::canonical_path(integr_config_path);
+    let (integr_name, _project_path) = crate::integrations::setting_up_integrations::split_path_into_project_and_integration(&config_path)
+        .map_err(|e| format!("Failed to split path: {}", e))?;
+    let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str())
+        .map_err(|e| format!("Failed to load integrations: {}", e))?;
+
+    integration_box.integr_settings_apply(integr_values)?;  // this will produce "no field XXX" errors
+
+    let mut sanitized_json: serde_json::Value = integration_box.integr_settings_as_json();
+    tracing::info!("posted values:\n{}", serde_json::to_string_pretty(integr_values).unwrap());
+    if !sanitized_json.as_object_mut().unwrap().contains_key("available") {
+        sanitized_json["available"] = serde_json::Value::Object(serde_json::Map::new());
+    }
+    sanitized_json["available"]["on_your_laptop"] = integr_values.pointer("/available/on_your_laptop").cloned().unwrap_or(serde_json::Value::Bool(false));
+    sanitized_json["available"]["when_isolated"] = integr_values.pointer("/available/when_isolated").cloned().unwrap_or(serde_json::Value::Bool(false));
+    tracing::info!("writing to {}:\n{}", config_path.display(), serde_json::to_string_pretty(&sanitized_json).unwrap());
+    let sanitized_yaml = serde_yaml::to_value(sanitized_json).unwrap();
+
+    let config_dir = config_path.parent().ok_or_else(|| {
+        "Failed to get parent directory".to_string()
+    })?;
+    async_fs::create_dir_all(config_dir).await.map_err(|e| {
+        format!("Failed to create {}: {}", config_dir.display(), e)
+    })?;
+
+    let mut file = async_fs::File::create(&config_path).await.map_err(|e| {
+        format!("Failed to create {}: {}", config_path.display(), e)
+    })?;
+    let sanitized_yaml_string = serde_yaml::to_string(&sanitized_yaml).unwrap();
+    file.write_all(sanitized_yaml_string.as_bytes()).await.map_err(|e| {
+        format!("Failed to write to {}: {}", config_path.display(), e)
+    })?;
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
