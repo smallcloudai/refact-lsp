@@ -45,7 +45,7 @@ fn _read_integrations_d(
             let path_str = join_config_path(config_dir, integr_name);
             let path = PathBuf::from(path_str.clone());
             let mut rec: IntegrationWithIconRecord = Default::default();
-            let (_integr_name, project_path) = match split_config_path(&path) {
+            let (_integr_name, project_path) = match split_path_into_project_and_integration(&path) {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::error!("error deriving project path: {}", e);
@@ -112,7 +112,7 @@ pub async fn config_dirs(
     config_folders
 }
 
-pub fn split_config_path(cfg_path: &PathBuf) -> Result<(String, String), String> {
+pub fn split_path_into_project_and_integration(cfg_path: &PathBuf) -> Result<(String, String), String> {
     let path_str = cfg_path.to_string_lossy();
     let re_per_project = Regex::new(r"^(.*)[\\/]\.refact[\\/](integrations\.d)[\\/](.+)\.yaml$").unwrap();
     let re_global = Regex::new(r"^(.*)[\\/]\.config[\\/](refact[\\/](integrations\.d)[\\/](.+)\.yaml$)").unwrap();
@@ -162,7 +162,7 @@ pub async fn integration_config_get(
         return Err(format!("can't derive integration name from file name"));
     }
 
-    let (integr_name, project_path) = split_config_path(&sanitized_path)?;
+    let (integr_name, project_path) = split_path_into_project_and_integration(&sanitized_path)?;
     let mut result = IntegrationGetResult {
         project_path: project_path.clone(),
         integr_name: integr_name.clone(),
