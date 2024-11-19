@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use regex::Regex;
 use serde::Serialize;
 use tokio::sync::RwLock as ARwLock;
 
@@ -111,29 +112,21 @@ pub async fn config_dirs(
     config_folders
 }
 
-pub fn split_config_path(cfg_path: &PathBuf) -> Result<(String, String), String>
-{
-    let integr_name = cfg_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-    if integr_name.is_empty() {
-        return Err(format!("can't derive integration name from file name"));
-    }
-    let project_path = if let Some(parent) = cfg_path.parent() {
-        let parent_str = parent.to_string_lossy();
-        if parent_str.contains(".refact/integrations.d") {
-            parent_str.split(".refact/integrations.d").next().unwrap().to_string()
-        } else if parent_str.contains(".config/refact/integrations.d") {
-            String::new()
-        } else {
-            return Err(format!("invalid path: {}", cfg_path.display()));
-        }
+pub fn split_config_path(cfg_path: &PathBuf) -> Result<(String, String), String> {
+    let path_str = cfg_path.to_string_lossy();
+    let re_per_project = Regex::new(r"^(.*)[\\/]\.refact[\\/](integrations\.d)[\\/](.+)\.yaml$").unwrap();
+    let re_global = Regex::new(r"^(.*)[\\/]\.config[\\/](refact[\\/](integrations\.d)[\\/](.+)\.yaml$)").unwrap();
+
+    if let Some(caps) = re_per_project.captures(&path_str) {
+        let project_path = caps.get(1).map_or(String::new(), |m| m.as_str().to_string());
+        let integr_name = caps.get(3).map_or(String::new(), |m| m.as_str().to_string());
+        Ok((integr_name, project_path))
+    } else if let Some(caps) = re_global.captures(&path_str) {
+        let integr_name = caps.get(4).map_or(String::new(), |m| m.as_str().to_string());
+        Ok((integr_name, String::new()))
     } else {
-        return Err(format!("invalid path: {}", cfg_path.display()));
-    };
-    let extension = cfg_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
-    if extension != "yaml" {
-        return Err(format!("invalid file extension: {}", extension));
+        Err(format!("invalid path: {}", cfg_path.display()))
     }
-    Ok((integr_name, project_path))
 }
 
 pub async fn integrations_all_with_icons(
@@ -163,7 +156,7 @@ pub struct IntegrationGetResult {
 pub async fn integration_config_get(
     integr_config_path: String,
 ) -> Result<IntegrationGetResult, String> {
-    let sanitized_path = PathBuf::from(&integr_config_path);
+    let sanitized_path = crate::files_correction::canonical_path(&integr_config_path);
     let integr_name = sanitized_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
     if integr_name.is_empty() {
         return Err(format!("can't derive integration name from file name"));
