@@ -35,7 +35,7 @@ impl DeltaSender {
         }
     }
 
-    pub fn feed_delta(&mut self, role: &str, json: &Value, finish_reason: &str, tool_calls: Option<Value>) -> Value {
+    pub fn feed_delta(&mut self, role: &str, _json: &Value, finish_reason: &str, tool_calls: Option<Value>) -> Value {
         // TODO: not implemented yet
         let x = serde_json::json!([{
             "index": 0,
