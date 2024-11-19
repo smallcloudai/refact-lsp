@@ -31,7 +31,7 @@ async fn create_chat_post_and_scratchpad(
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
     should_execute_remotely: bool,
-) -> Result<(ChatPost, Box<dyn ScratchpadAbstract>), String> {
+) -> Result<(ChatPost, ScratchpadAbstract), String> {
     let caps = try_load_caps_quickly_if_not_present(
         global_context.clone(), 0,
     ).await.map_err(|e| {
@@ -105,7 +105,7 @@ async fn chat_interaction_stream() {
 
 async fn chat_interaction_non_stream(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    mut spad: Box<dyn ScratchpadAbstract>,
+    mut spad: ScratchpadAbstract,
     prompt: &String,
     chat_post: &ChatPost,
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
@@ -212,7 +212,7 @@ async fn chat_interaction_non_stream(
 
 async fn chat_interaction(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    mut spad: Box<dyn ScratchpadAbstract>,
+    mut spad: ScratchpadAbstract,
     chat_post: &mut ChatPost,
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
     let prompt = spad.prompt(ccx.clone(), &mut chat_post.parameters).await?;

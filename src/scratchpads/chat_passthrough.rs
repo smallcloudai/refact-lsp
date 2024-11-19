@@ -12,8 +12,7 @@ use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, SamplingParameters};
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpad_abstract::{HasTokenizerAndEot, TextScratchpadAbstract};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, get_default_system_prompt_from_remote, system_prompt_add_workspace_info};
@@ -92,7 +91,7 @@ impl ChatPassthrough {
 }
 
 #[async_trait]
-impl ScratchpadAbstract for ChatPassthrough {
+impl TextScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
         &mut self,
         _patch: &Value,

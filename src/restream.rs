@@ -71,7 +71,7 @@ async fn _get_endpoint_and_stuff_from_model_name(
 
 pub async fn scratchpad_interaction_not_stream_json(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    scratchpad: &mut Box<dyn ScratchpadAbstract>,
+    scratchpad: &mut ScratchpadAbstract,
     scope: String,
     prompt: &str,
     model_name: String,
@@ -152,16 +152,27 @@ pub async fn scratchpad_interaction_not_stream_json(
     } else if let Some(hf_arr) = model_says.as_array() {
         let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
         let stopped = vec![false; choices.len()];
-        scratchpad_result = scratchpad.response_n_choices(choices, stopped);
-
-    } else if let Some(oai_choices) = model_says.get("choices") {
+        scratchpad_result = match scratchpad {
+            ScratchpadAbstract::Text(s) => s.response_n_choices(choices, stopped),
+            ScratchpadAbstract::Messages(_) => {
+                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
+            }
+        }
+    } else if let Some(oai_choices) = model_says.clone().get("choices") {
         let choice0 = oai_choices.as_array().unwrap().get(0).unwrap();
         if let Some(_msg) = choice0.get("message") {
             if let Ok(det_msgs) = scratchpad.response_spontaneous() {
                 model_says["deterministic_messages"] = json!(det_msgs);
             }
-            // new style openai response, used in passthrough
-            scratchpad_result = Ok(model_says.clone());
+            info!("json: {:?}", model_says);
+            let choices = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("message").unwrap().get("content").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
+            let stopped = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
+            scratchpad_result = match scratchpad {
+                ScratchpadAbstract::Messages(s) => s.response_n_choices(choices, stopped),
+                ScratchpadAbstract::Text(_) => {
+                    return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "text scratchpad cannot be used in the message mode".to_string()))
+                }
+            }
         } else {
             // TODO: restore order using 'index'
             // for oai_choice in oai_choices.as_array().unwrap() {
@@ -169,7 +180,12 @@ pub async fn scratchpad_interaction_not_stream_json(
             // }
             let choices = oai_choices.as_array().unwrap().iter().map(|x| x.get("text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
             let stopped = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
-            scratchpad_result = scratchpad.response_n_choices(choices, stopped);
+            scratchpad_result = match scratchpad {
+                ScratchpadAbstract::Text(s) => s.response_n_choices(choices, stopped),
+                ScratchpadAbstract::Messages(_) => {
+                    return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
+                }
+            }
         }
 
     } else if let Some(err) = model_says.get("error") {
@@ -203,7 +219,7 @@ pub async fn scratchpad_interaction_not_stream_json(
 
 pub async fn scratchpad_interaction_not_stream(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    scratchpad: &mut Box<dyn ScratchpadAbstract>,
+    scratchpad: &mut ScratchpadAbstract,
     scope: String,
     model_name: String,
     parameters: &mut SamplingParameters,
@@ -243,7 +259,7 @@ pub async fn scratchpad_interaction_not_stream(
 
 pub async fn scratchpad_interaction_stream(
     ccx: Arc<AMutex<AtCommandsContext>>,
-    mut scratchpad: Box<dyn ScratchpadAbstract>,
+    mut scratchpad: ScratchpadAbstract,
     scope: String,
     mut model_name: String,
     parameters: SamplingParameters,
@@ -251,7 +267,7 @@ pub async fn scratchpad_interaction_stream(
 ) -> Result<Response<Body>, ScratchError> {
     let t1 = std::time::SystemTime::now();
     let evstream = stream! {
-        let my_scratchpad: &mut Box<dyn ScratchpadAbstract> = &mut scratchpad;
+        let my_scratchpad: &mut ScratchpadAbstract = &mut scratchpad;
         let mut my_parameters = parameters.clone();
         let my_ccx = ccx.clone();
 
@@ -278,10 +294,10 @@ pub async fn scratchpad_interaction_stream(
         {
             let subchat_tx: Arc<AMutex<mpsc::UnboundedSender<serde_json::Value>>> = my_ccx.lock().await.subchat_tx.clone();
             let subchat_rx: Arc<AMutex<mpsc::UnboundedReceiver<serde_json::Value>>> = my_ccx.lock().await.subchat_rx.clone();
-            let mut prompt_future = Some(my_scratchpad.prompt(
+            let mut prompt_future = Some(Box::pin(my_scratchpad.prompt(
                 my_ccx.clone(),
                 &mut my_parameters,
-            ));
+            )));
             // horrible loop that waits for prompt() future, and at the same time retranslates any streaming via my_ccx.subchat_rx/tx to the user
             // (without streaming the rx/tx is never processed, disposed with the ccx)
             loop {
@@ -445,8 +461,14 @@ pub async fn scratchpad_interaction_stream(
             if problem_reported {
                 return;
             } else if !finished {
-                let mut value: serde_json::Value;
-                (value, _) = my_scratchpad.response_streaming("".to_string(), false, true).unwrap();
+                let (mut value, _) = match my_scratchpad {
+                    ScratchpadAbstract::Text(s) => s.response_streaming("".to_string(), false, true)?,
+                    ScratchpadAbstract::Messages(s) => {
+                        // Why do we need to do this?
+                        // s.response_streaming("".to_string(), false, true)?
+                        (json!(""), false)
+                    }
+                };
                 value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                 value["model"] = json!(model_name.clone());
                 let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
@@ -515,7 +537,7 @@ pub fn try_insert_usage(msg_value: &mut serde_json::Value) -> bool {
 }
 
 fn _push_streaming_json_into_scratchpad(
-    scratch: &mut Box<dyn ScratchpadAbstract>,
+    scratch: &mut ScratchpadAbstract,
     json: &serde_json::Value,
     model_name: &mut String,
     finished: &mut bool,
@@ -524,7 +546,12 @@ fn _push_streaming_json_into_scratchpad(
     if let Some(token) = json.get("token") { // hf style produces this
         let text = token.get("text").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
         let mut value: serde_json::Value;
-        (value, *finished) = scratch.response_streaming(text, false, false)?;
+        (value, *finished) = match scratch {
+            ScratchpadAbstract::Text(s) => s.response_streaming(text, false, false)?,
+            ScratchpadAbstract::Messages(_) => {
+                return Err("message scratchpad cannot be used in the text mode".to_string())
+            }
+        };
         value["model"] = json!(model_name.clone());
         *was_correct_output_even_if_error |= json.get("generated_text").is_some();
         Ok(value)
@@ -534,11 +561,16 @@ fn _push_streaming_json_into_scratchpad(
         let finish_reason = choice0.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
         if let Some(_delta) = choice0.get("delta") {
             // passthrough messages case
-            // let _role = delta.get("role").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
-            // let content = delta.get("content").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
-            // (value, *finished) = scratch.response_streaming(content, stop_toks, stop_length)?;
-            value = json.clone();
-            *finished = !finish_reason.is_empty();
+            let stop_toks = !finish_reason.is_empty() && finish_reason.starts_with("stop");
+            let stop_length = !finish_reason.is_empty() && !finish_reason.starts_with("stop");
+            let delta = _delta.as_str().unwrap_or("").to_string();
+            info!("JSON: {:?}", json);
+            (value, *finished) = match scratch {
+                ScratchpadAbstract::Messages(s) => s.response_streaming(&json, stop_toks, stop_length)?,
+                ScratchpadAbstract::Text(_) => {
+                    return Err("text scratchpad cannot be used in the message mode".to_string())
+                }
+            };
         } else if choices.as_array().map_or(true, |arr|arr.is_empty())  {
             value = json.clone();
             *finished = !finish_reason.is_empty();
@@ -547,7 +579,12 @@ fn _push_streaming_json_into_scratchpad(
             let stop_toks = !finish_reason.is_empty() && finish_reason.starts_with("stop");
             let stop_length = !finish_reason.is_empty() && !finish_reason.starts_with("stop");
             let text = choice0.get("text").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
-            (value, *finished) = scratch.response_streaming(text, stop_toks, stop_length)?;
+            (value, *finished) = match scratch {
+                ScratchpadAbstract::Text(s) => s.response_streaming(text, stop_toks, stop_length)?,
+                ScratchpadAbstract::Messages(_) => {
+                    return Err("message scratchpad cannot be used in the text mode".to_string())
+                }
+            };
         }
         if let Some(model_value) = choice0.get("model") {
             model_name.clone_from(&model_value.as_str().unwrap_or("").to_string());

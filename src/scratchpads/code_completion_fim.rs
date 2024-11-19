@@ -17,8 +17,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
-use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpad_abstract::{HasTokenizerAndEot, TextScratchpadAbstract};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
@@ -110,7 +109,7 @@ fn add_context_to_prompt(
 }
 
 #[async_trait]
-impl ScratchpadAbstract for FillInTheMiddleScratchpad {
+impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,

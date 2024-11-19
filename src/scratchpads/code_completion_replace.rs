@@ -3,8 +3,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, CodeCompletionPost, CursorPosition, SamplingParameters};
 use crate::completion_cache;
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::HasTokenizerAndEot;
-use crate::scratchpad_abstract::ScratchpadAbstract;
+use crate::scratchpad_abstract::{HasTokenizerAndEot, MessagesScratchpadAbstract, TextScratchpadAbstract};
 use crate::scratchpads::comments_parser::parse_comments;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
@@ -16,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::vec;
+use reqwest::get;
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
@@ -274,8 +274,10 @@ fn skip_similar_letters_from_a_rev(a: &str, b: &str) -> String {
 
 fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
     let mut cut_at = vec![];
-    if let Some(x) = text.find(eot_token) {
-        cut_at.push(x);
+    if !eot_token.is_empty() {
+        if let Some(x) = text.find(eot_token) {
+            cut_at.push(x);
+        }
     }
     if let Some(x) = text.find("\r\n\r\n") {
         cut_at.push(x);
@@ -357,7 +359,7 @@ impl CodeCompletionReplaceScratchpad {
 }
 
 #[async_trait]
-impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
+impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
@@ -507,15 +509,13 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
                 }
             }
             cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str());
-            // 
-            // if !cut_part.trim().is_empty() {
-            //     if let Some(idx) = cc.find(cut_part.as_str()) {
-            //         cc = cc.split_at(idx).1.to_string();
-            //     } else if let Some(idx) = cc.find(cut_part.trim()) {
-            //         cc = cc.split_at(idx).1.to_string();
-            //     } else  {
-            //     }
-            // }
+            if !cut_part.trim().is_empty() {
+                if let Some(idx) = cc.find(cut_part.as_str()) {
+                    cc = cc.split_at(idx).1.to_string();
+                } else if let Some(idx) = cc.find(cut_part.trim()) {
+                    cc = cc.split_at(idx).1.to_string();
+                } 
+            }
 
             finished |= stopped[i];
             let finish_reason = if finished {
@@ -604,7 +604,10 @@ impl CodeCompletionReplacePassthroughScratchpad {
 }
 
 
-fn parse_answer(scratchpad: &mut CodeCompletionReplacePassthroughScratchpad, json_choices: &Value) -> Result<Value, String> {
+fn parse_answer(
+    scratchpad: &mut CodeCompletionReplacePassthroughScratchpad, 
+    json_choices: &Value
+) -> Result<Value, String> {
     let subblock_ref = scratchpad.cursor_subblock
         .as_mut()
         .expect("cursor_subblock must be initialized in the prompt");
@@ -623,7 +626,16 @@ fn parse_answer(scratchpad: &mut CodeCompletionReplacePassthroughScratchpad, jso
             info!("unprocessed {i} response_n_choice\n{:?}", x);
         }
 
-        let (mut cc, mut finished) = _cut_result(&x, scratchpad.t.eot.as_str(), scratchpad.post.inputs.multiline);
+        let mut cc = skip_similar_letters_from_a(cut_part.as_str(), x.as_str());
+        if !cut_part.trim().is_empty() {
+            if let Some(idx) = cc.find(cut_part.as_str()) {
+                cc = cc.split_at(idx + cut_part.len()).1.to_string();
+            } else if let Some(idx) = cc.find(cut_part.trim()) {
+                cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
+            } else  {
+            }
+        }
+        let (mut cc, finished) = _cut_result(&cc, scratchpad.t.eot.as_str(), scratchpad.post.inputs.multiline);
         if !after_lines_str.trim().is_empty() {
             if let Some(idx) = cc.find(after_lines_str.as_str()) {
                 cc = cc.split_at(idx).0.to_string();
@@ -633,7 +645,6 @@ fn parse_answer(scratchpad: &mut CodeCompletionReplacePassthroughScratchpad, jso
                 cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
             }
         }
-        cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str());
 
         let finish_reason = if finished {
             cc = cc.trim_end().to_string();
@@ -671,12 +682,13 @@ fn parse_answer(scratchpad: &mut CodeCompletionReplacePassthroughScratchpad, jso
 }
 
 #[async_trait]
-impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
+impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         _patch: &Value,
         _exploration_tools: bool,
         _agentic_tools: bool,
+        _should_execute_remotely: bool,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -691,7 +703,9 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
             (ccx_locked.n_ctx, ccx_locked.global_context.clone())
         };
         // let use_rag = !self.t.context_format.is_empty() && self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
+        self.post.stream = false;
         sampling_parameters_to_patch.temperature = Some(0.2);
+        sampling_parameters_to_patch.max_new_tokens = 256;
         sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
         if !self.post.inputs.multiline {
             sampling_parameters_to_patch.stop.push("\n".to_string());
@@ -781,34 +795,101 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
 
     fn response_n_choices(
         &mut self,
-        _choices: Vec<String>,
-        _stopped: Vec<bool>,
+        choices: Vec<String>,
+        stopped: Vec<bool>,
     ) -> Result<Value, String> {
-        Err("Not implemented".to_string())
+        let subblock_ref = self.cursor_subblock
+            .as_mut()
+            .expect("cursor_subblock must be initialized in the prompt");
+        let cut_part = subblock_ref.cut_part.clone().expect("cut_part must be initialized in the prompt");
+        let mut after_lines_str = subblock_ref.after_lines_str();
+        if !self.post.inputs.multiline {
+            after_lines_str = after_lines_str.lines().next().unwrap_or("").to_string();
+        }
+        let json_choices = choices.iter().enumerate().map(|(i, x)| {
+            if DEBUG {
+                info!("unprocessed {i} response_n_choice\n{:?}", x);
+            }
+
+            let mut cc = skip_similar_letters_from_a(cut_part.as_str(), x.as_str());
+            if !cut_part.trim().is_empty() {
+                if let Some(idx) = cc.find(cut_part.as_str()) {
+                    cc = cc.split_at(idx + cut_part.len()).1.to_string();
+                } else if let Some(idx) = cc.find(cut_part.trim()) {
+                    cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
+                } else  {
+                }
+            }
+            
+            let (mut cc, mut finished) = _cut_result(&cc, self.t.eot.as_str(), self.post.inputs.multiline);
+            if !after_lines_str.trim().is_empty() {
+                if let Some(idx) = cc.find(after_lines_str.as_str()) {
+                    cc = cc.split_at(idx).0.to_string();
+                } else if let Some(idx) = cc.find(after_lines_str.trim()) {
+                    cc = cc.split_at(idx).0.to_string();
+                } else if self.post.inputs.multiline {
+                    cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
+                }
+            }
+
+            finished |= stopped[i];
+            let finish_reason = if finished {
+                cc = cc.trim_end().to_string();
+                "stop"
+            } else {
+                "length"
+            }.to_string();
+            if i == 0 {
+                self.data4cache.completion0_text = cc.clone();
+                self.data4cache.completion0_finish_reason = finish_reason.clone();
+            }
+            json!({
+                "index": i,
+                "code_completion": cc,
+                "finish_reason": finish_reason.clone(),
+            })
+        }).collect::<Vec<_>>();
+        if DEBUG {
+            info!("response_n_choices\n{:?}", json_choices);
+        }
+
+        snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
+        Ok(json!(
+            {
+                "choices": json_choices,
+                "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
+                "model": self.post.model.clone(),
+                "context": self.context_used,
+            }
+        ))
+
     }
 
     fn response_streaming(
         &mut self,
-        delta: String,
+        json: &Value,
         stop_toks: bool,
         stop_length: bool,
     ) -> Result<(Value, bool), String> {
-        let finished = stop_toks || stop_length;
-        let finish_reason = if finished {
-            if stop_toks { "stop".to_string() } else { "length".to_string() }
-        } else {
-            "".to_string()
-        };
-        let json_choices = self.delta_sender.feed_delta("assistant", &delta, &finish_reason, None);
-        let ans = if finished {
-            parse_answer(self, &json_choices)?
-        } else {
-            json!({
-                "choices": json_choices,
-                "object": "chat.completion.chunk",
-            })
-        };
-        Ok((ans, finished))
+        // let finished = stop_toks || stop_length;
+        // let finish_reason = if finished {
+        //     if stop_toks { "stop".to_string() } else { "length".to_string() }
+        // } else {
+        //     "".to_string()
+        // };
+        // 
+        // delta,get("choices").get
+        // let json_choices = self.delta_sender.feed_delta("assistant", &delta, &finish_reason, None);
+        // let ans = if finished {
+        //     parse_answer(self, &json_choices)?
+        // } else {
+        //     json!({
+        //         "choices": json_choices,
+        //         "object": "chat.completion.chunk",
+        //     })
+        // };
+        // Ok((ans, finished))
+        Ok((json.clone(), stop_toks | stop_length))
     }
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String> {
