@@ -463,11 +463,7 @@ pub async fn scratchpad_interaction_stream(
             } else if !finished {
                 let (mut value, _) = match my_scratchpad {
                     ScratchpadAbstract::Text(s) => s.response_streaming("".to_string(), false, true)?,
-                    ScratchpadAbstract::Messages(_) => {
-                        // Why do we need to do this?
-                        // s.response_streaming("".to_string(), false, true)?
-                        (json!(""), false)
-                    }
+                    ScratchpadAbstract::Messages(s) => s.response_streaming(&json!({}), false, true)?
                 };
                 value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                 value["model"] = json!(model_name.clone());
@@ -560,7 +556,6 @@ fn _push_streaming_json_into_scratchpad(
         let mut value: serde_json::Value;
         let finish_reason = choice0.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap_or("").to_string();
         if let Some(_delta) = choice0.get("delta") {
-            // passthrough messages case
             let stop_toks = !finish_reason.is_empty() && finish_reason.starts_with("stop");
             let stop_length = !finish_reason.is_empty() && !finish_reason.starts_with("stop");
             info!("JSON: {:?}", json);

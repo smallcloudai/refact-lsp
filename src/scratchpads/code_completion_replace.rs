@@ -923,7 +923,6 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
                 "context": self.context_used,
             }
         ))
-
     }
 
     fn response_streaming(

@@ -85,7 +85,7 @@ async fn create_chat_post_and_scratchpad(
         global_context.clone(),
         caps,
         model_name.to_string(),
-        &chat_post,
+        &mut chat_post,
         &messages.into_iter().cloned().collect::<Vec<_>>(),
         &scratchpad_name,
         &scratchpad_patch,

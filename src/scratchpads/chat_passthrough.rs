@@ -12,7 +12,7 @@ use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, SamplingParameters};
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, TextScratchpadAbstract};
+use crate::scratchpad_abstract::{HasTokenizerAndEot, MessagesScratchpadAbstract};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, get_default_system_prompt_from_remote, system_prompt_add_workspace_info};
@@ -35,15 +35,16 @@ impl DeltaSender {
         }
     }
 
-    pub fn feed_delta(&mut self, role: &str, delta: &str, finish_reason: &str, tool_calls: Option<Value>) -> Value {
+    pub fn feed_delta(&mut self, role: &str, json: &Value, finish_reason: &str, tool_calls: Option<Value>) -> Value {
+        // TODO: not implemented yet
         let x = serde_json::json!([{
             "index": 0,
             "delta": {
-                "role": if role != self.role_sent.as_str() { serde_json::Value::String(role.to_string()) } else { serde_json::Value::Null },
-                "content": delta,
-                "tool_calls": tool_calls.unwrap_or(serde_json::Value::Null),
+                "role": if role != self.role_sent.as_str() { Value::String(role.to_string()) } else { Value::Null },
+                "content": "",
+                "tool_calls": tool_calls.unwrap_or(Value::Null),
             },
-            "finish_reason": if finish_reason == "" { serde_json::Value::Null } else { serde_json::Value::String(finish_reason.to_string()) }
+            "finish_reason": if finish_reason == "" { Value::Null } else { Value::String(finish_reason.to_string()) }
         }]);
         self.role_sent = role.to_string();
         x
@@ -91,7 +92,7 @@ impl ChatPassthrough {
 }
 
 #[async_trait]
-impl TextScratchpadAbstract for ChatPassthrough {
+impl MessagesScratchpadAbstract for ChatPassthrough {
     async fn apply_model_adaptation_patch(
         &mut self,
         _patch: &Value,
@@ -207,28 +208,33 @@ impl TextScratchpadAbstract for ChatPassthrough {
         &mut self,
         _choices: Vec<String>,
         _stopped: Vec<bool>,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<Value, String> {
         todo!();
     }
 
     fn response_streaming(
         &mut self,
-        delta: String,
+        json: &Value,
         stop_toks: bool,
         stop_length: bool,
-    ) -> Result<(serde_json::Value, bool), String> {
-        let finished = stop_toks || stop_length;
-        let finish_reason = if finished {
-            if stop_toks { "stop".to_string() } else { "length".to_string() }
+    ) -> Result<(Value, bool), String> {
+        if !json.as_object().unwrap().is_empty() {
+            Ok((json.clone(), stop_toks || stop_length))
         } else {
-            "".to_string()
-        };
-        let json_choices = self.delta_sender.feed_delta("assistant", &delta, &finish_reason, None);
-        let ans = serde_json::json!({
-            "choices": json_choices,
-            "object": "chat.completion.chunk",
-        });
-        Ok((ans, finished))
+            // The unfinished part
+            let finished = stop_toks || stop_length;
+            let finish_reason = if finished {
+                if stop_toks { "stop".to_string() } else { "length".to_string() }
+            } else {
+                "".to_string()
+            };
+            let json_choices = self.delta_sender.feed_delta("assistant", &json, &finish_reason, None);
+            let ans = serde_json::json!({
+                "choices": json_choices,
+                "object": "chat.completion.chunk",
+            });
+            Ok((ans, finished))
+        }
     }
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>  {

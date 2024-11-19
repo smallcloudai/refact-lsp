@@ -71,7 +71,7 @@ pub async fn create_chat_scratchpad(
     global_context: Arc<ARwLock<GlobalContext>>,
     caps: Arc<StdRwLock<CodeAssistantCaps>>,
     model_name_for_tokenizer: String,
-    post: &ChatPost,
+    post: &mut ChatPost,
     messages: &Vec<ChatMessage>,
     scratchpad_name: &str,
     scratchpad_patch: &serde_json::Value,
@@ -91,7 +91,8 @@ pub async fn create_chat_scratchpad(
             tokenizer_arc.clone(), post, messages, global_context.clone(), allow_at
         )));
     } else if scratchpad_name == "PASSTHROUGH" {
-        result = ScratchpadAbstract::Text(Box::new(chat_passthrough::ChatPassthrough::new(
+        post.stream = Some(true);
+        result = ScratchpadAbstract::Messages(Box::new(chat_passthrough::ChatPassthrough::new(
             tokenizer_arc.clone(), post, messages, global_context.clone(), allow_at, supports_tools, supports_clicks
         )));
     } else {
