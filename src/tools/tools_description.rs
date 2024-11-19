@@ -7,12 +7,13 @@ use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
-
+use tracing::error;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
+
+use crate::integrations::load_integration_tools;
 use crate::yaml_configs::create_configs::read_yaml_into_value;
-// use crate::integrations::docker::integr_docker::ToolDocker;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -88,21 +89,6 @@ pub async fn tools_merged_and_filtered(
         (gcx_locked.ast_service.is_some(), vecdb_on, gcx_locked.cmdline.experimental)
     };
 
-    let integrations_value = match read_integrations_yaml(gcx.clone()).await {
-        Ok(value) => value,
-        Err(e) => return Err(format!("Problem in integrations.yaml: {}", e)),
-    };
-
-    if let Some(env_vars) = integrations_value.get("environment_variables") {
-        if let Some(env_vars_map) = env_vars.as_mapping() {
-            for (key, value) in env_vars_map {
-                if let (Some(key_str), Some(value_str)) = (key.as_str(), value.as_str()) {
-                    std::env::set_var(key_str, value_str);
-                }
-            }
-        }
-    }
-
     let mut tools_all = IndexMap::from([
         ("definition".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_ast_definition::ToolAstDefinition{}) as Box<dyn Tool + Send>))),
         ("references".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_ast_reference::ToolAstReference{}) as Box<dyn Tool + Send>))),
@@ -119,62 +105,14 @@ pub async fn tools_merged_and_filtered(
     ]);
 
     if allow_experimental {
-        // The approach here: if it exists, it shouldn't have syntax errors, note the "?"
-        // if let Some(gh_config) = integrations_value.get("github") {
-        //     tools_all.insert("github".to_string(), Arc::new(AMutex::new(Box::new(ToolGithub::new_from_yaml(gh_config)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Some(gl_config) = integrations_value.get("gitlab") {
-        //     tools_all.insert("gitlab".to_string(), Arc::new(AMutex::new(Box::new(ToolGitlab::new_from_yaml(gl_config)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Some(pdb_config) = integrations_value.get("pdb") {
-        //     tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(ToolPdb::new_from_yaml(pdb_config)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Some(chrome_config) = integrations_value.get("chrome") {
-        //     tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(ToolChrome::new_from_yaml(chrome_config, supports_clicks)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Some(postgres_config) = integrations_value.get("postgres") {
-        //     tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(ToolPostgres::new_from_yaml(postgres_config)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Some(docker_config) = integrations_value.get("docker") {
-        //     tools_all.insert("docker".to_string(), Arc::new(AMutex::new(Box::new(ToolDocker::new_from_yaml(docker_config)?) as Box<dyn Tool + Send>)));
-        // }
-        // if let Ok(caps) = crate::global_context::try_load_caps_quickly_if_not_present(gcx.clone(), 0).await {
-        //     let have_thinking_model = {
-        //         let caps_locked = caps.read().unwrap();
-        //         caps_locked.running_models.contains(&"o1-mini".to_string())
-        //     };
-        //     if have_thinking_model {
-        //         tools_all.insert("deep_thinking".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_deep_thinking::ToolDeepThinking{}) as Box<dyn Tool + Send>)));
-        //     }
-        // }
-        // #[cfg(feature="vecdb")]
-        // tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
-        // match load_integration_tools(gcx.clone()).await {
-        //     Ok(integrations) => {
-        //         tools_all.extend(integrations);
-        //     }
-        //     Err(e) => error!("Failed to load integrations: {}", e),
-        // }
-        // #[cfg(feature="vecdb")]
-        // tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
+        match load_integration_tools(gcx.clone()).await {
+            Ok(integrations) => {
+                tools_all.extend(integrations);
+            }
+            Err(e) => error!("Failed to load integrations: {}", e),
+        }
     }
-
-    if let Some(cmdline) = integrations_value.get("cmdline") {
-        let cmdline_tools = crate::tools::tool_cmdline::cmdline_tool_from_yaml_value(cmdline, false)?;
-        tools_all.extend(cmdline_tools);
-    }
-
-    if let Some(cmdline) = integrations_value.get("cmdline_services") {
-        let cmdline_tools = crate::tools::tool_cmdline::cmdline_tool_from_yaml_value(cmdline, true)?;
-        tools_all.extend(cmdline_tools);
-    }
-
-    //     let integrations = load_integration_tools(gcx.clone()).await;
-    //     tools_all.extend(integrations);
-    //     #[cfg(feature="vecdb")]
-    //     tools_all.insert("knowledge".to_string(), Arc::new(AMutex::new(Box::new(crate::tools::tool_knowledge::ToolGetKnowledge{}) as Box<dyn Tool + Send>)));
-    // }
-
+    
     let mut filtered_tools = IndexMap::new();
     for (tool_name, tool_arc) in tools_all {
         let tool_locked = tool_arc.lock().await;

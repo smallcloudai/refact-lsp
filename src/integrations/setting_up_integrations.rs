@@ -20,19 +20,18 @@ pub struct YamlError {
 }
 
 #[derive(Serialize, Default)]
-pub struct IntegrationWithIconRecord {
+pub struct IntegrationRecord {
     pub project_path: String,
     pub integr_name: String,
     pub integr_config_path: String,
     pub integr_config_exists: bool,
     pub on_your_laptop: bool,
     pub when_isolated: bool,
-    // pub unparsed:
 }
 
 #[derive(Serialize, Default)]
-pub struct IntegrationWithIconResult {
-    pub integrations: Vec<IntegrationWithIconRecord>,
+pub struct IntegrationsResult {
+    pub integrations: Vec<IntegrationRecord>,
     pub error_log: Vec<YamlError>,
 }
 
@@ -40,13 +39,13 @@ fn _read_integrations_d(
     config_folders: &Vec<PathBuf>,
     lst: &[&str],
     error_log: &mut Vec<YamlError>,
-) -> Vec<IntegrationWithIconRecord> {
+) -> Vec<IntegrationRecord> {
     let mut integrations = Vec::new();
     for config_dir in config_folders {
         for integr_name in lst.iter() {
             let path_str = join_config_path(config_dir, integr_name);
             let path = PathBuf::from(path_str.clone());
-            let mut rec: IntegrationWithIconRecord = Default::default();
+            let mut rec: IntegrationRecord = Default::default();
             let (_integr_name, project_path) = match split_path_into_project_and_integration(&path) {
                 Ok(x) => x,
                 Err(e) => {
@@ -134,13 +133,13 @@ pub fn split_path_into_project_and_integration(cfg_path: &PathBuf) -> Result<(St
 
 pub async fn integrations_all_with_icons(
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> IntegrationWithIconResult {
+) -> IntegrationsResult {
     let config_folders = config_dirs(gcx).await;
     let lst: Vec<&str> = crate::integrations::integrations_list();
     let mut error_log: Vec<YamlError> = Vec::new();
     let integrations = _read_integrations_d(&config_folders, &lst, &mut error_log);
     // rec.integr_icon = crate::integrations::icon_from_name(integr_name);
-    IntegrationWithIconResult {
+    IntegrationsResult {
         integrations,
         error_log,
     }
