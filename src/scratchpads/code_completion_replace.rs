@@ -282,32 +282,6 @@ fn skip_similar_letters_from_a_rev(a: &str, b: &str) -> String {
     }
 }
 
-fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> String {
-    let mut cut_at = vec![];
-    if !eot_token.is_empty() {
-        if let Some(x) = text.find(eot_token) {
-            cut_at.push(x);
-        }
-    }
-    if let Some(x) = text.find("\r\n\r\n") {
-        cut_at.push(x);
-    }
-    if let Some(x) = text.find("```") {
-        cut_at.push(x);
-    }
-    if !multiline {
-        if let Some(x) = text.find("\n") {
-            cut_at.push(x);
-        }
-    }
-    if cut_at.is_empty() {
-        return text.to_string().replace("\r", "");
-    }
-    let cut_at = cut_at.into_iter().min().unwrap_or(text.len());
-    let ans = text.split_at(cut_at).0.to_string();
-    ans.replace("\r", "")
-}
-
 fn retrieve_a_comment(
     source: &String,
     cpath: &PathBuf,
@@ -349,6 +323,133 @@ fn retrieve_a_comment(
         None
     }
 }
+
+fn process_n_choices(
+    subblock: &mut Option<SubBlock>,
+    choices: &Vec<String>,
+    finish_reasons: &Vec<String>,
+    is_multiline: bool,
+    data4cache: &mut completion_cache::CompletionSaveToCache
+) -> Vec<Value> {
+    let subblock_ref = subblock
+        .as_mut()
+        .expect("cursor_subblock must be initialized in the prompt");
+    let cut_part = subblock_ref.cut_part.clone().expect("cut_part must be initialized in the prompt");
+    let mut after_lines_str = subblock_ref.after_lines_str();
+    let mut before_lines_str = subblock_ref.before_lines_str();
+    if !is_multiline {
+        before_lines_str = before_lines_str.lines().rev().next().unwrap_or("").to_string();
+        after_lines_str = after_lines_str.lines().next().unwrap_or("").to_string();
+    }
+    let json_choices = choices.iter().enumerate().map(|(i, x)| {
+        if DEBUG {
+            info!("unprocessed {i} response_n_choice\n{:?}", x);
+        }
+
+        if finish_reasons[i] == "stop" && !x.contains("```") {
+            return json!({
+                    "index": i,
+                    "code_completion": "",
+                    "finish_reason": finish_reasons[i].clone(),
+                })
+        }
+
+        let mut cc = x.clone();
+
+        // This can happen if the model doesn't support prefilling, it will output the whole message
+        // and we stripping it here to leave the completion code only
+        let ticks_count = cc.matches("```").count();
+        if x.contains("<REWRITTEN_BLOCK_OF_CODE>")
+            || ticks_count >= 2
+            || (ticks_count == 1 && finish_reasons[i] == "length") {
+            if let Some(start_idx) = cc.find("```") {
+                let start_idx = cc[start_idx + 3..]
+                    .find('\n')
+                    .map_or(start_idx + 3, |i| start_idx + i + 4);
+                if let Some(end_idx) = cc[start_idx..].find("```") {
+                    cc = cc[start_idx..start_idx + end_idx].to_string();
+                } else {
+                    cc = cc[start_idx..].to_string();
+                }
+            }
+
+            cc = skip_similar_letters_from_a(before_lines_str.as_str(), cc.as_str());
+            if !before_lines_str.trim().is_empty() {
+                if let Some(idx) = cc.find(before_lines_str.as_str()) {
+                    cc = cc.split_at(idx + before_lines_str.len()).1.to_string();
+                } else if let Some(idx) = cc.find(before_lines_str.trim()) {
+                    cc = cc.split_at(idx + before_lines_str.trim().len()).1.to_string();
+                } else {
+                    cc = skip_similar_letters_from_a(before_lines_str.as_str(), cc.as_str())
+                }
+            }
+        }
+        
+        // Removing the cut part
+        if !cut_part.trim().is_empty() {
+            if let Some(idx) = cc.find(cut_part.as_str()) {
+                cc = cc.split_at(idx + cut_part.len()).1.to_string();
+            } else if let Some(idx) = cc.find(cut_part.trim()) {
+                cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
+            } else {
+                cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
+            }
+        }
+
+        // Removing the suffix
+        if !after_lines_str.trim().is_empty() {
+            if let Some(idx) = cc.find(after_lines_str.as_str()) {
+                cc = cc.split_at(idx).0.to_string();
+            } else if let Some(idx) = cc.find(after_lines_str.trim()) {
+                cc = cc.split_at(idx).0.to_string();
+            } else if is_multiline {
+                cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
+            }
+        }
+
+        // Sometimes models write some text after the code block, stripping it here
+        if let Some(start_idx) = cc.find("```") {
+            cc = cc.split_at(start_idx).0.to_string();
+        }
+
+        if !is_multiline {
+            if let Some(x) = cc.find("\n") {
+                cc = cc.split_at(x).0.to_string();
+            }
+        }
+        cc = cc.replace("\r", "");
+
+        // Instruct-based models love to add weird comments
+        // Trying to remove some of them with a simple heuristics
+        if !is_multiline {
+            if let Some(new_row) = cc.split(" //").next() {
+                if cc.starts_with(new_row) {
+                    cc = new_row.to_string();
+                }
+            }
+            if let Some(new_row) = cc.split("  #").next() {
+                if cc.starts_with(new_row) {
+                    cc = new_row.to_string();
+                }
+            }
+        }
+
+        if i == 0 {
+            data4cache.completion0_text = cc.clone();
+            data4cache.completion0_finish_reason = finish_reasons[i].clone();
+        }
+        json!({
+                "index": i,
+                "code_completion": cc,
+                "finish_reason": finish_reasons[i].clone(),
+            })
+    }).collect::<Vec<_>>();
+    if DEBUG {
+        info!("response_n_choices\n{:?}", json_choices);
+    }
+    json_choices
+}
+
 
 pub struct CodeCompletionReplaceScratchpad {
     pub t: HasTokenizerAndEot,
@@ -529,52 +630,13 @@ impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
         choices: Vec<String>,
         finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
-        let subblock_ref = self.cursor_subblock
-            .as_mut()
-            .expect("cursor_subblock must be initialized in the prompt");
-        let cut_part = subblock_ref.cut_part.clone().expect("cut_part must be initialized in the prompt");
-        let mut after_lines_str = subblock_ref.after_lines_str();
-        if !self.post.inputs.multiline {
-            after_lines_str = after_lines_str.lines().next().unwrap_or("").to_string();
-        }
-        let json_choices = choices.iter().enumerate().map(|(i, x)| {
-            if DEBUG {
-                info!("unprocessed {i} response_n_choice\n{:?}", x);
-            }
-
-            let mut cc = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
-            if !after_lines_str.trim().is_empty() {
-                if let Some(idx) = cc.find(after_lines_str.as_str()) {
-                    cc = cc.split_at(idx).0.to_string();
-                } else if let Some(idx) = cc.find(after_lines_str.trim()) {
-                    cc = cc.split_at(idx).0.to_string();
-                } else if self.post.inputs.multiline {
-                    cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
-                }
-            }
-            cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str());
-            if !cut_part.trim().is_empty() {
-                if let Some(idx) = cc.find(cut_part.as_str()) {
-                    cc = cc.split_at(idx).1.to_string();
-                } else if let Some(idx) = cc.find(cut_part.trim()) {
-                    cc = cc.split_at(idx).1.to_string();
-                } 
-            }
-
-            if i == 0 {
-                self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
-            }
-            json!({
-                "index": i,
-                "code_completion": cc,
-                "finish_reason": finish_reasons[i].clone(),
-            })
-        }).collect::<Vec<_>>();
-        if DEBUG {
-            info!("response_n_choices\n{:?}", json_choices);
-        }
-
+        let json_choices = process_n_choices(
+            &mut self.cursor_subblock, 
+            &choices, 
+            &finish_reasons,
+            self.post.inputs.multiline,
+            &mut self.data4cache
+        );
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
         Ok(json!(
             {
@@ -746,115 +808,13 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         choices: Vec<String>,
         finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
-        let subblock_ref = self.cursor_subblock
-            .as_mut()
-            .expect("cursor_subblock must be initialized in the prompt");
-        let cut_part = subblock_ref.cut_part.clone().expect("cut_part must be initialized in the prompt");
-        let mut after_lines_str = subblock_ref.after_lines_str();
-        let mut before_lines_str = subblock_ref.before_lines_str();
-        if !self.post.inputs.multiline {
-            before_lines_str = before_lines_str.lines().rev().next().unwrap_or("").to_string();
-            after_lines_str = after_lines_str.lines().next().unwrap_or("").to_string();
-        }
-        let json_choices = choices.iter().enumerate().map(|(i, x)| {
-            if DEBUG {
-                info!("unprocessed {i} response_n_choice\n{:?}", x);
-            }
-
-            if finish_reasons[i] == "stop" && !x.contains("```") {
-                return json!({
-                    "index": i,
-                    "code_completion": "",
-                    "finish_reason": finish_reasons[i].clone(),
-                })
-            }
-
-            let mut cc = x.clone();
-            let ticks_count = cc.matches("```").count();
-            if x.contains("<REWRITTEN_BLOCK_OF_CODE>")
-                || ticks_count >= 2
-                || (ticks_count == 1 && finish_reasons[i] == "length") {
-                if let Some(start_idx) = cc.find("```") {
-                    let start_idx = cc[start_idx + 3..]
-                        .find('\n')
-                        .map_or(start_idx + 3, |i| start_idx + i + 4);
-                    if let Some(end_idx) = cc[start_idx..].find("```") {
-                        cc = cc[start_idx..start_idx + end_idx].to_string();
-                    } else {
-                        cc = cc[start_idx..].to_string();
-                    }
-                }
-
-                cc = skip_similar_letters_from_a(before_lines_str.as_str(), cc.as_str());
-                if !before_lines_str.trim().is_empty() {
-                    if let Some(idx) = cc.find(before_lines_str.as_str()) {
-                        cc = cc.split_at(idx + before_lines_str.len()).1.to_string();
-                    } else if let Some(idx) = cc.find(before_lines_str.trim()) {
-                        cc = cc.split_at(idx + before_lines_str.trim().len()).1.to_string();
-                    } else {
-                        cc = skip_similar_letters_from_a(before_lines_str.as_str(), cc.as_str())
-                    }
-                }
-            }
-            if !cut_part.trim().is_empty() {
-                if let Some(idx) = cc.find(cut_part.as_str()) {
-                    cc = cc.split_at(idx + cut_part.len()).1.to_string();
-                } else if let Some(idx) = cc.find(cut_part.trim()) {
-                    cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
-                } else {
-                    cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
-                }
-            }
-            if !after_lines_str.trim().is_empty() {
-                if let Some(idx) = cc.find(after_lines_str.as_str()) {
-                    cc = cc.split_at(idx).0.to_string();
-                } else if let Some(idx) = cc.find(after_lines_str.trim()) {
-                    cc = cc.split_at(idx).0.to_string();
-                } else if self.post.inputs.multiline {
-                    cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
-                }
-            }
-
-            // Consider this as an ending fence 
-            if let Some(start_idx) = cc.find("```") {
-                cc = cc.split_at(start_idx).0.to_string();
-            }
-
-            if !self.post.inputs.multiline {
-                if let Some(x) = cc.find("\n") {
-                    cc = cc.split_at(x).0.to_string();
-                }
-            }
-            cc = cc.replace("\r", "");
-            
-            // trying to remove extra commentaries
-            if !self.post.inputs.multiline {
-                if let Some(new_row) = cc.split(" //").next() {
-                    if cc.starts_with(new_row) {
-                        cc = new_row.to_string();
-                    }
-                }
-                if let Some(new_row) = cc.split("  #").next() {
-                    if cc.starts_with(new_row) {
-                        cc = new_row.to_string();
-                    }
-                }
-            }
-
-            if i == 0 {
-                self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
-            }
-            json!({
-                "index": i,
-                "code_completion": cc,
-                "finish_reason": finish_reasons[i].clone(),
-            })
-        }).collect::<Vec<_>>();
-        if DEBUG {
-            info!("response_n_choices\n{:?}", json_choices);
-        }
-
+        let json_choices = process_n_choices(
+            &mut self.cursor_subblock,
+            &choices,
+            &finish_reasons,
+            self.post.inputs.multiline,
+            &mut self.data4cache
+        );
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
         Ok(json!(
             {
