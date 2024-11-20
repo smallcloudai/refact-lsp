@@ -11,57 +11,61 @@ use tokio::sync::RwLock as ARwLock;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
+use crate::integrations::setting_up_integrations::{get_integration_contents, get_integration_records, save_integration_value};
 // use crate::integrations::{get_empty_integrations, get_integration_path};
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
 
-pub async fn handle_v1_integrations(
-    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    _: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let with_icons = crate::integrations::setting_up_integrations::integrations_all_with_icons(gcx.clone()).await;
-    let payload = serde_json::to_string_pretty(&with_icons).map_err(|e| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
-    })?;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "application/json")
-        .body(Body::from(payload))
-        .unwrap())
-}
-
 #[derive(Deserialize)]
-struct IntegrationGetPost {
-    pub integr_config_path: String,
-}
-
-pub async fn handle_v1_integration_get(
-    Extension(_gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
-) -> axum::response::Result<Response<Body>, ScratchError> {
-    let post = serde_json::from_slice::<IntegrationGetPost>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-
-    let the_get = crate::integrations::setting_up_integrations::integration_config_get(
-        post.integr_config_path,
-    ).await.map_err(|e|{
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
-    })?;
-
-    let payload = serde_json::to_string_pretty(&the_get).map_err(|e| {
-        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
-    })?;
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "application/json")
-        .body(Body::from(payload))
-        .unwrap())
+struct IntegrationsPost {
+    pub scope: String,
 }
 
 #[derive(Deserialize)]
 struct IntegrationSavePost {
-    pub integr_config_path: String,
-    pub integr_values: serde_json::Value,
+    pub scope: String,
+    pub name: String,
+    pub value: serde_json::Value,
+}
+
+pub async fn handle_v1_integrations_meta(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    _: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let records = get_integration_records(gcx.clone()).await.map_err(|e|{
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    })?;        
+    
+    let payload = serde_json::to_string_pretty(&records).map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
+    })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(Body::from(payload))
+        .unwrap())
+}
+
+
+pub async fn handle_v1_integrations(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    body_bytes: hyper::body::Bytes,
+) -> axum::response::Result<Response<Body>, ScratchError> {
+    let post = serde_json::from_slice::<IntegrationsPost>(&body_bytes)
+        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
+
+    let contents = get_integration_contents(gcx.clone(), &post.scope).await.map_err(|e|{
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
+    })?;
+
+    let payload = serde_json::to_string_pretty(&contents).map_err(|e| {
+        ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize payload: {}", e))
+    })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .body(Body::from(payload))
+        .unwrap())
 }
 
 pub async fn handle_v1_integration_save(
@@ -71,14 +75,16 @@ pub async fn handle_v1_integration_save(
     let post = serde_json::from_slice::<IntegrationSavePost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    crate::integrations::setting_up_integrations::integration_config_save(&post.integr_config_path, &post.integr_values).await.map_err(|e| {
+    save_integration_value(
+        gcx.clone(), &post.scope, &post.name, &post.value
+    ).await.map_err(|e| {
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
     })?;
 
     Ok(Response::builder()
        .status(StatusCode::OK)
        .header("Content-Type", "application/json")
-       .body(Body::from(format!("")))
+       .body(Body::from("".to_string()))
        .unwrap())
 }
 

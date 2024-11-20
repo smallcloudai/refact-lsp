@@ -26,21 +26,21 @@ use integr_abstract::IntegrationTrait;
 use crate::integrations::setting_up_integrations::{integration_extra_from_yaml, IntegrationExtra};
 
 pub const INTEGRATION_NAMES: &[&str] = &[
-    "github",
-    "gitlab",
-    "pdb",
+    // "github",
+    // "gitlab",
+    // "pdb",
     "postgres",
-    "chrome",
+    // "chrome",
 ];
 
-pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String> {
-    match n {
+pub fn integration_from_name(name: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String> {
+    match name {
         // "github" => Ok(Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         // "gitlab" => Ok(Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         // "pdb" => Ok(Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         // "chrome" => Ok(Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
-        _ => Err(format!("Unknown integration name: {}", n)),
+        _ => Err(format!("Unknown integration name: {}", name)),
     }
 }
 
@@ -71,12 +71,6 @@ pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
     cache_dir.join("integrations.d").join(format!("{}.yaml", name))
 }
 
-pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
-    let j_value = integr_yaml2json(&value, name)?;
-    let yaml_value: serde_yaml::Value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
-    Ok(yaml_value)
-}
-
 pub async fn get_integrations(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> Result<
@@ -96,7 +90,7 @@ pub async fn get_integrations(
     let integrations_yaml_value = read_yaml_into_value(&integrations_yaml_path).await?;
 
     let mut results = IndexMap::new();
-    results["global"] = IndexMap::new();
+    results.entry("global".to_string()).or_insert_with(IndexMap::new);
     for (i_name, mut i) in get_empty_integrations() {
         let path = get_integration_path(&cache_dir, &i_name);
         let (j_value, i_extra) = json_for_integration_global(
@@ -117,7 +111,7 @@ pub async fn get_integrations(
     let mut err_log = vec![];
     for c_dir in workspace_folders {
         let c_dir_str = c_dir.to_string_lossy().to_string();
-        results[c_dir_str.as_str()] = IndexMap::new();
+        results.entry(c_dir_str.clone()).or_insert_with(IndexMap::new);
         
         for (i_name, mut i) in get_empty_integrations() {
             let integr_path = c_dir.join(".refact").join("customization.d").join(format!("{}.yaml", i_name));
@@ -247,60 +241,6 @@ async fn json_for_integration_global(
             Ok((value, IntegrationExtra::default()))
         }
     }
-}
-
-async fn load_tool_from_yaml<T: Tool + IntegrationTrait + Send + 'static>(
-    yaml_path: Option<&PathBuf>,
-    tool_constructor: fn(&serde_yaml::Value) -> Result<T, String>,
-    value_from_integrations: Option<&serde_yaml::Value>,
-    enabled: Option<&bool>,
-    integrations: &mut IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
-) -> Result<(), String> {
-    let yaml_path = yaml_path.as_ref().expect("No yaml path");
-    let tool_name = yaml_path.file_stem().expect("No file name").to_str().expect("No file name").to_string();
-    if !enabled.unwrap_or(&false) {
-        info!("Integration {} is disabled", tool_name);
-        return Ok(());
-    }
-    let tool = if yaml_path.exists() {
-        match read_yaml_into_value(yaml_path).await {
-            Ok(value) => {
-                match tool_constructor(&value) {
-                    Ok(tool) => {
-                        Some(tool)
-                    }
-                    Err(e) => {
-                        warn!("Problem in {}: {}", yaml_path.display(), e);
-                        None
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Problem reading {:?}: {}", yaml_path, e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    let tool_from_integrations = value_from_integrations
-        .and_then(|value| match tool_constructor(&value) {
-            Ok(tool) => Some(tool),
-            Err(_) => None
-        });
-
-    match (tool, tool_from_integrations) {
-        (Some(_), Some(_)) => {
-            return Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."));
-        },
-        (Some(tool), None) | (None, Some(tool)) => {
-            integrations.insert(tool_name.clone(), Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
-        },
-        _ => {}
-    }
-
-    Ok(())
 }
 
 pub const INTEGRATIONS_DEFAULT_YAML: &str = r#"# This file is used to configure integrations in Refact Agent.

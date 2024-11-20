@@ -78,6 +78,7 @@ pub async fn read_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<
 
 pub async fn tools_merged_and_filtered(
     gcx: Arc<ARwLock<GlobalContext>>,
+    integr_scope: Option<String>,
     _supports_clicks: bool,  // XXX
 ) -> Result<IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>, String> {
     let (ast_on, vecdb_on, allow_experimental) = {
@@ -105,7 +106,7 @@ pub async fn tools_merged_and_filtered(
     ]);
 
     if allow_experimental {
-        match load_integration_tools(gcx.clone()).await {
+        match load_integration_tools(gcx.clone(), integr_scope).await {
             Ok(integrations) => {
                 tools_all.extend(integrations);
             }

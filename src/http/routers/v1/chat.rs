@@ -197,6 +197,7 @@ async fn _chat(
         supports_tools,
         supports_clicks,
         should_execute_remotely,
+        chat_post.integr_scope.clone()
     ).await.map_err(|e|
         ScratchError::new(StatusCode::BAD_REQUEST, e)
     )?;
