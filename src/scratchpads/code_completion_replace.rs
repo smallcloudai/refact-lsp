@@ -387,11 +387,15 @@ fn process_n_choices(
         
         // Removing the cut part
         if let Some(idx) = cc.find(cut_part.as_str()) {
-            cc = cc.split_at(idx + cut_part.len()).1.to_string();
-        } else if let Some(idx) = cc.find(cut_part.trim()) {
-            cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
-        } else {
-            cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
+            if !cut_part.trim().is_empty() || idx == 0 {
+                cc = cc.split_at(idx + cut_part.len()).1.to_string();
+            }
+        } else if !cut_part.trim().is_empty() {
+            if let Some(idx) = cc.find(cut_part.trim()) {
+                cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
+            } else {
+                cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
+            }
         }
         if cut_part.replace(" ", "").is_empty() {
             cc = format!("{}{}", cut_part, cc);
