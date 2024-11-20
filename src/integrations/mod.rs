@@ -23,9 +23,7 @@ use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
 use crate::yaml_configs::create_configs::read_yaml_into_value;
 use integr_abstract::IntegrationTrait;
-use crate::integrations::integr_postgres::ToolPostgres;
-use crate::integrations::setting_up_integrations::config_dirs;
-
+use crate::integrations::setting_up_integrations::{integration_extra_from_yaml, IntegrationExtra};
 
 pub const INTEGRATION_NAMES: &[&str] = &[
     "github",
@@ -35,37 +33,48 @@ pub const INTEGRATION_NAMES: &[&str] = &[
     "chrome",
 ];
 
+pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String> {
+    match n {
+        // "github" => Ok(Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "gitlab" => Ok(Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "pdb" => Ok(Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        // "chrome" => Ok(Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        _ => Err(format!("Unknown integration name: {}", n)),
+    }
+}
+
 pub fn get_empty_integrations() -> IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>> {
     let mut integrations = IndexMap::new();
     for i_name in INTEGRATION_NAMES.iter().cloned() {
-        let i = match i_name {
-            // "github" => Box::new(ToolGithub {..Default::default()} ) as Box<dyn IntegrationTrait + Send + Sync>,
-            // "gitlab" => Box::new(ToolGitlab {..Default::default()} ) as Box<dyn IntegrationTrait + Send + Sync>,
-            // "pdb" => Box::new(ToolPdb {..Default::default()} ) as Box<dyn IntegrationTrait + Send + Sync>,
-            "postgres" => Box::new(ToolPostgres {..Default::default()} ) as Box<dyn IntegrationTrait + Send + Sync>,
-            // "chrome" => Box::new(ToolChrome {..Default::default()} ) as Box<dyn IntegrationTrait + Send + Sync>,
-            _ => panic!("Unknown integration name: {}", i_name)
-        };
+        let i = integration_from_name(i_name).unwrap();
         integrations.insert(i_name.to_string(), i);
     }
     integrations
 }
 
+fn integr_yaml2json(
+    value: &serde_yaml::Value, 
+    integr_name: &str,
+) -> Result<serde_json::Value, String> {
+    let mut integr_empty = integration_from_name(integr_name)?;
+    let j_value = serde_json::to_value(value).map_err(|e| { 
+        format!("failed to convert yaml -> json: {e}")
+    })?;
+    if let Err(e) = integr_empty.integr_settings_apply(&j_value) {
+        return Err(e);
+    }
+    Ok(integr_empty.integr_settings_as_json())
+}
 
 pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
     cache_dir.join("integrations.d").join(format!("{}.yaml", name))
 }
 
 pub async fn validate_integration_value(name: &str, value: serde_yaml::Value) -> Result<serde_yaml::Value, String> {
-    let integrations = get_empty_integrations();
-    match integrations.get(name) {
-        Some(i) => {
-            let j_value: serde_json::Value = i.integr_yaml2json(&value)?;
-            let yaml_value: serde_yaml::Value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
-            Ok(yaml_value)
-        },
-        None => Err(format!("Integration {} is not defined", name))
-    }
+    let j_value = integr_yaml2json(&value, name)?;
+    let yaml_value: serde_yaml::Value = serde_yaml::to_value(&j_value).map_err(|e| e.to_string())?;
+    Ok(yaml_value)
 }
 
 pub async fn get_integrations(
@@ -73,7 +82,7 @@ pub async fn get_integrations(
 ) -> Result<
     (IndexMap<
         String, 
-        IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>>>, 
+        IndexMap<String, (Box<dyn IntegrationTrait + Send + Sync>, IntegrationExtra)>>, 
      Vec<String>),
     String
 > {
@@ -83,13 +92,16 @@ pub async fn get_integrations(
     };
     let workspace_folders = workspace_folders.lock().unwrap().clone();
 
-    let integrations_yaml_value = read_yaml_into_value(&cache_dir.join("integrations.yaml")).await?;
+    let integrations_yaml_path = cache_dir.join("integrations.yaml");
+    let integrations_yaml_value = read_yaml_into_value(&integrations_yaml_path).await?;
 
     let mut results = IndexMap::new();
     results["global"] = IndexMap::new();
     for (i_name, mut i) in get_empty_integrations() {
         let path = get_integration_path(&cache_dir, &i_name);
-        let j_value = json_for_integration_global(&path, integrations_yaml_value.get(&i_name), &i).await?;
+        let (j_value, i_extra) = json_for_integration_global(
+            &path, integrations_yaml_value.get(&i_name), &i, &integrations_yaml_path
+        ).await?;
 
         if j_value.get("detail").is_some() {
             warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
@@ -98,9 +110,8 @@ pub async fn get_integrations(
                 warn!("failed to load integration {}: {}", i_name, e);
             };
         }
-        results["global"].insert(i_name.clone(), i);
+        results["global"].insert(i_name.clone(), (i, i_extra));
     }
-    
     
     // gathering integrations from .refact that is present in each workdir
     let mut err_log = vec![];
@@ -110,9 +121,9 @@ pub async fn get_integrations(
         
         for (i_name, mut i) in get_empty_integrations() {
             let integr_path = c_dir.join(".refact").join("customization.d").join(format!("{}.yaml", i_name));
-            let j_value = match json_for_integration_local(&integr_path, &i).await {
-                Ok(v) => match v {
-                    Some(v) => v,
+            let (j_value, i_extra) = match json_for_integration_local(&integr_path, &i).await {
+                Ok((v, i_extra)) => match v {
+                    Some(v) => (v, i_extra),
                     None => continue
                 },
                 Err(e) => {
@@ -124,7 +135,7 @@ pub async fn get_integrations(
                 err_log.push(e);
                 continue;
             }
-            results[c_dir_str.as_str()].insert(i_name.clone(), i);
+            results[c_dir_str.as_str()].insert(i_name.clone(), (i, i_extra));
         }
     }
 
@@ -148,7 +159,7 @@ pub async fn load_integration_tools(
     };
     
     let mut tools = IndexMap::new();
-    for (i_name, i) in integrations.iter() {
+    for (i_name, (i, _i_extra)) in integrations.iter() {
         if !enabled.get(i_name).unwrap_or(&true) { // todo: placeholder: no enabled config rn
             info!("Integration {} is disabled", i_name);
             continue;
@@ -162,18 +173,25 @@ pub async fn load_integration_tools(
 async fn json_for_integration_local(
     yaml_path: &PathBuf,
     integration: &Box<dyn IntegrationTrait + Send + Sync>,
-) -> Result<Option<serde_json::Value>, String> {
+) -> Result<(Option<serde_json::Value>, IntegrationExtra), String> {
     if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
-            Ok(value) => integration.integr_yaml2json(&value).map(|x|Some(x)).map_err(|e| {
-                format!("Problem converting integration to JSON: {}", e)
-            }),
+            Ok(value) => integr_yaml2json(&value, integration.integr_name())
+                .map(|x|Some(x))
+                .map(|x| {
+                    let mut extra = integration_extra_from_yaml(&value);
+                    extra.integr_path = yaml_path.to_string_lossy().to_string();
+                    (x, extra) 
+                })
+                .map_err(|e| {
+                    format!("Problem converting integration to JSON: {}", e) 
+                }),
             Err(e) => {
                 Err(format!("Problem reading YAML from {}: {}", yaml_path.display(), e))
             }
         }
     } else {
-        Ok(None)
+        Ok((None, IntegrationExtra::default()))
     }
 }
 
@@ -181,26 +199,33 @@ async fn json_for_integration_global(
     yaml_path: &PathBuf,
     value_from_integrations: Option<&serde_yaml::Value>,
     integration: &Box<dyn IntegrationTrait + Send + Sync>,
-) -> Result<serde_json::Value, String> {
+    integrations_yaml_path: &PathBuf,
+) -> Result<(serde_json::Value, IntegrationExtra), String> {
     let tool_name = integration.integr_name().to_string();
 
-    let value = if yaml_path.exists() {
+    let (value, extra) = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
-            Ok(value) => integration.integr_yaml2json(&value).unwrap_or_else(|e| {
-                let e = format!("Problem converting integration to JSON: {}", e);
-                json!({"detail": e.to_string()})
-            }),
+            Ok(value) => integr_yaml2json(&value, integration.integr_name())
+                .map(|i| { 
+                    let mut extra = integration_extra_from_yaml(&value);
+                    extra.integr_path = yaml_path.to_string_lossy().to_string();
+                    (i, extra) 
+                })
+                .unwrap_or_else(|e| {
+                    let e = format!("Problem converting integration to JSON: {}", e);
+                    (json!({"detail": e.to_string()}), IntegrationExtra::default())
+                }),
             Err(e) => {
                 let e = format!("Problem reading YAML from {}: {}", yaml_path.display(), e);
-                json!({"detail": e.to_string()})
+                (json!({"detail": e.to_string()}), IntegrationExtra::default())
             }
         }
     } else {
-        json!({"detail": format!("Cannot read {}. Probably, file does not exist", yaml_path.display())})
+        (json!({"detail": format!("Cannot read {}. Probably, file does not exist", yaml_path.display())}), IntegrationExtra::default())
     };
 
     let value_from_integrations = value_from_integrations.map_or(json!({"detail": format!("tool {tool_name} is not defined in integrations.yaml")}), |value| {
-        integration.integr_yaml2json(value).unwrap_or_else(|e| {
+        integr_yaml2json(value, integration.integr_name()).unwrap_or_else(|e| {
             let e = format!("Problem converting integration to JSON: {}", e);
             json!({"detail": e.to_string()})
         })
@@ -211,13 +236,15 @@ async fn json_for_integration_global(
             Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."))
         },
         (Some(_), None) => {
-            Ok(value_from_integrations)
+            let mut extra = IntegrationExtra::default();
+            extra.integr_path = integrations_yaml_path.to_string_lossy().to_string();
+            Ok((value_from_integrations, extra))
         },
         (None, Some(_)) => {
-            Ok(value)
+            Ok((value, extra))
         }
         (Some(_), Some(_)) => {
-            Ok(value)
+            Ok((value, IntegrationExtra::default()))
         }
     }
 }
@@ -240,7 +267,6 @@ async fn load_tool_from_yaml<T: Tool + IntegrationTrait + Send + 'static>(
             Ok(value) => {
                 match tool_constructor(&value) {
                     Ok(tool) => {
-                        // integrations.insert(tool_name, Arc::new(AMutex::new(Box::new(tool) as Box<dyn Tool + Send>)));
                         Some(tool)
                     }
                     Err(e) => {
