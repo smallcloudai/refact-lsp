@@ -23,7 +23,7 @@ use tracing::info;
 const DEBUG: bool = true;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
 An unfinished line in this block is marked with <CURSOR>. 
-Your task is to complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE>. 
+Your task is to complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context. 
 Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes.
 Copy additional lines before and after the <CURSOR> line exactly as they are.
 You cannot remove the line with the <CURSOR>, you have to complete it. 
@@ -357,7 +357,7 @@ fn process_n_choices(
         let mut cc = x.clone();
 
         // This can happen if the model doesn't support prefilling, it will output the whole message
-        // and we stripping it here to leave the completion code only
+        // Stripping it here to leave the completion part only
         let ticks_count = cc.matches("```").count();
         if x.contains("<REWRITTEN_BLOCK_OF_CODE>")
             || ticks_count >= 2
@@ -386,14 +386,15 @@ fn process_n_choices(
         }
         
         // Removing the cut part
-        if !cut_part.trim().is_empty() {
-            if let Some(idx) = cc.find(cut_part.as_str()) {
-                cc = cc.split_at(idx + cut_part.len()).1.to_string();
-            } else if let Some(idx) = cc.find(cut_part.trim()) {
-                cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
-            } else {
-                cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
-            }
+        if let Some(idx) = cc.find(cut_part.as_str()) {
+            cc = cc.split_at(idx + cut_part.len()).1.to_string();
+        } else if let Some(idx) = cc.find(cut_part.trim()) {
+            cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
+        } else {
+            cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
+        }
+        if cut_part.replace(" ", "").is_empty() {
+            cc = format!("{}{}", cut_part, cc);
         }
 
         // Removing the suffix
@@ -412,7 +413,8 @@ fn process_n_choices(
             cc = cc.split_at(start_idx).0.to_string();
         }
 
-        if !is_multiline {
+        let predicted_single_line = cc.matches("\n").count() == 1;
+        if !is_multiline || predicted_single_line {
             if let Some(x) = cc.find("\n") {
                 cc = cc.split_at(x).0.to_string();
             }
@@ -421,7 +423,7 @@ fn process_n_choices(
 
         // Instruct-based models love to add weird comments
         // Trying to remove some of them with a simple heuristics
-        if !is_multiline {
+        if !is_multiline || predicted_single_line {
             if let Some(new_row) = cc.split(" //").next() {
                 if cc.starts_with(new_row) {
                     cc = new_row.to_string();
