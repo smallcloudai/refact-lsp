@@ -22,17 +22,14 @@ use tracing::info;
 
 const DEBUG: bool = true;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
-An unfinished line in this block is marked with <CURSOR>. 
-Your task is to complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context. 
-Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes.
-Copy additional lines before and after the <CURSOR> line exactly as they are.
-You cannot remove the line with the <CURSOR>, you have to complete it. 
-If the <BLOCK_OF_CODE> is already complete - just copy the block it without changes!!"#;
+An unfinished line in this block is marked with the <CURSOR>. 
+Your task is to complete the code after the <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context.
+Finish up code, functions, comments, etc. 
+Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes."#;
 const SYSTEM_PROMPT_USING_A_COMMENT: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
 Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
 Provide a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes.
-You cannot remove the line with the <CURSOR>, you have to complete it. 
-If the <BLOCK_OF_CODE> is already complete - just copy the block it without changes!
+Strictly follow the user's intention.
 User's intention:
 <comment>"#;
 const SUBBLOCK_CUT_TOKENS_N: usize = 3;
@@ -88,7 +85,8 @@ impl SubBlock {
             .map(|x| x.replace("\r\n", "\n"))
             .collect::<Vec<_>>()
             .join("");
-        let (new_cursor_line, cut_part) = if !self.cursor_line.is_empty() {
+        let (new_cursor_line, cut_part) = if !self.cursor_line.trim().is_empty() 
+            || self.cursor_line.len() < SUBBLOCK_CUT_TOKENS_N {
             let tokenizer_ref = tokenizer.tokenizer
                 .write()
                 .map_err(|x| x.to_string())?;
