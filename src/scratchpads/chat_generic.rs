@@ -177,9 +177,9 @@ impl TextScratchpadAbstract for GenericChatScratchpad {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        stopped: Vec<bool>,
+        finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
-        self.dd.response_n_choices(choices, stopped)
+        self.dd.response_n_choices(choices, finish_reasons)
     }
 
     fn response_streaming(

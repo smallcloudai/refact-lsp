@@ -29,7 +29,7 @@ pub trait TextScratchpadAbstract: Send {
     fn response_n_choices(   // Not streaming, convert what model says (choices) to final result
                              &mut self,
                              choices: Vec<String>,
-                             stopped: Vec<bool>,
+                             finish_reason: Vec<String>,
     ) -> Result<Value, String>;
 
     fn response_streaming(   // Only 1 choice, but streaming. Returns delta the user should see, and finished flag
@@ -61,7 +61,7 @@ pub trait MessagesScratchpadAbstract: Send {
     fn response_n_choices(   // Not streaming, convert what model says (choices) to final result
                              &mut self,
                              choices: Vec<String>,
-                             stopped: Vec<bool>,
+                             finish_reason: Vec<String>,
     ) -> Result<Value, String>;
 
     fn response_streaming(   // Only 1 choice, but streaming. Returns delta the user should see, and finished flag

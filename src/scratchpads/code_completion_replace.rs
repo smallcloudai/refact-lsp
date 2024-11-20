@@ -27,12 +27,12 @@ Your task is to complete the code after <CURSOR> by rewriting the <BLOCK_OF_CODE
 Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes.
 Copy additional lines before and after the <CURSOR> line exactly as they are.
 You cannot remove the line with the <CURSOR>, you have to complete it. 
-If the <BLOCK_OF_CODE> is already complete - just copy it without changes"#;
+If the <BLOCK_OF_CODE> is already complete - just copy the block it without changes!!"#;
 const SYSTEM_PROMPT_USING_A_COMMENT: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
 Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
 Provide a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes.
 You cannot remove the line with the <CURSOR>, you have to complete it. 
-If the <BLOCK_OF_CODE> is already complete - just copy it without changes.
+If the <BLOCK_OF_CODE> is already complete - just copy the block it without changes!
 User's intention:
 <comment>"#;
 const SUBBLOCK_CUT_TOKENS_N: usize = 3;
@@ -282,7 +282,7 @@ fn skip_similar_letters_from_a_rev(a: &str, b: &str) -> String {
     }
 }
 
-fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
+fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> String {
     let mut cut_at = vec![];
     if !eot_token.is_empty() {
         if let Some(x) = text.find(eot_token) {
@@ -301,11 +301,11 @@ fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
         }
     }
     if cut_at.is_empty() {
-        return (text.to_string().replace("\r", ""), false);
+        return text.to_string().replace("\r", "");
     }
     let cut_at = cut_at.into_iter().min().unwrap_or(text.len());
     let ans = text.split_at(cut_at).0.to_string();
-    (ans.replace("\r", ""), true)
+    ans.replace("\r", "")
 }
 
 fn retrieve_a_comment(
@@ -527,7 +527,7 @@ impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        stopped: Vec<bool>,
+        finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
         let subblock_ref = self.cursor_subblock
             .as_mut()
@@ -542,7 +542,7 @@ impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
                 info!("unprocessed {i} response_n_choice\n{:?}", x);
             }
 
-            let (mut cc, mut finished) = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
+            let mut cc = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
             if !after_lines_str.trim().is_empty() {
                 if let Some(idx) = cc.find(after_lines_str.as_str()) {
                     cc = cc.split_at(idx).0.to_string();
@@ -561,21 +561,14 @@ impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
                 } 
             }
 
-            finished |= stopped[i];
-            let finish_reason = if finished {
-                cc = cc.trim_end().to_string();
-                "stop"
-            } else {
-                "length"
-            }.to_string();
             if i == 0 {
                 self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reason.clone();
+                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
             }
             json!({
                 "index": i,
                 "code_completion": cc,
-                "finish_reason": finish_reason.clone(),
+                "finish_reason": finish_reasons[i].clone(),
             })
         }).collect::<Vec<_>>();
         if DEBUG {
@@ -751,7 +744,7 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        stopped: Vec<bool>,
+        finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
         let subblock_ref = self.cursor_subblock
             .as_mut()
@@ -768,16 +761,25 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
                 info!("unprocessed {i} response_n_choice\n{:?}", x);
             }
 
+            if finish_reasons[i] == "stop" && !x.contains("```") {
+                return json!({
+                    "index": i,
+                    "code_completion": "",
+                    "finish_reason": finish_reasons[i].clone(),
+                })
+            }
+
             let mut cc = x.clone();
-            if x.contains("<REWRITTEN_BLOCK_OF_CODE>") || cc.matches("```").count() >= 2 {
+            let ticks_count = cc.matches("```").count();
+            if x.contains("<REWRITTEN_BLOCK_OF_CODE>")
+                || ticks_count >= 2
+                || (ticks_count == 1 && finish_reasons[i] == "length") {
                 if let Some(start_idx) = cc.find("```") {
-                    let start_idx = start_idx + 3;
-                    // Skip any language specifier
-                    let start_idx = cc[start_idx..].find('\n').map_or(start_idx, |i| start_idx + i + 1);
-                    if let Some(end_idx) = cc.rfind("```") {
-                        if start_idx < end_idx {
-                            cc = cc[start_idx..end_idx].to_string();
-                        }
+                    let start_idx = cc[start_idx + 3..]
+                        .find('\n')
+                        .map_or(start_idx + 3, |i| start_idx + i + 4);
+                    if let Some(end_idx) = cc[start_idx..].find("```") {
+                        cc = cc[start_idx..start_idx + end_idx].to_string();
                     } else {
                         cc = cc[start_idx..].to_string();
                     }
@@ -789,18 +791,18 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
                         cc = cc.split_at(idx + before_lines_str.len()).1.to_string();
                     } else if let Some(idx) = cc.find(before_lines_str.trim()) {
                         cc = cc.split_at(idx + before_lines_str.trim().len()).1.to_string();
-                    } else  {
+                    } else {
+                        cc = skip_similar_letters_from_a(before_lines_str.as_str(), cc.as_str())
                     }
                 }
             }
-            
-            cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str());
             if !cut_part.trim().is_empty() {
                 if let Some(idx) = cc.find(cut_part.as_str()) {
                     cc = cc.split_at(idx + cut_part.len()).1.to_string();
                 } else if let Some(idx) = cc.find(cut_part.trim()) {
                     cc = cc.split_at(idx + cut_part.trim().len()).1.to_string();
-                } else  {
+                } else {
+                    cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
                 }
             }
             if !after_lines_str.trim().is_empty() {
@@ -812,24 +814,41 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
                     cc = skip_similar_letters_from_a_rev(after_lines_str.as_str(), &cc);
                 }
             }
-            let (mut cc, mut finished) = _cut_result(&cc, self.t.eot.as_str(), self.post.inputs.multiline);
 
+            // Consider this as an ending fence 
+            if let Some(start_idx) = cc.find("```") {
+                cc = cc.split_at(start_idx).0.to_string();
+            }
 
-            finished |= stopped[i];
-            let finish_reason = if finished {
-                cc = cc.trim_end().to_string();
-                "stop"
-            } else {
-                "length"
-            }.to_string();
+            if !self.post.inputs.multiline {
+                if let Some(x) = cc.find("\n") {
+                    cc = cc.split_at(x).0.to_string();
+                }
+            }
+            cc = cc.replace("\r", "");
+            
+            // trying to remove extra commentaries
+            if !self.post.inputs.multiline {
+                if let Some(new_row) = cc.split(" //").next() {
+                    if cc.starts_with(new_row) {
+                        cc = new_row.to_string();
+                    }
+                }
+                if let Some(new_row) = cc.split("  #").next() {
+                    if cc.starts_with(new_row) {
+                        cc = new_row.to_string();
+                    }
+                }
+            }
+
             if i == 0 {
                 self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reason.clone();
+                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
             }
             json!({
                 "index": i,
                 "code_completion": cc,
-                "finish_reason": finish_reason.clone(),
+                "finish_reason": finish_reasons[i].clone(),
             })
         }).collect::<Vec<_>>();
         if DEBUG {

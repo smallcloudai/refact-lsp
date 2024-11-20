@@ -352,25 +352,18 @@ impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        stopped: Vec<bool>
+        finish_reasons: Vec<String>
     ) -> Result<Value, String> {
         let json_choices = choices.iter().enumerate().map(|(i, x)| {
-            let (mut cc, mut finished) = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
-            finished |= stopped[i];
-            let finish_reason = if finished {
-                cc = cc.trim_end().to_string();
-                "stop"
-            } else {
-                "length"
-            }.to_string();
+            let cc = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
             if i==0 {
                 self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reason.clone();
+                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
             }
             json!({
                 "index": i,
                 "code_completion": cc,
-                "finish_reason": finish_reason.clone(),
+                "finish_reason": finish_reasons[i].clone(),
             })
         }).collect::<Vec<_>>();
         if DEBUG {
@@ -394,15 +387,15 @@ impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
         stop_toks: bool,
         stop_length: bool,
     ) -> Result<(Value, bool), String> {
-        let mut finished;
+        let mut finished = false;
         let json_choices;
         // info!("XXXXX delta: {:?}", delta);
         // info!("XXXXX stop_toks: {:?}", stop_toks);
         // info!("XXXXX stop_length: {:?}", stop_length);
         if !delta.is_empty() || stop_toks {
+            let finished = stop_toks || stop_length;
             let mut s: String;
-            (s, finished) = _cut_result(&delta, self.t.eot.as_str(), self.post.inputs.multiline);
-            finished |= stop_toks;
+            s = _cut_result(&delta, self.t.eot.as_str(), self.post.inputs.multiline);
             if finished {
                 // can stay consistent with trim() only if that's the final iteration
                 s = s.trim_end().to_string();
@@ -433,11 +426,11 @@ impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
     }
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>  {
-        return Err("".to_string());
+        Err("".to_string())
     }
 }
 
-fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
+fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> String {
     let mut cut_at = vec![];
     if let Some(x) = text.find(eot_token) {
         cut_at.push(x);
@@ -454,11 +447,11 @@ fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> (String, bool) {
         }
     }
     if cut_at.is_empty() {
-        return (text.to_string().replace("\r", ""), false);
+        return text.to_string().replace("\r", "");
     }
     let cut_at = cut_at.into_iter().min().unwrap_or(text.len());
     let ans = text.split_at(cut_at).0.to_string();
-    return (ans.replace("\r", ""), true);
+    ans.replace("\r", "")
 }
 
 async fn _cursor_position_to_context_file(

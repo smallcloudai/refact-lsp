@@ -151,9 +151,9 @@ pub async fn scratchpad_interaction_not_stream_json(
         scratchpad_result = Ok(model_says.clone());
     } else if let Some(hf_arr) = model_says.as_array() {
         let choices = hf_arr.iter().map(|x| x.get("generated_text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-        let stopped = vec![false; choices.len()];
+        let finish_reasons = vec!["length".to_string(); choices.len()];
         scratchpad_result = match scratchpad {
-            ScratchpadAbstract::Text(s) => s.response_n_choices(choices, stopped),
+            ScratchpadAbstract::Text(s) => s.response_n_choices(choices, finish_reasons),
             ScratchpadAbstract::Messages(_) => {
                 return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
             }
@@ -166,9 +166,9 @@ pub async fn scratchpad_interaction_not_stream_json(
             }
             info!("json: {:?}", model_says);
             let choices = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("message").unwrap().get("content").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-            let stopped = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
+            let finish_reasons = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string()).collect::<Vec<_>>();
             scratchpad_result = match scratchpad {
-                ScratchpadAbstract::Messages(s) => s.response_n_choices(choices, stopped),
+                ScratchpadAbstract::Messages(s) => s.response_n_choices(choices, finish_reasons),
                 ScratchpadAbstract::Text(_) => {
                     return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "text scratchpad cannot be used in the message mode".to_string()))
                 }
@@ -179,9 +179,9 @@ pub async fn scratchpad_interaction_not_stream_json(
             //     let index = oai_choice.get("index").unwrap().as_u64().unwrap() as usize;
             // }
             let choices = oai_choices.as_array().unwrap().iter().map(|x| x.get("text").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-            let stopped = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string().starts_with("stop")).collect::<Vec<_>>();
+            let finish_reasons = oai_choices.as_array().unwrap().iter().map(|x| x.get("finish_reason").unwrap_or(&json!("")).as_str().unwrap().to_string()).collect::<Vec<_>>();
             scratchpad_result = match scratchpad {
-                ScratchpadAbstract::Text(s) => s.response_n_choices(choices, stopped),
+                ScratchpadAbstract::Text(s) => s.response_n_choices(choices, finish_reasons),
                 ScratchpadAbstract::Messages(_) => {
                     return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
                 }

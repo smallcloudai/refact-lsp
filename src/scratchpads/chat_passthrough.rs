@@ -207,7 +207,7 @@ impl MessagesScratchpadAbstract for ChatPassthrough {
     fn response_n_choices(  // result of old-school OpenAI with text (not messages) which is not possible when using passthrough (means messages)
         &mut self,
         _choices: Vec<String>,
-        _stopped: Vec<bool>,
+        _finish_reasons: Vec<String>,
     ) -> Result<Value, String> {
         todo!();
     }

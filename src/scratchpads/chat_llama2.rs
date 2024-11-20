@@ -157,9 +157,9 @@ impl TextScratchpadAbstract for ChatLlama2 {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        stopped: Vec<bool>,
+        finish_reasons: Vec<String>,
     ) -> Result<serde_json::Value, String> {
-        self.dd.response_n_choices(choices, stopped)
+        self.dd.response_n_choices(choices, finish_reasons)
     }
 
     fn response_streaming(
