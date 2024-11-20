@@ -62,7 +62,7 @@ fn default_endpoint_style() -> String {
 }
 
 fn default_code_completion_n_ctx() -> usize {
-    8192
+    2048
 }
 
 fn default_endpoint_embeddings_style() -> String {

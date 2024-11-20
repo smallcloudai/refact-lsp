@@ -117,10 +117,10 @@ pub async fn handle_v1_code_completion(
         "".to_string(),
         false,
     ).await));
-    if code_completion_post.stream {
-        crate::restream::scratchpad_interaction_stream(ccx.clone(), scratchpad, "completion-stream".to_string(), model_name, code_completion_post.parameters.clone(), false).await
-    } else {
+    if !code_completion_post.stream {
         crate::restream::scratchpad_interaction_not_stream(ccx.clone(), &mut scratchpad, "completion".to_string(), model_name, &mut code_completion_post.parameters, false).await
+    } else {
+        crate::restream::scratchpad_interaction_stream(ccx.clone(), scratchpad, "completion-stream".to_string(), model_name, code_completion_post.parameters.clone(), false).await
     }
 }
 

@@ -36,7 +36,7 @@ impl DeltaSender {
     }
 
     pub fn feed_delta(&mut self, role: &str, _json: &Value, finish_reason: &str, tool_calls: Option<Value>) -> Value {
-        // TODO: not implemented yet
+        // TODO: correctly implement it
         let x = serde_json::json!([{
             "index": 0,
             "delta": {
@@ -221,7 +221,7 @@ impl MessagesScratchpadAbstract for ChatPassthrough {
         if !json.as_object().unwrap().is_empty() {
             Ok((json.clone(), stop_toks || stop_length))
         } else {
-            // The unfinished part
+            // TODO: the unfinished part
             let finished = stop_toks || stop_length;
             let finish_reason = if finished {
                 if stop_toks { "stop".to_string() } else { "length".to_string() }

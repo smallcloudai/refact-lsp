@@ -155,7 +155,9 @@ pub async fn scratchpad_interaction_not_stream_json(
         scratchpad_result = match scratchpad {
             ScratchpadAbstract::Text(s) => s.response_n_choices(choices, finish_reasons),
             ScratchpadAbstract::Messages(_) => {
-                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
+                return Err(ScratchError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    "message scratchpad cannot be used in the text mode".to_string()))
             }
         }
     } else if let Some(oai_choices) = model_says.clone().get("choices") {
@@ -170,7 +172,9 @@ pub async fn scratchpad_interaction_not_stream_json(
             scratchpad_result = match scratchpad {
                 ScratchpadAbstract::Messages(s) => s.response_n_choices(choices, finish_reasons),
                 ScratchpadAbstract::Text(_) => {
-                    return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "text scratchpad cannot be used in the message mode".to_string()))
+                    return Err(ScratchError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR, 
+                        "text scratchpad cannot be used in the message mode".to_string()))
                 }
             }
         } else {
@@ -183,7 +187,9 @@ pub async fn scratchpad_interaction_not_stream_json(
             scratchpad_result = match scratchpad {
                 ScratchpadAbstract::Text(s) => s.response_n_choices(choices, finish_reasons),
                 ScratchpadAbstract::Messages(_) => {
-                    return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "message scratchpad cannot be used in the text mode".to_string()))
+                    return Err(ScratchError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR, 
+                        "message scratchpad cannot be used in the text mode".to_string()))
                 }
             }
         }
@@ -558,7 +564,6 @@ fn _push_streaming_json_into_scratchpad(
         if let Some(_delta) = choice0.get("delta") {
             let stop_toks = !finish_reason.is_empty() && finish_reason.starts_with("stop");
             let stop_length = !finish_reason.is_empty() && !finish_reason.starts_with("stop");
-            info!("JSON: {:?}", json);
             (value, *finished) = match scratch {
                 ScratchpadAbstract::Messages(s) => s.response_streaming(&json, stop_toks, stop_length)?,
                 ScratchpadAbstract::Text(_) => {

@@ -27,16 +27,16 @@ pub trait TextScratchpadAbstract: Send {
     ) -> Result<String, String>;
 
     fn response_n_choices(   // Not streaming, convert what model says (choices) to final result
-                             &mut self,
-                             choices: Vec<String>,
-                             finish_reason: Vec<String>,
+        &mut self,
+        choices: Vec<String>,
+        finish_reason: Vec<String>,
     ) -> Result<Value, String>;
 
     fn response_streaming(   // Only 1 choice, but streaming. Returns delta the user should see, and finished flag
-                             &mut self,
-                             delta: String,       // if delta is empty, there is no more input, add final fields if needed
-                             stop_toks: bool,
-                             stop_length: bool,
+        &mut self,
+        delta: String,       // if delta is empty, there is no more input, add final fields if needed
+        stop_toks: bool,
+        stop_length: bool,
     ) -> Result<(Value, bool), String>;
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>;
@@ -59,21 +59,20 @@ pub trait MessagesScratchpadAbstract: Send {
     ) -> Result<String, String>;
 
     fn response_n_choices(   // Not streaming, convert what model says (choices) to final result
-                             &mut self,
-                             choices: Vec<String>,
-                             finish_reason: Vec<String>,
+        &mut self,
+        choices: Vec<String>,
+        finish_reason: Vec<String>,
     ) -> Result<Value, String>;
 
     fn response_streaming(   // Only 1 choice, but streaming. Returns delta the user should see, and finished flag
-                             &mut self,
-                             delta: &Value,       // if delta is empty, there is no more input, add final fields if needed
-                             stop_toks: bool,
-                             stop_length: bool,
+        &mut self,
+        delta: &Value,
+        stop_toks: bool,
+        stop_length: bool,
     ) -> Result<(Value, bool), String>;
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>;
 }
-
 
 pub enum ScratchpadAbstract {
     Text(Box<dyn TextScratchpadAbstract>),
