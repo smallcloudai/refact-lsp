@@ -11,14 +11,14 @@ use tokio::sync::RwLock as ARwLock;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::integrations::setting_up_integrations::{get_integration_contents, get_integration_records, save_integration_value};
+use crate::integrations::setting_up_integrations::{get_integration_contents_with_filter, get_integration_records, save_integration_value, IntegrationsFilter};
 // use crate::integrations::{get_empty_integrations, get_integration_path};
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value, write_yaml_value};
 
 
 #[derive(Deserialize)]
 struct IntegrationsPost {
-    pub scope: String,
+    pub filter: IntegrationsFilter,
 }
 
 #[derive(Deserialize)]
@@ -54,7 +54,7 @@ pub async fn handle_v1_integrations(
     let post = serde_json::from_slice::<IntegrationsPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let contents = get_integration_contents(gcx.clone(), &post.scope).await.map_err(|e|{
+    let contents = get_integration_contents_with_filter(gcx.clone(), &post.filter).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load integrations: {}", e))
     })?;
 

@@ -110,11 +110,12 @@ pub async fn get_integrations(
     // gathering integrations from .refact that is present in each workdir
     let mut err_log = vec![];
     for c_dir in workspace_folders {
+        info!("Loading integrations from {}", c_dir.display());
         let c_dir_str = c_dir.to_string_lossy().to_string();
         results.entry(c_dir_str.clone()).or_insert_with(IndexMap::new);
         
         for (i_name, mut i) in get_empty_integrations() {
-            let integr_path = c_dir.join(".refact").join("customization.d").join(format!("{}.yaml", i_name));
+            let integr_path = c_dir.join(".refact").join("integrations.d").join(format!("{}.yaml", i_name));
             let (j_value, i_extra) = match json_for_integration_local(&integr_path, &i).await {
                 Ok((v, i_extra)) => match v {
                     Some(v) => (v, i_extra),

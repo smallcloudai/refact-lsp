@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use indexmap::IndexMap;
 use tokio::sync::RwLock as ARwLock;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -42,6 +43,14 @@ pub struct IntegrationContent {
     pub error_log: Vec<String>,
 }
 
+#[derive(Deserialize)]
+pub struct IntegrationsFilter {
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>
+}
+
 pub fn integration_extra_from_yaml(value: &serde_yaml::Value) -> IntegrationExtra {
     let mut extra = IntegrationExtra::default();
     if let Some(available) = value.get("available").and_then(|v| v.as_mapping()) {
@@ -71,31 +80,41 @@ pub async fn get_integration_records(gcx: Arc<ARwLock<GlobalContext>>) -> Result
     Ok(resutls)
 }
 
-pub async fn get_integration_contents(
+pub async fn get_integration_contents_with_filter(
     gcx: Arc<ARwLock<GlobalContext>>,
-    scope: &String,
+    filter: &IntegrationsFilter,
 ) -> Result<Vec<IntegrationContent>, String> {
     let (integrations, _errors) = get_integrations(gcx.clone()).await?;
 
-    let integrations_in_scope = match integrations.get(scope) {
-        Some(s) => s,
-        None => {
-            return Err(format!("integration scope '{}' doesn't exist", scope));
-        }
-    };
-    
+    let filtered_integrations: IndexMap<_, _> = integrations.into_iter()
+        .filter(|(scope, _)| filter.scope.as_ref().map_or(true, |s| s == scope))
+        .collect();
+    let filtered_integrations: IndexMap<_, _> = filtered_integrations.into_iter()
+        .map(|(scope, scope_integrations)| {
+            let filtered_scope_integrations: IndexMap<_, _> = scope_integrations
+                .into_iter()
+                .filter(|(i_name, _)| filter.name.as_ref().map_or(true, |n| n == i_name))
+                .collect();
+            (scope, filtered_scope_integrations)
+        }).collect();
+
     let mut results = vec![];
-    for (i_name, (i, _i_extra)) in integrations_in_scope {
-        let integr_schema = serde_json::from_str(i.integr_schema())
-            .map_err(|e| format!("Failed to parse integration schema for integration {}: {}", i_name, e))?;
-        let cont = IntegrationContent {
-            scope: scope.clone(),
-            integr_name: i_name.clone(),
-            integr_schema,
-            integr_value: i.integr_settings_as_json(),
-            error_log: vec![], // todo: implement
-        };
-        results.push(cont);
+    for (scope, scope_integrations) in filtered_integrations {
+        for (i_name, (i, _i_extra)) in scope_integrations {
+            let integr_schema_yaml: serde_yaml::Value = serde_yaml::from_str(i.integr_schema())
+                .map_err(|e| format!("Failed to parse integration schema for integration {}: {}", i_name, e))?;
+            let integr_schema = serde_json::to_value(integr_schema_yaml)
+                .map_err(|e| format!("Failed to convert integration schema to JSON for integration {}: {}", i_name, e))?;
+            
+            let cont = IntegrationContent {
+                scope: scope.clone(),
+                integr_name: i_name.clone(),
+                integr_schema,
+                integr_value: i.integr_settings_as_json(),
+                error_log: vec![], // todo: implement
+            };
+            results.push(cont);
+        }
     }
     
     Ok(results)
