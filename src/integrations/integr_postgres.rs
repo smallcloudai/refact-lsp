@@ -192,6 +192,10 @@ fields:
   database:
     f_type: string
     f_placeholder: marketing_db
+  psql_binary_path:
+    f_type: string
+    f_desc: "If it can't find a path to `psql` you can provide it here, leave blank if not sure."
+    f_placeholder: "psql"
 available:
   on_your_laptop_possible: true
   when_isolated_possible: true
