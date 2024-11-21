@@ -197,6 +197,8 @@ pub struct ChatPost {
     pub current_config_file: String,
     #[serde(default)]
     pub style: Option<String>,
+    #[serde(default)]
+    pub integr_scope: Option<String>,
 }
 
 fn default_true() -> bool {

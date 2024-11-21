@@ -64,6 +64,7 @@ pub struct ChatPassthrough {
     pub allow_at: bool,
     pub supports_tools: bool,
     pub supports_clicks: bool,
+    pub integr_scope: Option<String>,
 }
 
 impl ChatPassthrough {
@@ -75,6 +76,7 @@ impl ChatPassthrough {
         allow_at: bool,
         supports_tools: bool,
         supports_clicks: bool,
+        integr_scope: Option<String>,
     ) -> Self {
         ChatPassthrough {
             t: HasTokenizerAndEot::new(tokenizer),
@@ -87,6 +89,7 @@ impl ChatPassthrough {
             allow_at,
             supports_tools,
             supports_clicks,
+            integr_scope,
         }
     }
 }
@@ -118,7 +121,7 @@ impl ScratchpadAbstract for ChatPassthrough {
             (ccx_locked.global_context.clone(), ccx_locked.n_ctx, ccx_locked.should_execute_remotely)
         };
         let style = self.post.style.clone();
-        let at_tools = tools_merged_and_filtered(gcx.clone(), self.supports_clicks).await?;
+        let at_tools = tools_merged_and_filtered(gcx.clone(), self.integr_scope.clone(), self.supports_clicks).await?;
 
         // TODO? Maybe we should execute at commands remotely.
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at && !should_execute_remotely {

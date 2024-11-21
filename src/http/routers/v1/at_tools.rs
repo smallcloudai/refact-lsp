@@ -61,7 +61,7 @@ pub async fn handle_v1_tools(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     _: hyper::body::Bytes,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let all_tools = match tools_merged_and_filtered(gcx.clone(), true).await {
+    let all_tools = match tools_merged_and_filtered(gcx.clone(), Some("global".to_string()), true).await {
         Ok(tools) => tools,
         Err(e) => {
             let error_body = serde_json::json!({ "detail": e }).to_string();
@@ -98,7 +98,7 @@ pub async fn handle_v1_tools_check_if_confirmation_needed(
     let post = serde_json::from_slice::<ToolsPermissionCheckPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
-    let all_tools = match tools_merged_and_filtered(gcx.clone(), true).await {
+    let all_tools = match tools_merged_and_filtered(gcx.clone(), Some("global".to_string()), true).await {
         Ok(tools) => tools,
         Err(e) => {
             let error_body = serde_json::json!({ "detail": e }).to_string();
@@ -202,7 +202,7 @@ pub async fn handle_v1_tools_execute(
     ccx.postprocess_parameters = tools_execute_post.postprocess_parameters.clone();
     let ccx_arc = Arc::new(AMutex::new(ccx));
 
-    let at_tools = tools_merged_and_filtered(gcx.clone(), false).await.map_err(|e|{
+    let at_tools = tools_merged_and_filtered(gcx.clone(), Some("global".to_string()), false).await.map_err(|e|{
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting at_tools: {}", e))
     })?;
     let (messages, tools_runned) = run_tools( // todo: fix typo "runned"
