@@ -84,7 +84,7 @@ pub async fn get_integration_contents_with_filter(
     gcx: Arc<ARwLock<GlobalContext>>,
     filter: &IntegrationsFilter,
 ) -> Result<Vec<IntegrationContent>, String> {
-    let (integrations, _errors) = get_integrations(gcx.clone()).await?;
+    let (integrations, errors) = get_integrations(gcx.clone()).await?;
 
     let filtered_integrations: IndexMap<_, _> = integrations.into_iter()
         .filter(|(scope, _)| filter.scope.as_ref().map_or(true, |s| s == scope))
@@ -111,7 +111,7 @@ pub async fn get_integration_contents_with_filter(
                 integr_name: i_name.clone(),
                 integr_schema,
                 integr_value: i.integr_settings_as_json(),
-                error_log: vec![], // todo: implement
+                error_log: errors.clone(),
             };
             results.push(cont);
         }
