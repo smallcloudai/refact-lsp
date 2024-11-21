@@ -74,10 +74,9 @@ pub fn get_integration_path(cache_dir: &PathBuf, name: &str) -> PathBuf {
 pub async fn get_integrations(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> Result<
-    (IndexMap<
+    IndexMap<
         String, 
-        IndexMap<String, (Box<dyn IntegrationTrait + Send + Sync>, IntegrationExtra)>>, 
-     Vec<String>),
+        IndexMap<String, (Box<dyn IntegrationTrait + Send + Sync>, IntegrationExtra)>>,
     String
 > {
     let (cache_dir, workspace_folders) = {
@@ -93,22 +92,25 @@ pub async fn get_integrations(
     results.entry("global".to_string()).or_insert_with(IndexMap::new);
     for (i_name, mut i) in get_empty_integrations() {
         let path = get_integration_path(&cache_dir, &i_name);
-        let (j_value, i_extra) = json_for_integration_global(
+        let (j_value, mut i_extra) = json_for_integration_global(
             &path, integrations_yaml_value.get(&i_name), &i, &integrations_yaml_path
         ).await?;
 
-        if j_value.get("detail").is_some() {
-            warn!("failed to load integration {}: {}", i_name, j_value.get("detail").unwrap());
+        if let Some(detail) = j_value.get("detail") {
+            let detail_str = detail.as_str().unwrap().to_string();
+            warn!("failed to load integration {}: {}", i_name, detail_str);
+            i_extra.error_log.push(detail_str);
+        } else if let Err(e) = i.integr_settings_apply(&j_value) {
+            warn!("failed to load integration {}: {}", i_name, e);
+            i_extra.error_log.push(e);
         } else {
-            if let Err(e) = i.integr_settings_apply(&j_value) {
-                warn!("failed to load integration {}: {}", i_name, e);
-            };
+            i_extra.is_loaded = true;
         }
+        
         results["global"].insert(i_name.clone(), (i, i_extra));
     }
     
     // gathering integrations from .refact that is present in each workdir
-    let mut err_log = vec![];
     for c_dir in workspace_folders {
         info!("Loading integrations from {}", c_dir.display());
         let c_dir_str = c_dir.to_string_lossy().to_string();
@@ -116,25 +118,29 @@ pub async fn get_integrations(
         
         for (i_name, mut i) in get_empty_integrations() {
             let integr_path = c_dir.join(".refact").join("integrations.d").join(format!("{}.yaml", i_name));
-            let (j_value, i_extra) = match json_for_integration_local(&integr_path, &i).await {
+            let (j_value, mut i_extra) = match json_for_integration_local(&integr_path, &i).await {
                 Ok((v, i_extra)) => match v {
                     Some(v) => (v, i_extra),
                     None => continue
                 },
                 Err(e) => {
-                    err_log.push(e);
-                    continue;
+                    (json!({"detail": e}), IntegrationExtra::default())
                 }
             };
-            if let Err(e) = i.integr_settings_apply(&j_value) {
-                err_log.push(e);
-                continue;
+
+            if let Some(detail) = j_value.get("detail") {
+                i_extra.error_log.push(detail.as_str().unwrap().to_string());
+            } else if let Err(e) = i.integr_settings_apply(&j_value) {
+                i_extra.error_log.push(e);
+            } else {
+                i_extra.is_loaded = true;
             }
+            
             results[c_dir_str.as_str()].insert(i_name.clone(), (i, i_extra));
         }
     }
 
-    Ok((results, err_log))
+    Ok(results)
 }
 
 pub async fn load_integration_tools(
@@ -144,7 +150,7 @@ pub async fn load_integration_tools(
     let enabled: IndexMap<String, bool> = IndexMap::new();
 
     let scope = integr_scope.unwrap_or("global".to_string());
-    let (integrations_dict, _) = get_integrations(gcx.clone()).await?;
+    let integrations_dict= get_integrations(gcx.clone()).await?;
     
     let integrations = match integrations_dict.get(scope.as_str()) {
         Some(integrations) => integrations,
@@ -154,9 +160,13 @@ pub async fn load_integration_tools(
     };
     
     let mut tools = IndexMap::new();
-    for (i_name, (i, _i_extra)) in integrations.iter() {
+    for (i_name, (i, i_extra)) in integrations.iter() {
         if !enabled.get(i_name).unwrap_or(&true) { // todo: placeholder: no enabled config rn
             info!("Integration {} is disabled", i_name);
+            continue;
+        }
+        if !i_extra.is_loaded {
+            info!("Integration {} has failed to load: {}", i_name, i_extra.error_log.join("\n"));
             continue;
         }
         let tool = i.integr_upgrade_to_tool();

@@ -16,6 +16,8 @@ pub struct IntegrationExtra {
     pub integr_path: String,
     pub on_your_laptop: bool,
     pub when_isolated: bool,
+    pub is_loaded: bool,
+    pub error_log: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -55,7 +57,7 @@ pub fn integration_extra_from_yaml(value: &serde_yaml::Value) -> IntegrationExtr
 }
 
 pub async fn get_integration_records(gcx: Arc<ARwLock<GlobalContext>>) -> Result<Vec<IntegrationRecord>, String> {
-    let (integrations, _errors) = get_integrations(gcx.clone()).await?;
+    let integrations = get_integrations(gcx.clone()).await?;
     let mut resutls = vec![];
 
     for (i_scope, scope_integrations) in integrations {
@@ -77,7 +79,7 @@ pub async fn get_integration_contents_with_filter(
     gcx: Arc<ARwLock<GlobalContext>>,
     filter: &IntegrationsFilter,
 ) -> Result<Vec<IntegrationContent>, String> {
-    let (integrations, errors) = get_integrations(gcx.clone()).await?;
+    let integrations = get_integrations(gcx.clone()).await?;
 
     let filtered_integrations: IndexMap<_, _> = integrations.into_iter()
         .filter(|(scope, _)| filter.scope.as_ref().map_or(true, |s| s == scope))
@@ -93,7 +95,7 @@ pub async fn get_integration_contents_with_filter(
 
     let mut results = vec![];
     for (scope, scope_integrations) in filtered_integrations {
-        for (i_name, (i, _i_extra)) in scope_integrations {
+        for (i_name, (i, i_extra)) in scope_integrations {
             let integr_schema_yaml: serde_yaml::Value = serde_yaml::from_str(i.integr_schema())
                 .map_err(|e| format!("Failed to parse integration schema for integration {}: {}", i_name, e))?;
             let integr_schema = serde_json::to_value(integr_schema_yaml)
@@ -104,7 +106,7 @@ pub async fn get_integration_contents_with_filter(
                 integr_name: i_name.clone(),
                 integr_schema,
                 integr_value: i.integr_settings_as_json(),
-                error_log: errors.clone(),
+                error_log: i_extra.error_log.clone(),
             };
             results.push(cont);
         }
@@ -119,7 +121,7 @@ pub async fn save_integration_value(
     integr_name: &String,
     integr_value: &serde_json::Value,
 ) -> Result<(), String> {
-    let (integrations, _errors) = get_integrations(gcx.clone()).await?;
+    let integrations = get_integrations(gcx.clone()).await?;
     let mut i = integration_from_name(integr_name)?;
 
     let integrations_in_scope = match integrations.get(integr_scope) {
