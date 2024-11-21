@@ -77,6 +77,7 @@ pub fn cmdline_tool_from_yaml_value(
                 name: "action".to_string(),
                 param_type: "string".to_string(),
                 description: "start | stop | restart | status".to_string(),
+                ..Default::default()
             });
         }
         let tool = Arc::new(AMutex::new(Box::new(

@@ -99,13 +99,13 @@ pub enum ContextEnum {
     ChatMessage(ChatMessage),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatToolFunction {
     pub arguments: String,
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ChatToolCall {
     pub id: String,
     pub function: ChatToolFunction,
@@ -126,19 +126,23 @@ impl Default for ChatContent {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct ChatUsage {
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
     pub total_tokens: usize,   // TODO: remove (can produce self-contradictory data when prompt+completion != total)
 }
 
-#[derive(Debug, Serialize, Clone, Default)]
+// deserialize_messages_from_post must be used to decode content as ChatContentRaw
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct ChatMessage {
     pub role: String,
     pub content: ChatContent,
+    #[serde(default)]
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(default)]
     pub tool_call_id: String,
+    #[serde(default)]
     pub usage: Option<ChatUsage>,
 }
 
@@ -182,8 +186,6 @@ pub struct ChatPost {
     #[allow(dead_code)]
     #[serde(default)]
     pub chat_id: String,
-    #[serde(default)]
-    pub style: Option<String>,
 }
 
 fn default_true() -> bool {

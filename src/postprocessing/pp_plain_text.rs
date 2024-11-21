@@ -33,7 +33,7 @@ pub async fn postprocess_plain_text(
     plain_text_messages: Vec<&ChatMessage>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     tokens_limit: usize,
-    style: &Option<String>,
+    style: &str,
 ) -> (Vec<ChatMessage>, usize) {
     if plain_text_messages.is_empty() {
         return (vec![], tokens_limit);

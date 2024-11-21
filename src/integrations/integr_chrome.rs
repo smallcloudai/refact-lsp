@@ -158,6 +158,7 @@ device <desktop|mobile> <tab_id>"#.to_string();
                 name: "commands".to_string(),
                 param_type: "string".to_string(),
                 description: commands_desc,
+                ..Default::default()
             }],
             parameters_required: vec!["commands".to_string()],
         }
