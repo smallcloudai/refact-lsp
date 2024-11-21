@@ -48,7 +48,7 @@ pub struct ToolsExecutePost {
     pub postprocess_parameters: PostprocessSettings,
     pub model_name: String,
     pub chat_id: String,
-    pub style: Option<String>,
+    pub style: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

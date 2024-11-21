@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 use tokio::sync::Mutex as AMutex;
@@ -122,7 +122,7 @@ impl ScratchpadAbstract for ChatPassthrough {
         };
         let style = self.endpoint_style.clone();
         let allow_experimental = gcx.read().await.cmdline.experimental;
-        let at_tools = tools_merged_and_filtered(gcx.clone()).await?;
+        let at_tools = tools_merged_and_filtered(gcx.clone(), self.supports_clicks).await?;
 
         // TODO? Maybe we should execute at commands remotely.
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at && !should_execute_remotely {
@@ -154,7 +154,12 @@ impl ScratchpadAbstract for ChatPassthrough {
         }
 
         let converted_messages = convert_messages_to_openai_format(limited_msgs, &style);
-
+        let converted_messages = if style.as_str() == "anthropic" {
+            format_messages_anthropic(converted_messages)
+        } else {
+            converted_messages 
+        };
+        
         let mut big_json = serde_json::json!({
             "messages": converted_messages,
         });
@@ -189,7 +194,7 @@ impl ScratchpadAbstract for ChatPassthrough {
 
             big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
             if DEBUG {
-                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(vec![]).len());
+                info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());
             }
         } else {
             if DEBUG {

@@ -55,7 +55,7 @@ pub async fn run_tools_remotely(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (n_ctx, subchat_tool_parameters, postprocess_parameters, gcx, chat_id) = {
         let ccx_locked = ccx.lock().await;
@@ -76,7 +76,7 @@ pub async fn run_tools_remotely(
         postprocess_parameters,
         model_name: model_name.to_string(),
         chat_id: chat_id.clone(),
-        style: style.clone(),
+        style: style.to_string(),
     };
 
     let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
@@ -99,7 +99,6 @@ pub async fn run_tools_locally(
     ccx: Arc<AMutex<AtCommandsContext>>,
     at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool+Send>>>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
-    at_tools: IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
@@ -124,7 +123,7 @@ pub async fn run_tools(
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
-    style: &Option<String>,
+    style: &str,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let gcx = ccx.lock().await.global_context.clone();
     let n_ctx = ccx.lock().await.n_ctx;
