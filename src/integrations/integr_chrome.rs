@@ -21,7 +21,7 @@ use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use serde::{Deserialize, Serialize};
-use crate::integrations::integr_abstract::Integration;
+use crate::integrations::integr_abstract::IntegrationTrait;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -68,35 +68,32 @@ impl IntegrationSession for ChromeSession
     fn is_expired(&self) -> bool { false }
 }
 
-impl Integration for ToolChrome {
+impl IntegrationTrait for ToolChrome {
+    fn integr_name(&self) -> &str {
+        "chrome"
+    }
+
+    fn integr_schema(&self) -> &str {
+        CHROME_INTEGRATION_SCHEMA
+    }
+
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
-        let integration_github = serde_json::from_value::<IntegrationChrome>(value.clone())
-            .map_err(|e|e.to_string())?;
-        self.integration_chrome = integration_github;
+        let integration_chrome = serde_json::from_value::<IntegrationChrome>(value.clone())
+            .map_err(|e| e.to_string())?;
+        self.integration_chrome = integration_chrome;
         Ok(())
     }
 
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_github = serde_yaml::from_value::<IntegrationChrome>(value.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Value {
+        serde_json::to_value(&self.integration_chrome).unwrap()
     }
 
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
         Box::new(ToolChrome {
             integration_chrome: self.integration_chrome.clone(),
-            supports_clicks: false}
-        ) as Box<dyn Tool + Send>
+            supports_clicks: self.supports_clicks,
+        }) as Box<dyn Tool + Send>
     }
-
-    fn integr_settings_as_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_chrome).map_err(|e| e.to_string())
-    }
-
-    fn integr_settings_default(&self) -> String { DEFAULT_CHROME_INTEGRATION_YAML.to_string() }
-    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/732/732205.png".to_string() }
 }
 
 #[async_trait]
@@ -570,4 +567,28 @@ const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
 # window_width: 1024
 # window_height: 768
 # idle_browser_timeout: 600
+"#;
+
+pub const CHROME_INTEGRATION_SCHEMA: &str = r#"
+fields:
+  chrome_path:
+    f_type: string
+    f_desc: "Path to the Chrome binary or WebSocket URL."
+    f_placeholder: "/path/to/chrome"
+  window_width:
+    f_type: int
+    f_desc: "Width of the browser window."
+    f_default: "1024"
+  window_height:
+    f_type: int
+    f_desc: "Height of the browser window."
+    f_default: "768"
+  idle_browser_timeout:
+    f_type: int
+    f_desc: "Idle timeout for the browser in seconds."
+    f_default: "600"
+  headless:
+    f_type: bool
+    f_desc: "Run Chrome in headless mode."
+    f_default: true
 "#;

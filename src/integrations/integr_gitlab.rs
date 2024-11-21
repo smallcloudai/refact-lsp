@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage};
 use crate::tools::tools_description::Tool;
-use crate::integrations::integr_abstract::Integration;
+use crate::integrations::integr_abstract::IntegrationTrait;
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -25,32 +25,31 @@ pub struct ToolGitlab {
     pub integration_gitlab: IntegrationGitLab,
 }
 
-impl Integration for ToolGitlab{
+impl IntegrationTrait for ToolGitlab {
+    fn integr_name(&self) -> &str {
+        "gitlab"
+    }
+
+    fn integr_schema(&self) -> &str {
+        GITLAB_INTEGRATION_SCHEMA
+    }
+
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let integration_gitlab = serde_json::from_value::<IntegrationGitLab>(value.clone())
-            .map_err(|e|e.to_string())?;
+            .map_err(|e| e.to_string())?;
         self.integration_gitlab = integration_gitlab;
         Ok(())
     }
 
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_gitlab = serde_yaml::from_value::<IntegrationGitLab>(value.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        serde_json::to_value(&integration_gitlab).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Value {
+        serde_json::to_value(&self.integration_gitlab).unwrap()
     }
 
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
-        Box::new(ToolGitlab {integration_gitlab: self.integration_gitlab.clone()}) as Box<dyn Tool + Send>
+        Box::new(ToolGitlab {
+            integration_gitlab: self.integration_gitlab.clone(),
+        }) as Box<dyn Tool + Send>
     }
-
-    fn integr_settings_as_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_gitlab).map_err(|e| e.to_string())
-    }
-
-    fn integr_settings_default(&self) -> String { DEFAULT_GITLAB_INTEGRATION_YAML.to_string() }
-    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968853.png".to_string() }
 }
 
 #[async_trait]
@@ -146,4 +145,16 @@ const DEFAULT_GITLAB_INTEGRATION_YAML: &str = r#"
 
 # GITLAB_TOKEN: "glpat-xxx"                   # To get a token, check out https://docs.gitlab.com/ee/user/profile/personal_access_tokens
 # glab_binary_path: "/opt/homebrew/bin/glab"  # Uncomment to set a custom path for the glab binary, defaults to "glab"
+"#;
+
+pub const GITLAB_INTEGRATION_SCHEMA: &str = r#"
+fields:
+  glab_binary_path:
+    f_type: string
+    f_desc: "Path to the GitLab CLI binary."
+    f_placeholder: "/path/to/glab"
+  GITLAB_TOKEN:
+    f_type: string
+    f_desc: "GitLab token for authentication."
+    f_placeholder: "glpat-xxx"
 "#;

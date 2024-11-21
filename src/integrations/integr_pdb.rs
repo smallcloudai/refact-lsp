@@ -16,7 +16,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
-use crate::integrations::integr_abstract::Integration;
+use crate::integrations::integr_abstract::IntegrationTrait;
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_lines, write_to_stdin_and_flush, blocking_read_until_token_or_timeout};
 
@@ -55,32 +55,31 @@ impl IntegrationSession for PdbSession
     }
 }
 
-impl Integration for ToolPdb {
+impl IntegrationTrait for ToolPdb {
+    fn integr_name(&self) -> &str {
+        "pdb"
+    }
+
+    fn integr_schema(&self) -> &str {
+        PDB_INTEGRATION_SCHEMA
+    }
+
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         let settings_pdb = serde_json::from_value::<SettingsPdb>(value.clone())
-            .map_err(|e|e.to_string())?;
+            .map_err(|e| e.to_string())?;
         self.settings_pdb = settings_pdb;
         Ok(())
     }
 
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_github = serde_yaml::from_value::<SettingsPdb>(value.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Value {
+        serde_json::to_value(&self.settings_pdb).unwrap()
     }
 
     fn integr_upgrade_to_tool(&self) -> Box<dyn Tool + Send> {
-        Box::new(ToolPdb {settings_pdb: self.settings_pdb.clone()}) as Box<dyn Tool + Send>
+        Box::new(ToolPdb {
+            settings_pdb: self.settings_pdb.clone(),
+        }) as Box<dyn Tool + Send>
     }
-
-    fn integr_settings_as_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.settings_pdb).map_err(|e| e.to_string())
-    }
-
-    fn integr_settings_default(&self) -> String { DEFAULT_PDB_INTEGRATION_YAML.to_string() }
-    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/919/919852.png".to_string() }
 }
 
 #[async_trait]
@@ -294,4 +293,12 @@ const DEFAULT_PDB_INTEGRATION_YAML: &str = r#"
 # Python debugger
 
 # python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
+"#;
+
+pub const PDB_INTEGRATION_SCHEMA: &str = r#"
+fields:
+  python_path:
+    f_type: string
+    f_desc: "Path to the Python binary."
+    f_placeholder: "/path/to/python"
 "#;

@@ -6,10 +6,10 @@ use serde_json::json;
 use tracing::{info, warn};
 
 pub mod integr_abstract;
-// pub mod integr_github;
-// pub mod integr_gitlab;
-// pub mod integr_pdb;
-// pub mod integr_chrome;
+pub mod integr_github;
+pub mod integr_gitlab;
+pub mod integr_pdb;
+pub mod integr_chrome;
 pub mod integr_postgres;
 
 pub mod process_io_utils;
@@ -26,20 +26,20 @@ use integr_abstract::IntegrationTrait;
 use crate::integrations::setting_up_integrations::{integration_extra_from_yaml, IntegrationExtra};
 
 pub const INTEGRATION_NAMES: &[&str] = &[
-    // "github",
-    // "gitlab",
-    // "pdb",
+    "github",
+    "gitlab",
+    "pdb",
     "postgres",
-    // "chrome",
+    "chrome",
 ];
 
 pub fn integration_from_name(name: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String> {
     match name {
-        // "github" => Ok(Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
-        // "gitlab" => Ok(Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
-        // "pdb" => Ok(Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "github" => Ok(Box::new(integr_github::ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "gitlab" => Ok(Box::new(integr_gitlab::ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "pdb" => Ok(Box::new(integr_pdb::ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
-        // "chrome" => Ok(Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "chrome" => Ok(Box::new(integr_chrome::ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         _ => Err(format!("Unknown integration name: {}", name)),
     }
 }

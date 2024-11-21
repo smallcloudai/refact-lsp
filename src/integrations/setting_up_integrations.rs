@@ -11,13 +11,6 @@ use crate::global_context::GlobalContext;
 use crate::integrations::{get_integrations, integration_from_name};
 
 
-#[derive(Serialize, Default)]
-pub struct YamlError {
-    pub integr_config_path: String,
-    pub error_line: usize,  // starts with 1, zero if invalid
-    pub error_msg: String,
-}
-
 #[derive(Default, Clone)]
 pub struct IntegrationExtra {
     pub integr_path: String,
