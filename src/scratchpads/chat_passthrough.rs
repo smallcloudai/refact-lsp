@@ -186,13 +186,15 @@ impl ScratchpadAbstract for ChatPassthrough {
             let tools_desc_list = tool_description_list_from_yaml(at_tools, &tools_enabled, allow_experimental).await?;
             let tools_filtered = tools_desc_list.iter().filter(|t|tools_enabled.contains(&t.name)).cloned().collect::<Vec<_>>();
 
-            if self.endpoint_style == "anthropic" {
-                big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_anthropic_style()).collect::<Vec<_>>());
-            } else {
-                big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_openai_style(false)).collect::<Vec<_>>());
+            if !tools_filtered.is_empty() {
+                if self.endpoint_style == "anthropic" {
+                    big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_anthropic_style()).collect::<Vec<_>>());
+                } else {
+                    big_json["tools"] = serde_json::json!(tools_filtered.iter().map(|t|t.clone().into_openai_style(false)).collect::<Vec<_>>());
+                    big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
+                }
             }
 
-            big_json["tool_choice"] = serde_json::json!(self.post.tool_choice);
             if DEBUG {
                 info!("PASSTHROUGH TOOLS ENABLED CNT: {:?}", tools.unwrap_or(&vec![]).len());
             }
