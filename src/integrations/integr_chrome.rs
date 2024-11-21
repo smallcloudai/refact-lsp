@@ -555,20 +555,6 @@ async fn screenshot_jpeg_base64(tab: &Arc<Tab>, capture_beyond_viewport: bool) -
     MultimodalElement::new("image/jpeg".to_string(), jpeg_data)
 }
 
-const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
-# Chrome integration
-
-# This can be path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read
-# more here https://developer.chrome.com/blog/chrome-for-testing/?utm_source=Fibery&utm_medium=iframely
-#chrome_path: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-# Or you can give it ws:// path, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
-# In that case start chrome with --remote-debugging-port
-# chrome_path: "ws://127.0.0.1:6006/"
-# window_width: 1024
-# window_height: 768
-# idle_browser_timeout: 600
-"#;
-
 pub const CHROME_INTEGRATION_SCHEMA: &str = r#"
 fields:
   chrome_path:

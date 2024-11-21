@@ -140,13 +140,6 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
     Ok(parsed_args)
 }
 
-const DEFAULT_GITLAB_INTEGRATION_YAML: &str = r#"
-# GitLab integration: install on mac using "brew install glab"
-
-# GITLAB_TOKEN: "glpat-xxx"                   # To get a token, check out https://docs.gitlab.com/ee/user/profile/personal_access_tokens
-# glab_binary_path: "/opt/homebrew/bin/glab"  # Uncomment to set a custom path for the glab binary, defaults to "glab"
-"#;
-
 pub const GITLAB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   glab_binary_path:

@@ -289,12 +289,6 @@ fn format_error(error_title: &str, error: &str) -> String
     }
 }
 
-const DEFAULT_PDB_INTEGRATION_YAML: &str = r#"
-# Python debugger
-
-# python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
-"#;
-
 pub const PDB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   python_path:
