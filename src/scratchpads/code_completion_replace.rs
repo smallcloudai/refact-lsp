@@ -3,7 +3,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, CodeCompletionPost, CursorPosition, SamplingParameters};
 use crate::completion_cache;
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, MessagesScratchpadAbstract, TextScratchpadAbstract};
+use crate::scratchpad_abstract::{HasTokenizerAndEot, ScratchpadAbstract};
 use crate::scratchpads::comments_parser::parse_comments;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
@@ -515,7 +515,7 @@ impl CodeCompletionReplaceScratchpad {
 }
 
 #[async_trait]
-impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
+impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
@@ -661,8 +661,30 @@ impl TextScratchpadAbstract for CodeCompletionReplaceScratchpad {
         Err("Not implemented".to_string())
     }
 
+    fn response_message_n_choices(
+        &mut self,
+        _choices: Vec<String>,
+        _finish_reason: Vec<String>
+    ) -> Result<Value, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn response_message_streaming(
+        &mut self,
+        _delta: &Value,
+        _stop_toks: bool,
+        _stop_length: bool
+    ) -> Result<(Value, bool), String> {
+        Err("not implemented".to_string())
+    }
+
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String> {
         Ok(vec![])
+    }
+
+    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
+        let (res, _) = self.response_streaming("".to_string(), false, true)?;
+        Ok(res)
     }
 }
 
@@ -705,7 +727,7 @@ impl CodeCompletionReplacePassthroughScratchpad {
 }
 
 #[async_trait]
-impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
+impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         _patch: &Value,
@@ -806,8 +828,7 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         }
         Ok(prompt)
     }
-
-    fn response_n_choices(
+    fn response_message_n_choices(
         &mut self,
         choices: Vec<String>,
         finish_reasons: Vec<String>,
@@ -830,7 +851,7 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         ))
     }
 
-    fn response_streaming(
+    fn response_message_streaming(
         &mut self,
         _json: &Value,
         _stop_toks: bool,
@@ -839,7 +860,30 @@ impl MessagesScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         Err("Not implemented".to_string())
     }
 
+    fn response_n_choices(
+        &mut self, 
+        _choices: Vec<String>,
+        _finish_reason: Vec<String>
+    ) -> Result<Value, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn response_streaming(
+        &mut self,
+        _delta: String,
+        _stop_toks: bool,
+        _stop_length: bool
+    ) -> Result<(Value, bool), String> {
+        Err("not implemented".to_string())
+    }
+
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String> {
         Ok(vec![])
+    }
+    
+
+    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
+        let (res, _) = self.response_message_streaming(&json!({}), false, true)?;
+        Ok(res)
     }
 }

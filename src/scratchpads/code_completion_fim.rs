@@ -17,7 +17,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, TextScratchpadAbstract};
+use crate::scratchpad_abstract::{HasTokenizerAndEot, ScratchpadAbstract};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
@@ -109,7 +109,7 @@ fn add_context_to_prompt(
 }
 
 #[async_trait]
-impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
+impl ScratchpadAbstract for FillInTheMiddleScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
@@ -425,8 +425,30 @@ impl TextScratchpadAbstract for FillInTheMiddleScratchpad {
         Ok((ans, finished))
     }
 
+    fn response_message_n_choices(
+        &mut self, 
+        _choices: Vec<String>, 
+        _finish_reason: Vec<String>
+    ) -> Result<Value, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn response_message_streaming(
+        &mut self,
+        _delta: &Value,
+        _stop_toks: bool,
+        _stop_length: bool,
+    ) -> Result<(Value, bool), String> {
+        Err("not implemented".to_string())
+    }
+
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>  {
         Err("".to_string())
+    }
+
+    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
+        let (res, _) = self.response_streaming("".to_string(), false, true)?;
+        Ok(res)
     }
 }
 

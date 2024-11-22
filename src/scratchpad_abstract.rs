@@ -11,7 +11,7 @@ use crate::call_validation::SamplingParameters;
 
 
 #[async_trait]
-pub trait TextScratchpadAbstract: Send {
+pub trait ScratchpadAbstract: Send {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
@@ -39,32 +39,14 @@ pub trait TextScratchpadAbstract: Send {
         stop_length: bool,
     ) -> Result<(Value, bool), String>;
 
-    fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>;
-}
 
-#[async_trait]
-pub trait MessagesScratchpadAbstract: Send {
-    async fn apply_model_adaptation_patch(
-        &mut self,
-        patch: &Value,
-        exploration_tools: bool,
-        agentic_tools: bool,
-        should_execute_remotely: bool,
-    ) -> Result<(), String>;
-
-    async fn prompt(
-        &mut self,
-        ccx: Arc<AMutex<AtCommandsContext>>,
-        sampling_parameters_to_patch: &mut SamplingParameters,
-    ) -> Result<String, String>;
-
-    fn response_n_choices(   // Not streaming, convert what model says (choices) to final result
+    fn response_message_n_choices(
         &mut self,
         choices: Vec<String>,
         finish_reason: Vec<String>,
     ) -> Result<Value, String>;
 
-    fn response_streaming(   // Only 1 choice, but streaming. Returns delta the user should see, and finished flag
+    fn response_message_streaming(
         &mut self,
         delta: &Value,
         stop_toks: bool,
@@ -72,56 +54,8 @@ pub trait MessagesScratchpadAbstract: Send {
     ) -> Result<(Value, bool), String>;
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>;
-}
 
-pub enum ScratchpadAbstract {
-    Text(Box<dyn TextScratchpadAbstract>),
-    Messages(Box<dyn MessagesScratchpadAbstract>),
-}
-
-impl ScratchpadAbstract {
-    pub async fn apply_model_adaptation_patch(
-        &mut self,
-        patch: &Value,
-        exploration_tools: bool,
-        agentic_tools: bool,
-        should_execute_remotely: bool,
-    ) -> Result<(), String> {
-        match self {
-            ScratchpadAbstract::Text(text_scratchpad) => {
-                text_scratchpad.apply_model_adaptation_patch(patch, exploration_tools, agentic_tools, should_execute_remotely).await
-            }
-            ScratchpadAbstract::Messages(messages_scratchpad) => {
-                messages_scratchpad.apply_model_adaptation_patch(patch, exploration_tools, agentic_tools, should_execute_remotely).await
-            }
-        }
-    }
-
-    pub async fn prompt(
-        &mut self,
-        ccx: Arc<AMutex<AtCommandsContext>>,
-        sampling_parameters_to_patch: &mut SamplingParameters,
-    ) -> Result<String, String> {
-        match self {
-            ScratchpadAbstract::Text(text_scratchpad) => {
-                Box::pin(text_scratchpad.prompt(ccx, sampling_parameters_to_patch)).await
-            }
-            ScratchpadAbstract::Messages(messages_scratchpad) => {
-                Box::pin(messages_scratchpad.prompt(ccx, sampling_parameters_to_patch)).await
-            }
-        }
-    }
-
-    pub fn response_spontaneous(&mut self) -> Result<Vec<Value>, String> {
-        match self {
-            ScratchpadAbstract::Text(text_scratchpad) => {
-                text_scratchpad.response_spontaneous()
-            }
-            ScratchpadAbstract::Messages(messages_scratchpad) => {
-                messages_scratchpad.response_spontaneous()
-            }
-        }
-    }
+    fn streaming_finished(&mut self, finish_reason: &String) -> Result<Value, String>;
 }
 
 // aggregate this struct to make scratchpad implementation easier

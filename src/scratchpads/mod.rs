@@ -40,25 +40,25 @@ pub async fn create_code_completion_scratchpad(
     cache_arc: Arc<StdRwLock<completion_cache::CompletionCache>>,
     tele_storage: Arc<StdRwLock<telemetry_structs::Storage>>,
     ast_module: Option<Arc<AMutex<AstIndexService>>>,
-) -> Result<ScratchpadAbstract, String> {
-    let mut result: ScratchpadAbstract;
+) -> Result<Box<dyn ScratchpadAbstract>, String> {
+    let mut result: Box<dyn ScratchpadAbstract>;
     let tokenizer_arc: Arc<StdRwLock<Tokenizer>> = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
     if scratchpad_name == "FIM-PSM" {
-        result = ScratchpadAbstract::Text(Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(
+        result = Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(
             tokenizer_arc, &post, "PSM".to_string(), cache_arc, tele_storage, ast_module, global_context.clone()
-        )))
+        ))
     } else if scratchpad_name == "FIM-SPM" {
-        result = ScratchpadAbstract::Text(Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(
+        result = Box::new(code_completion_fim::FillInTheMiddleScratchpad::new(
             tokenizer_arc, &post, "SPM".to_string(), cache_arc, tele_storage, ast_module, global_context.clone()
-        )))
+        ))
     } else if scratchpad_name == "REPLACE" {
-        result = ScratchpadAbstract::Text(Box::new(code_completion_replace::CodeCompletionReplaceScratchpad::new(
+        result = Box::new(code_completion_replace::CodeCompletionReplaceScratchpad::new(
             tokenizer_arc, &post, cache_arc, tele_storage, ast_module, global_context.clone()
-        )))
+        ))
     } else if scratchpad_name == "REPLACE_PASSTHROUGH" {
-        result = ScratchpadAbstract::Messages(Box::new(code_completion_replace::CodeCompletionReplacePassthroughScratchpad::new(
+        result = Box::new(code_completion_replace::CodeCompletionReplacePassthroughScratchpad::new(
             tokenizer_arc, &post, cache_arc, tele_storage, ast_module, global_context.clone()
-        )))
+        ))
     } else {
         return Err(format!("This rust binary doesn't have code completion scratchpad \"{}\" compiled in", scratchpad_name));
     }
@@ -79,22 +79,22 @@ pub async fn create_chat_scratchpad(
     supports_tools: bool,
     supports_clicks: bool,
     should_execute_remotely: bool,
-) -> Result<ScratchpadAbstract, String> {
-    let mut result: ScratchpadAbstract;
+) -> Result<Box<dyn ScratchpadAbstract>, String> {
+    let mut result: Box<dyn ScratchpadAbstract>;
     let tokenizer_arc = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
     if scratchpad_name == "CHAT-GENERIC" {
-        result = ScratchpadAbstract::Text(Box::new(chat_generic::GenericChatScratchpad::new(
+        result = Box::new(chat_generic::GenericChatScratchpad::new(
             tokenizer_arc.clone(), post, messages, global_context.clone(), allow_at
-        )));
+        ));
     } else if scratchpad_name == "CHAT-LLAMA2" {
-        result = ScratchpadAbstract::Text(Box::new(chat_llama2::ChatLlama2::new(
+        result = Box::new(chat_llama2::ChatLlama2::new(
             tokenizer_arc.clone(), post, messages, global_context.clone(), allow_at
-        )));
+        ));
     } else if scratchpad_name == "PASSTHROUGH" {
         post.stream = Some(true);  // this should be passed from the request
-        result = ScratchpadAbstract::Messages(Box::new(chat_passthrough::ChatPassthrough::new(
+        result = Box::new(chat_passthrough::ChatPassthrough::new(
             tokenizer_arc.clone(), post, messages, global_context.clone(), allow_at, supports_tools, supports_clicks
-        )));
+        ));
     } else {
         return Err(format!("This rust binary doesn't have chat scratchpad \"{}\" compiled in", scratchpad_name));
     }

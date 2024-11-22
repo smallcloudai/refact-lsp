@@ -12,7 +12,7 @@ use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, TextScratchpadAbstract};
+use crate::scratchpad_abstract::{HasTokenizerAndEot, ScratchpadAbstract};
 use crate::scratchpads::chat_utils_deltadelta::DeltaDeltaChatStreamer;
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
@@ -67,7 +67,7 @@ impl GenericChatScratchpad {
 }
 
 #[async_trait]
-impl TextScratchpadAbstract for GenericChatScratchpad {
+impl ScratchpadAbstract for GenericChatScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
         patch: &Value,
@@ -191,7 +191,29 @@ impl TextScratchpadAbstract for GenericChatScratchpad {
         self.dd.response_streaming(delta, stop_toks)
     }
 
+    fn response_message_n_choices(
+        &mut self,
+        _choices: Vec<String>,
+        _finish_reason: Vec<String>,
+    ) -> Result<Value, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn response_message_streaming(
+        &mut self,
+        _delta: &Value,
+        _stop_toks: bool,
+        _stop_length: bool,
+    ) -> Result<(Value, bool), String> {
+        Err("not implemented".to_string())
+    }
+
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String> {
         return self.has_rag_results.response_streaming();
+    }
+    
+    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
+        let (res, _) = self.response_streaming("".to_string(), false, true)?;
+        Ok(res)
     }
 }
