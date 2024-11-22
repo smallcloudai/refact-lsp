@@ -27,6 +27,13 @@ use std::fmt;
 use tokio::time::sleep;
 use chrono::DateTime;
 
+use headless_chrome::protocol::cdp::Target;
+use headless_chrome::protocol::cdp::types::Method;
+
+use std::net::TcpStream;
+use tungstenite::protocol::WebSocketConfig;
+use tungstenite::stream::MaybeTlsStream;
+
 use base64::Engine;
 use std::io::Cursor;
 use image::imageops::FilterType;
@@ -91,6 +98,7 @@ impl ChromeTab {
 struct ChromeSession {
     browser: Browser,
     tabs: HashMap<String, Arc<AMutex<ChromeTab>>>,
+    web_socket_addr: Option<String>,
 }
 
 impl ChromeSession {
@@ -204,6 +212,7 @@ impl Tool for ToolChrome {
             "press_key_at <enter|esc|pageup|pagedown|home|end> <tab_id>",
             "type_text_at <text> <tab_id>",
             "tab_log <tab_id>",
+            "chrome_dev_tools_protocol <tab_id> <cdp_method_json>",
         ];
         if self.supports_clicks {
             supported_commands.extend(vec![
@@ -282,7 +291,11 @@ async fn setup_chrome_session(
     // NOTE: we're not register any tabs because they can be used by another chat
     setup_log.push("No opened tabs.".to_string());
 
-    let command_session: Box<dyn IntegrationSession> = Box::new(ChromeSession { browser, tabs: HashMap::new() });
+    let command_session: Box<dyn IntegrationSession> = Box::new(ChromeSession {
+        browser,
+        tabs: HashMap::new(),
+        web_socket_addr: args.chrome_path.clone(),
+    });
     gcx.write().await.integration_sessions.insert(
         session_hashmap_key.clone(), Arc::new(AMutex::new(command_session))
     );
@@ -389,6 +402,72 @@ async fn session_get_tab_arc(
     }
 }
 
+pub fn websocket_connection(
+    ws_url: &String,
+) -> Result<tungstenite::WebSocket<MaybeTlsStream<TcpStream>>, String> {
+    let mut client = tungstenite::client::connect_with_config(
+        ws_url.as_str(),
+        Some(WebSocketConfig {
+            max_message_size: None,
+            max_frame_size: None,
+            accept_unmasked_frames: true,
+            ..Default::default()
+        }),
+        u8::MAX - 1,
+    ).map_err(|e| e.to_string())?;
+    let stream = client.0.get_mut();
+    let stream = match stream {
+        MaybeTlsStream::Plain(s) => s,
+        _ => todo!(),
+    };
+    stream.set_read_timeout(Some(Duration::from_millis(100))).map_err(|e| e.to_string())?;
+    Ok(client.0)
+}
+
+async fn raw_cdp_call_method(
+    web_socket_addr: &Option<String>,
+    target_id: &String,
+    method: &Value,
+) -> Result<String, String> {
+    let mut connection = {
+        if let Some(url) = web_socket_addr {
+            websocket_connection(&url).map_err(|e| e.to_string())?
+        } else {
+            todo!("we can't get ws address directly from browser")
+        }
+    };
+    let session_id = {
+        let target_method = Target::AttachToTarget {
+            target_id: target_id.clone(),
+            flatten: None,
+        };
+        let message_text = serde_json::to_string(&target_method.to_method_call(9001)).map_err(|e| e.to_string())?;
+        let message = tungstenite::protocol::Message::text(message_text);
+        connection.send(message).map_err(|e| e.to_string())?;
+        let result = connection.read().map_err(|e| e.to_string())?;
+        let json_result = result.to_string().parse::<Value>().map_err(|e| e.to_string())?;
+        if let Value::String(session_id) = json_result["params"]["sessionId"].clone() {
+            session_id
+        } else {
+            return Err(format!("Failed to get session_id for {}", target_id));
+        }
+    };
+    let result = {
+        let mut target_message = method.clone();
+        target_message["id"] = Value::Number(serde_json::Number::from(9002));
+        let target_method = Target::SendMessageToTarget {
+            message: target_message.to_string(),
+            target_id: None,
+            session_id: Some(session_id),
+        };
+        let message_text = serde_json::to_string(&target_method.to_method_call(9003)).map_err(|e| e.to_string())?;
+        let message = tungstenite::protocol::Message::text(message_text);
+        connection.send(message).map_err(|e| e.to_string())?;
+        connection.read().map_err(|e| e.to_string())?
+    };
+    Ok(result.to_string())
+}
+
 #[derive(Debug)]
 enum Command {
     OpenTab(OpenTabArgs),
@@ -400,6 +479,7 @@ enum Command {
     TypeTextAt(TypeTextAtArgs),
     PressKeyAt(PressKeyAtArgs),
     TabLog(TabLogArgs),
+    TabCDP(TabCDPArgs),
 }
 
 async fn chrome_command_exec(
@@ -598,7 +678,26 @@ async fn chrome_command_exec(
             let mut tab_log_lock = tab_lock.tab_log.lock().unwrap();
             tool_log.extend(tab_log_lock.clone());
             tab_log_lock.clear();
-        }
+        },
+        Command::TabCDP(args) => {
+            let (tab, maybe_web_socket_addr) = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                (session_get_tab_arc(chrome_session, &args.tab_id).await?, chrome_session.web_socket_addr.clone())
+            };
+            let tab_lock = tab.lock().await;
+            let target_id = tab_lock.headless_tab.get_target_id();
+            let log = match raw_cdp_call_method(&maybe_web_socket_addr, &target_id, &args.method).await {
+                Ok(result) => {
+                    format!("CDP method `{}` called for {}: {}", args.method, tab_lock.state_string(), result)
+                },
+                Err(e) => {
+                    format!("failed to execute CDP method `{}` at {}: {}", args.method, tab_lock.state_string(), e.to_string())
+                }
+            };
+            sleep(Duration::from_millis(100)).await;
+            tool_log.push(log);
+        },
     }
 
     Ok((tool_log, multimodal_els))
@@ -678,8 +777,14 @@ struct TabLogArgs {
     tab_id: String,
 }
 
+#[derive(Debug)]
+struct TabCDPArgs {
+    tab_id: String,
+    method: Value,
+}
+
 fn parse_single_command(command: &String) -> Result<Command, String> {
-    let args = shell_words::split(&command).map_err(|e| e.to_string())?;
+    let args = command.split(" ").map(|e| e.to_string()).collect::<Vec<String>>();
     if args.is_empty() {
         return Err("Command is empty".to_string());
     }
@@ -797,6 +902,18 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 }
             }
         },
+        "chrome_dev_tools_protocol" => {
+            if parsed_args.len() < 1 {
+                return Err("Missing 'tab_id'".to_string());
+            }
+            let tab_id = parsed_args[0].clone();
+            let method = serde_json::from_str(parsed_args[1..].join(" ").as_str())
+                .map_err(|e| format!("Can't parse cdp method: {}", e.to_string()))?;
+            Ok(Command::TabCDP(TabCDPArgs {
+                tab_id,
+                method,
+            }))
+        }
         _ => Err(format!("Unknown command: {:?}.", command_name)),
     }
 }
