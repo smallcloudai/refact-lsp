@@ -1,14 +1,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use indexmap::IndexMap;
+use rust_embed::RustEmbed;
 use tokio::sync::RwLock as ARwLock;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
 use crate::global_context::GlobalContext;
-use crate::integrations::{get_integrations, integration_from_name};
+use crate::integrations::{get_integrations, integration_from_name, INTEGRATION_NAMES};
 
 
 #[derive(Default, Clone)]
@@ -33,8 +34,8 @@ pub struct IntegrationRecord {
 pub struct IntegrationContent {
     pub scope: String,
     pub integr_name: String,
-    pub integr_schema: serde_json::Value,
-    pub integr_value: serde_json::Value,
+    pub integr_schema: Value,
+    pub integr_value: Value,
     pub error_log: Vec<String>,
 }
 
@@ -44,6 +45,31 @@ pub struct IntegrationsFilter {
     pub scope: Option<String>,
     #[serde(default)]
     pub name: Option<String>
+}
+
+#[derive(RustEmbed)]
+#[folder = "assets/integrations/"]
+struct IntegrationAsset;
+
+fn integration_icon_base64(integr_name: &str) -> Option<String> {
+    #[allow(deprecated)]
+    IntegrationAsset::get(&format!("{integr_name}.png")).map(|file| base64::encode(file.data))
+}
+
+pub fn all_integration_icons() -> Vec<Value> {
+    let mut res = vec![];
+    
+    for i_name in INTEGRATION_NAMES {
+        if let Some(icon) = integration_icon_base64(i_name) {
+            res.push(json!({
+                "name": i_name,
+                "format": "png",
+                "encoding": "base64",
+                "value": icon,
+            }))
+        }
+    }
+    res
 }
 
 pub fn integration_extra_from_yaml(value: &serde_yaml::Value) -> IntegrationExtra {
