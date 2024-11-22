@@ -446,8 +446,8 @@ impl ScratchpadAbstract for FillInTheMiddleScratchpad {
         Err("".to_string())
     }
 
-    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
-        let (res, _) = self.response_streaming("".to_string(), false, true)?;
+    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
+        let (res, _) = self.response_streaming("".to_string(), false, stop_length)?;
         Ok(res)
     }
 }

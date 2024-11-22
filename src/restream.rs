@@ -446,7 +446,7 @@ pub async fn scratchpad_interaction_stream(
             if problem_reported {
                 return;
             } else if !finished {
-                let mut value = my_scratchpad.streaming_finished(&"length".to_string())?;
+                let mut value = my_scratchpad.streaming_finished(true)?;
                 value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
                 value["model"] = json!(model_name.clone());
                 let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());

@@ -682,8 +682,8 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
         Ok(vec![])
     }
 
-    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
-        let (res, _) = self.response_streaming("".to_string(), false, true)?;
+    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
+        let (res, _) = self.response_streaming("".to_string(), false, stop_length)?;
         Ok(res)
     }
 }
@@ -882,8 +882,8 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
     }
     
 
-    fn streaming_finished(&mut self, _finish_reason: &String) -> Result<Value, String> {
-        let (res, _) = self.response_message_streaming(&json!({}), false, true)?;
+    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
+        let (res, _) = self.response_message_streaming(&json!({}), false, stop_length)?;
         Ok(res)
     }
 }

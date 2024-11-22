@@ -241,7 +241,8 @@ impl ScratchpadAbstract for ChatPassthrough {
         self.has_rag_results.response_streaming()
     }
 
-    fn streaming_finished(&mut self, finish_reason: &String) -> Result<Value, String> {
+    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
+        let finish_reason = if stop_length { "length" } else { "stop" };
         let json_choices = self.delta_sender.feed_delta("assistant", &json!({}), &finish_reason, None);
         Ok(json!({
                 "choices": json_choices,

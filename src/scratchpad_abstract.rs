@@ -55,7 +55,7 @@ pub trait ScratchpadAbstract: Send {
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>;
 
-    fn streaming_finished(&mut self, finish_reason: &String) -> Result<Value, String>;
+    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String>;
 }
 
 // aggregate this struct to make scratchpad implementation easier
