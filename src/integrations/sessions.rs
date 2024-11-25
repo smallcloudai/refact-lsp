@@ -53,14 +53,15 @@ pub async fn remove_expired_sessions_background_task(
 }
 
 pub async fn stop_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
-    let mut gcx_locked = gcx.write().await;
-    let keys = gcx_locked.integration_sessions.iter()
-        .map(|(key, _)| key.to_string())
-        .collect::<Vec<_>>();
-
-    for key in keys {
-        if let Some(session) = gcx_locked.integration_sessions.remove(&key) {
-            Box::into_pin(session.lock().await.try_stop()).await;
-        }
+    let sessions = {
+        let mut gcx_locked = gcx.write().await;
+        let sessions = gcx_locked.integration_sessions.iter()
+            .map(|(_, session)| Arc::clone(session))
+            .collect::<Vec<_>>();
+        gcx_locked.integration_sessions.clear();
+        sessions
+    };
+    for session in sessions {
+        Box::into_pin(session.lock().await.try_stop()).await;
     }
 }

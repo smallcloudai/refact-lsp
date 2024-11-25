@@ -1,6 +1,6 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::process::{Child, ChildStdin};
+use tokio::process::ChildStdin;
 use tokio::time::Duration;
 use std::time::Instant;
 use tracing::error;
