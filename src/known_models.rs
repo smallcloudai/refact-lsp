@@ -176,6 +176,7 @@ pub const KNOWN_MODELS: &str = r####"
             },
             "default_scratchpad": "REPLACE",
             "similar_models": [
+                "qwen2.5/coder/0.5b/instruct/vllm",
                 "qwen2.5/coder/1.5b/instruct",
                 "qwen2.5/coder/1.5b/instruct/vllm",
                 "qwen2.5/coder/3b/instruct",
@@ -208,6 +209,7 @@ pub const KNOWN_MODELS: &str = r####"
                 "qwen2.5/coder/7b/base",
                 "qwen2.5/coder/14b/base",
                 "qwen2.5/coder/32b/base",
+                "qwen2.5/coder/0.5b/base/vllm",
                 "qwen2.5/coder/1.5b/base/vllm",
                 "qwen2.5/coder/3b/base/vllm",
                 "qwen2.5/coder/7b/base/vllm",
