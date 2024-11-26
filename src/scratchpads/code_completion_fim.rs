@@ -17,7 +17,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, ScratchpadAbstract};
+use crate::scratchpad_abstract::{FinishReason, HasTokenizerAndEot, ScratchpadAbstract};
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
@@ -352,83 +352,70 @@ impl ScratchpadAbstract for FillInTheMiddleScratchpad {
     fn response_n_choices(
         &mut self,
         choices: Vec<String>,
-        finish_reasons: Vec<String>
+        finish_reasons: Vec<FinishReason>
     ) -> Result<Value, String> {
         let json_choices = choices.iter().enumerate().map(|(i, x)| {
             let cc = _cut_result(&x, self.t.eot.as_str(), self.post.inputs.multiline);
             if i==0 {
                 self.data4cache.completion0_text = cc.clone();
-                self.data4cache.completion0_finish_reason = finish_reasons[i].clone();
+                self.data4cache.completion0_finish_reason = finish_reasons[i].to_string();
             }
             json!({
                 "index": i,
                 "code_completion": cc,
-                "finish_reason": finish_reasons[i].clone(),
+                "finish_reason": finish_reasons[i].to_json_val(),
             })
         }).collect::<Vec<_>>();
         if DEBUG {
             info!("response_n_choices\n{:?}", json_choices);
         }
-
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
-        return Ok(json!(
+        Ok(json!(
             {
                 "choices": json_choices,
                 "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
                 "model": self.post.model.clone(),
                 "context": self.context_used,
             }
-        ));
+        ))
     }
 
     fn response_streaming(
         &mut self,
         delta: String,
-        stop_toks: bool,
-        stop_length: bool,
-    ) -> Result<(Value, bool), String> {
-        let mut finished = false;
-        let json_choices;
-        // info!("XXXXX delta: {:?}", delta);
-        // info!("XXXXX stop_toks: {:?}", stop_toks);
-        // info!("XXXXX stop_length: {:?}", stop_length);
-        if !delta.is_empty() || stop_toks {
-            let finished = stop_toks || stop_length;
-            let mut s: String;
-            s = _cut_result(&delta, self.t.eot.as_str(), self.post.inputs.multiline);
-            if finished {
-                // can stay consistent with trim() only if that's the final iteration
+        finish_reason: FinishReason
+    ) -> Result<(Value, FinishReason), String> {
+        let json_choices= if !delta.is_empty() || finish_reason == FinishReason::Stop {
+            let mut s: String = _cut_result(&delta, self.t.eot.as_str(), self.post.inputs.multiline);
+            if finish_reason.is_finished() {
                 s = s.trim_end().to_string();
-                self.data4cache.completion0_finish_reason = if finished { "stop".to_string() } else { "".to_string() };
             }
             self.data4cache.completion0_text.push_str(&s);
-            json_choices = json!([{
+            json!([{
                 "index": 0,
                 "code_completion": s,
-                "finish_reason": if finished { serde_json::Value::String("stop".to_string()) } else { serde_json::Value::Null },
-            }]);
+                "finish_reason": finish_reason.to_json_val(),
+            }])
         } else {
-            assert!(stop_length);
-            json_choices = json!([{
+            assert_eq!(finish_reason, FinishReason::Length);
+            json!([{
                 "index": 0,
                 "code_completion": "",
-                "finish_reason": "length"
-            }]);
-            self.data4cache.completion0_finish_reason = "length".to_string();
-            finished = true;
-        }
+                "finish_reason": finish_reason.to_json_val()
+            }])
+        };
+        self.data4cache.completion0_finish_reason = finish_reason.to_string();
         snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
-        let ans = json!({
+        Ok((json!({
             "choices": json_choices,
             "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
-        });
-        Ok((ans, finished))
+        }), finish_reason))
     }
 
     fn response_message_n_choices(
         &mut self, 
         _choices: Vec<String>, 
-        _finish_reason: Vec<String>
+        _finish_reasons: Vec<FinishReason>
     ) -> Result<Value, String> {
         Err("not implemented".to_string())
     }
@@ -436,9 +423,8 @@ impl ScratchpadAbstract for FillInTheMiddleScratchpad {
     fn response_message_streaming(
         &mut self,
         _delta: &Value,
-        _stop_toks: bool,
-        _stop_length: bool,
-    ) -> Result<(Value, bool), String> {
+        _finish_reason: FinishReason,
+    ) -> Result<(Value, FinishReason), String> {
         Err("not implemented".to_string())
     }
 
@@ -446,9 +432,17 @@ impl ScratchpadAbstract for FillInTheMiddleScratchpad {
         Err("".to_string())
     }
 
-    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
-        let (res, _) = self.response_streaming("".to_string(), false, stop_length)?;
-        Ok(res)
+    fn streaming_finished(&mut self, finish_reason: FinishReason) -> Result<Value, String> {
+        self.data4cache.completion0_finish_reason = finish_reason.to_string();
+        snippets_collection::snippet_register_from_data4cache(&self.data4snippet, &mut self.data4cache, self.context_used != json!({}));
+        Ok(json!({
+            "choices": [{
+                "index": 0,
+                "code_completion": "",
+                "finish_reason": finish_reason.to_json_val()
+            }],
+            "snippet_telemetry_id": self.data4cache.completion0_snippet_telemetry_id,
+        }))
     }
 }
 

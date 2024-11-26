@@ -11,7 +11,7 @@ use crate::at_commands::execute_at::run_at_commands;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ChatPost, SamplingParameters};
 use crate::global_context::GlobalContext;
-use crate::scratchpad_abstract::{HasTokenizerAndEot, ScratchpadAbstract};
+use crate::scratchpad_abstract::{FinishReason, HasTokenizerAndEot, ScratchpadAbstract};
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::{get_default_system_prompt, get_default_system_prompt_from_remote, system_prompt_add_workspace_info};
@@ -34,7 +34,7 @@ impl DeltaSender {
         }
     }
 
-    pub fn feed_delta(&mut self, role: &str, _json: &Value, finish_reason: &str, tool_calls: Option<Value>) -> Value {
+    pub fn feed_delta(&mut self, role: &str, _json: &Value, finish_reason: &FinishReason, tool_calls: Option<Value>) -> Value {
         // TODO: correctly implement it
         let x = json!([{
             "index": 0,
@@ -43,7 +43,7 @@ impl DeltaSender {
                 "content": "",
                 "tool_calls": tool_calls.unwrap_or(Value::Null),
             },
-            "finish_reason": if finish_reason == "" { Value::Null } else { Value::String(finish_reason.to_string()) }
+            "finish_reason": finish_reason.to_json_val()
         }]);
         self.role_sent = role.to_string();
         x
@@ -203,27 +203,10 @@ impl ScratchpadAbstract for ChatPassthrough {
         Ok(prompt.to_string())
     }
 
-    fn response_message_n_choices(  // result of old-school OpenAI with text (not messages) which is not possible when using passthrough (means messages)
-        &mut self,
-        _choices: Vec<String>,
-        _finish_reasons: Vec<String>,
-    ) -> Result<Value, String> {
-        todo!();
-    }
-
-    fn response_message_streaming(
-        &mut self,
-        json: &Value,
-        stop_toks: bool,
-        stop_length: bool,
-    ) -> Result<(Value, bool), String> {
-        Ok((json.clone(), stop_toks || stop_length))
-    }
-
     fn response_n_choices(
         &mut self,
         _choices: Vec<String>,
-        _finish_reason: Vec<String>,
+        _finish_reasons: Vec<FinishReason>,
     ) -> Result<Value, String> {
         Err("not implemented".to_string())
     }
@@ -231,22 +214,36 @@ impl ScratchpadAbstract for ChatPassthrough {
     fn response_streaming(
         &mut self,
         _delta: String,
-        _stop_toks: bool,
-        _stop_length: bool,
-    ) -> Result<(Value, bool), String> {
+        _finish_reason: FinishReason
+    ) -> Result<(Value, FinishReason), String> {
         Err("not implemented".to_string())
+    }
+
+    fn response_message_n_choices(
+        &mut self,
+        _choices: Vec<String>,
+        _finish_reasons: Vec<FinishReason>,
+    ) -> Result<Value, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn response_message_streaming(
+        &mut self,
+        json: &Value,
+        finish_reason: FinishReason,
+    ) -> Result<(Value, FinishReason), String> {
+        Ok((json.clone(), finish_reason))
     }
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>  {
         self.has_rag_results.response_streaming()
     }
 
-    fn streaming_finished(&mut self, stop_length: bool) -> Result<Value, String> {
-        let finish_reason = if stop_length { "length" } else { "stop" };
+    fn streaming_finished(&mut self, finish_reason: FinishReason) -> Result<Value, String> {
         let json_choices = self.delta_sender.feed_delta("assistant", &json!({}), &finish_reason, None);
         Ok(json!({
-                "choices": json_choices,
-                "object": "chat.completion.chunk",
-            }))
+            "choices": json_choices,
+            "object": "chat.completion.chunk",
+        }))
     }
 }
