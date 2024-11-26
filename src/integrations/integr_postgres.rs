@@ -16,7 +16,7 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 pub struct SettingsPostgres {
     pub psql_binary_path: String,
     pub host: String,
-    pub port: usize,
+    pub port: String,
     pub user: String,
     pub password: String,
     pub database: String,
@@ -176,7 +176,7 @@ fields:
     f_desc: "Connect to this host, for example 127.0.0.1 or docker container name."
     f_placeholder: marketing_db_container
   port:
-    f_type: int
+    f_type: string
     f_desc: "Which port to use."
     f_default: "5432"
   user:
