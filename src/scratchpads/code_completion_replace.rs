@@ -440,11 +440,15 @@ fn process_n_choices(
                 }
             }
             // vscode cannot correctly handle a completion if it has spaces in front of it
-            if cut_part.replace(" ", "").replace("\t", "").is_empty() {
-                cc = format!("{}{}", cut_part, cc);
+            if !cc.starts_with(&cut_part) {
+                if cut_part.replace(" ", "").replace("\t", "").is_empty() {
+                    cc = format!("{}{}", cut_part, cc);
+                }
             }
-            if subblock_ref.cursor_line.replace(" ", "").replace("\t", "").is_empty() {
-                cc = format!("{}{}", subblock_ref.cursor_line, cc);
+            if !cc.starts_with(&subblock_ref.cursor_line) {
+                if subblock_ref.cursor_line.replace(" ", "").replace("\t", "").is_empty() {
+                    cc = format!("{}{}", subblock_ref.cursor_line, cc);
+                }
             }
 
             // Removing the suffix
