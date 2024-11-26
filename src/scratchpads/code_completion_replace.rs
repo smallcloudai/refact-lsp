@@ -22,7 +22,7 @@ use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
 An unfinished line in this block is marked with the <CURSOR>. 
 Your task is to complete the code after the <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context.
