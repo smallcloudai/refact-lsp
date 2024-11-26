@@ -217,16 +217,15 @@ async fn chat_interaction(
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
     let prompt = spad.prompt(ccx.clone(), &mut chat_post.parameters).await?;
     let stream = chat_post.stream.unwrap_or(false);
-    return if stream {
-        todo!();
-    } else {
-        Ok(chat_interaction_non_stream(
-            ccx.clone(),
-            spad,
-            &prompt,
-            chat_post,
-        ).await?)
+    if stream {
+        warn!("subchats doesn't support streaming, fallback to non-stream communications");
     }
+    Ok(chat_interaction_non_stream(
+        ccx.clone(),
+        spad,
+        &prompt,
+        chat_post,
+    ).await?)
 }
 
 fn update_usage_from_messages(usage: &mut ChatUsage, messages: &Vec<Vec<ChatMessage>>) {

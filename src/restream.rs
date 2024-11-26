@@ -165,9 +165,18 @@ pub async fn scratchpad_interaction_not_stream_json(
             if let Ok(det_msgs) = scratchpad.response_spontaneous() {
                 model_says["deterministic_messages"] = json!(det_msgs);
             }
-            info!("json: {:?}", model_says);
             let choices = oai_choices.clone().as_array().unwrap().iter().map(|x| x.get("message").unwrap().get("content").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
-            scratchpad_result = scratchpad.response_message_n_choices(choices, finish_reasons);
+            scratchpad_result = match scratchpad.response_message_n_choices(choices, finish_reasons) {
+                Ok(res) => Ok(res),
+                Err(err) => {
+                    if err == "not implemented" {
+                        info!("scratchpad doesn't implement response_message_n_choices, passing the original message through");
+                        Ok(model_says.clone())
+                    } else { 
+                        Err(err)
+                    }
+                }
+            };
         } else {
             // TODO: restore order using 'index'
             // for oai_choice in oai_choices.as_array().unwrap() {
@@ -533,7 +542,17 @@ fn _push_streaming_json_into_scratchpad(
             FinishReason::None
         });
         if let Some(_delta) = choice0.get("delta") {
-            (value, finish_reason) = scratch.response_message_streaming(&json, finish_reason.clone())?;
+            (value, finish_reason) = match scratch.response_message_streaming(&json, finish_reason.clone()) {
+                Ok(res) => Ok(res),
+                Err(err) => {
+                    if err == "not implemented" {
+                        info!("scratchpad doesn't implement response_message_streaming, passing the original message through");
+                        Ok((json.clone(), finish_reason.clone()))
+                    } else {
+                        Err(err)
+                    }
+                }
+            }?;
         } else if choices.as_array().map_or(true, |arr|arr.is_empty())  {
             value = json.clone();
         } else {
