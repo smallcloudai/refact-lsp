@@ -26,11 +26,12 @@ const DEBUG: bool = true;
 const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
 An unfinished line in this block is marked with the <CURSOR>. 
 Your task is to complete the code after the <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context.
-Finish up code, functions, comments, etc. 
-Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes."#;
+Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes and nothing more.
+Ensure the rewritten block includes all necessary updates such as code completion, function definitions, or comments."#;
 const SYSTEM_PROMPT_USING_A_COMMENT: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
 Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
-Provide a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes.
+Produce a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes and nothing more.
+Ensure the rewritten block includes all necessary updates such as code completion, function definitions, or comments.
 Strictly follow the user's intention.
 User's intention:
 <comment>"#;
@@ -438,8 +439,12 @@ fn process_n_choices(
                     cc = skip_similar_letters_from_a(cut_part.as_str(), cc.as_str())
                 }
             }
-            if cut_part.replace(" ", "").is_empty() {
+            // vscode cannot correctly handle a completion if it has spaces in front of it
+            if cut_part.replace(" ", "").replace("\t", "").is_empty() {
                 cc = format!("{}{}", cut_part, cc);
+            }
+            if subblock_ref.cursor_line.replace(" ", "").replace("\t", "").is_empty() {
+                cc = format!("{}{}", subblock_ref.cursor_line, cc);
             }
 
             // Removing the suffix
@@ -963,6 +968,7 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         }
         Ok(prompt)
     }
+    
     fn response_n_choices(
         &mut self,
         _choices: Vec<String>,
