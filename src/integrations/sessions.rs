@@ -1,6 +1,6 @@
 use std::{any::Any, sync::Arc};
 use tokio::sync::RwLock as ARwLock;
-use std::future::Future;
+use crate::tools::tool_cmdline::CmdlineSession;
 
 use crate::global_context::GlobalContext;
 
@@ -9,7 +9,6 @@ pub trait IntegrationSession: Any + Send + Sync
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
     fn is_expired(&self) -> bool;
-    fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_>;
 }
 
 pub fn get_session_hashmap_key(integration_name: &str, base_key: &str) -> String {
@@ -36,7 +35,10 @@ async fn remove_expired_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
         let mut gcx_locked = gcx.write().await;
         for key in expired_keys {
             if let Some(session) = gcx_locked.integration_sessions.remove(&key) {
-                Box::into_pin(session.lock().await.try_stop()).await;
+                let mut session_locked = session.lock().await;
+                if let Some(cmdline_session) = session_locked.as_any_mut().downcast_mut::<CmdlineSession>() {
+                    cmdline_session.try_stop().await;
+                }
             }
         }
     }
@@ -52,16 +54,17 @@ pub async fn remove_expired_sessions_background_task(
     }
 }
 
-pub async fn stop_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
-    let sessions = {
-        let mut gcx_locked = gcx.write().await;
-        let sessions = gcx_locked.integration_sessions.iter()
-            .map(|(_, session)| Arc::clone(session))
-            .collect::<Vec<_>>();
-        gcx_locked.integration_sessions.clear();
-        sessions
-    };
+pub async fn stop_cmdline_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
+    let mut gcx_locked = gcx.write().await;
+    let sessions = gcx_locked.integration_sessions.iter()
+        .map(|(_, session)| Arc::clone(session))
+        .collect::<Vec<_>>();
+    gcx_locked.integration_sessions.clear();
+
     for session in sessions {
-        Box::into_pin(session.lock().await.try_stop()).await;
+        let mut session_locked = session.lock().await;
+        if let Some(cmdline_session) = session_locked.as_any_mut().downcast_mut::<CmdlineSession>() {
+            cmdline_session.try_stop().await;
+        }
     }
 }
