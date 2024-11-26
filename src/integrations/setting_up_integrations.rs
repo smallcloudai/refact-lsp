@@ -12,13 +12,32 @@ use crate::global_context::GlobalContext;
 use crate::integrations::{get_integrations, integration_from_name, INTEGRATION_NAMES};
 
 
+#[derive(Default, Clone, Serialize, Debug)]
+pub struct IntegrationErrorYamlParsing {
+    pub path: String,
+    pub line_n: usize,
+    pub text: String,
+}
+
+#[derive(Clone, Serialize, Debug)]
+pub enum IntegrationError {
+    IntegrationErrorYamlParsing(IntegrationErrorYamlParsing),
+    IntegrationErrorPlainText(String),
+}
+
+impl Default for IntegrationError {
+    fn default() -> Self {
+        IntegrationError::IntegrationErrorPlainText(String::default())
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct IntegrationExtra {
     pub integr_path: String,
     pub on_your_laptop: bool,
     pub when_isolated: bool,
     pub is_loaded: bool,
-    pub error_log: Vec<String>,
+    pub error_log: Vec<IntegrationError>,
 }
 
 #[derive(Serialize, Default)]
@@ -36,7 +55,7 @@ pub struct IntegrationContent {
     pub integr_name: String,
     pub integr_schema: Value,
     pub integr_value: Value,
-    pub error_log: Vec<String>,
+    pub error_log: Vec<IntegrationError>,
 }
 
 #[derive(Deserialize)]
@@ -131,7 +150,7 @@ pub async fn get_integration_contents_with_filter(
                 scope: scope.clone(),
                 integr_name: i_name.clone(),
                 integr_schema,
-                integr_value: i.integr_settings_as_json(),
+                integr_value: if i_extra.error_log.is_empty() {i.integr_settings_as_json() } else {json!({})},
                 error_log: i_extra.error_log.clone(),
             };
             results.push(cont);

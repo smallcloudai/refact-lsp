@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use indexmap::IndexMap;
 use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
-use serde_json::json;
 use tracing::{info, warn};
 
 pub mod integr_abstract;
@@ -21,9 +20,8 @@ pub mod setting_up_integrations;
 
 use crate::global_context::GlobalContext;
 use crate::tools::tools_description::Tool;
-use crate::yaml_configs::create_configs::read_yaml_into_value;
 use integr_abstract::IntegrationTrait;
-use crate::integrations::setting_up_integrations::{integration_extra_from_yaml, IntegrationExtra};
+use crate::integrations::setting_up_integrations::{integration_extra_from_yaml, IntegrationError, IntegrationErrorYamlParsing, IntegrationExtra};
 
 pub const INTEGRATION_NAMES: &[&str] = &[
     "github",
@@ -44,6 +42,20 @@ pub fn integration_from_name(name: &str) -> Result<Box<dyn IntegrationTrait + Se
     }
 }
 
+async fn read_yaml_into_value(yaml_path: &PathBuf) -> Result<serde_yaml::Value, IntegrationError> {
+    let file = std::fs::File::open(&yaml_path).map_err(
+        |e| IntegrationError::IntegrationErrorPlainText(format!("Failed to open {}: {}", yaml_path.display(), e))
+    )?;
+    let reader = std::io::BufReader::new(file);
+    serde_yaml::from_reader(reader).map_err(|e| {
+        IntegrationError::IntegrationErrorYamlParsing(IntegrationErrorYamlParsing {
+            path: yaml_path.to_string_lossy().to_string(),
+            line_n: e.location().map(|loc| loc.line()).unwrap_or(0),
+            text: e.to_string(),
+        })
+    })
+}
+
 pub fn get_empty_integrations() -> IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>> {
     let mut integrations = IndexMap::new();
     for i_name in INTEGRATION_NAMES.iter().cloned() {
@@ -56,14 +68,20 @@ pub fn get_empty_integrations() -> IndexMap<String, Box<dyn IntegrationTrait + S
 fn integr_yaml2json(
     value: &serde_yaml::Value, 
     integr_name: &str,
-) -> Result<serde_json::Value, String> {
-    let mut integr_empty = integration_from_name(integr_name)?;
-    let j_value = serde_json::to_value(value).map_err(|e| { 
-        format!("failed to convert yaml -> json: {e}")
+) -> Result<serde_json::Value, IntegrationError> {
+    let mut integr_empty = integration_from_name(integr_name).map_err(|e|{
+        IntegrationError::IntegrationErrorPlainText(format!("Failed to create empty integration: {}", e))
     })?;
-    if let Err(e) = integr_empty.integr_settings_apply(&j_value) {
-        return Err(e);
-    }
+    let j_value = serde_json::to_value(value).map_err(|e| {
+        IntegrationError::IntegrationErrorYamlParsing(IntegrationErrorYamlParsing {
+            path: "".to_string(),
+            line_n: e.line(),
+            text: format!("failed to convert yaml -> json: {e}")
+        })
+    })?;
+    integr_empty.integr_settings_apply(&j_value).map_err(|e|{
+        IntegrationError::IntegrationErrorPlainText(e)
+    })?;
     Ok(integr_empty.integr_settings_as_json())
 }
 
@@ -86,7 +104,9 @@ pub async fn get_integrations(
     let workspace_folders = workspace_folders.lock().unwrap().clone();
 
     let integrations_yaml_path = cache_dir.join("integrations.yaml");
-    let integrations_yaml_value = read_yaml_into_value(&integrations_yaml_path).await?;
+    let integrations_yaml_value = read_yaml_into_value(&integrations_yaml_path).await.map_err(|e|{
+        format!("Failed to load integrations.yaml from {:?}: \n{:?}", integrations_yaml_path, e)
+    })?;
 
     let mut results = IndexMap::new();
     results.entry("global".to_string()).or_insert_with(IndexMap::new);
@@ -96,12 +116,11 @@ pub async fn get_integrations(
             &path, integrations_yaml_value.get(&i_name), &i, &integrations_yaml_path
         ).await?;
 
-        if let Some(detail) = j_value.get("detail") {
-            let detail_str = detail.as_str().unwrap().to_string();
-            warn!("failed to load integration {}: {}", i_name, detail_str);
-            i_extra.error_log.push(detail_str);
+        if !i_extra.error_log.is_empty() {
+            
         } else if let Err(e) = i.integr_settings_apply(&j_value) {
             warn!("failed to load integration {}: {}", i_name, e);
+            let e = IntegrationError::IntegrationErrorPlainText(e);
             i_extra.error_log.push(e);
         } else {
             i_extra.is_loaded = true;
@@ -124,13 +143,16 @@ pub async fn get_integrations(
                     None => continue
                 },
                 Err(e) => {
-                    (json!({"detail": e}), IntegrationExtra::default())
+                    let mut extra = IntegrationExtra::default();
+                    extra.error_log.push(e);
+                    (serde_json::Value::Null, extra)
                 }
             };
 
-            if let Some(detail) = j_value.get("detail") {
-                i_extra.error_log.push(detail.as_str().unwrap().to_string());
+            if !i_extra.error_log.is_empty() {
+                
             } else if let Err(e) = i.integr_settings_apply(&j_value) {
+                let e = IntegrationError::IntegrationErrorPlainText(e);
                 i_extra.error_log.push(e);
             } else {
                 i_extra.is_loaded = true;
@@ -166,7 +188,7 @@ pub async fn load_integration_tools(
             continue;
         }
         if !i_extra.is_loaded {
-            info!("Integration {} has failed to load: {}", i_name, i_extra.error_log.join("\n"));
+            info!("Integration {} has failed to load: {:#?}", i_name, i_extra.error_log);
             continue;
         }
         let tool = i.integr_upgrade_to_tool();
@@ -178,7 +200,7 @@ pub async fn load_integration_tools(
 async fn json_for_integration_local(
     yaml_path: &PathBuf,
     integration: &Box<dyn IntegrationTrait + Send + Sync>,
-) -> Result<(Option<serde_json::Value>, IntegrationExtra), String> {
+) -> Result<(Option<serde_json::Value>, IntegrationExtra), IntegrationError> {
     if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
             Ok(value) => integr_yaml2json(&value, integration.integr_name())
@@ -189,11 +211,13 @@ async fn json_for_integration_local(
                     (x, extra) 
                 })
                 .map_err(|e| {
-                    format!("Problem converting integration to JSON: {}", e) 
+                    let mut e = e;
+                    if let IntegrationError::IntegrationErrorYamlParsing(ref mut e_yaml) = e {
+                        e_yaml.path = yaml_path.to_string_lossy().to_string();
+                    }
+                    e
                 }),
-            Err(e) => {
-                Err(format!("Problem reading YAML from {}: {}", yaml_path.display(), e))
-            }
+            Err(e) => Err(e)
         }
     } else {
         Ok((None, IntegrationExtra::default()))
@@ -210,46 +234,51 @@ async fn json_for_integration_global(
 
     let (value, extra) = if yaml_path.exists() {
         match read_yaml_into_value(yaml_path).await {
-            Ok(value) => integr_yaml2json(&value, integration.integr_name())
-                .map(|i| { 
+            Ok(value) => match integr_yaml2json(&value, integration.integr_name()) {
+                Ok(i) => {
                     let mut extra = integration_extra_from_yaml(&value);
                     extra.integr_path = yaml_path.to_string_lossy().to_string();
-                    (i, extra) 
-                })
-                .unwrap_or_else(|e| {
-                    let e = format!("Problem converting integration to JSON: {}", e);
-                    (json!({"detail": e.to_string()}), IntegrationExtra::default())
-                }),
+                    (Ok(i), extra)
+                }
+                Err(e) => {
+                    (Err(e), IntegrationExtra::default())
+                }
+            },
             Err(e) => {
-                let e = format!("Problem reading YAML from {}: {}", yaml_path.display(), e);
-                (json!({"detail": e.to_string()}), IntegrationExtra::default())
+                let mut e = e;
+                if let IntegrationError::IntegrationErrorYamlParsing(ref mut e_yaml) = e {
+                    e_yaml.path = yaml_path.to_string_lossy().to_string();
+                }
+                (Err(e), IntegrationExtra::default())
             }
         }
     } else {
-        (json!({"detail": format!("Cannot read {}. Probably, file does not exist", yaml_path.display())}), IntegrationExtra::default())
+        let e = IntegrationError::IntegrationErrorPlainText(format!("Cannot read {}. Probably, file does not exist", yaml_path.display()));
+        (Err(e), IntegrationExtra::default())
     };
-
-    let value_from_integrations = value_from_integrations.map_or(json!({"detail": format!("tool {tool_name} is not defined in integrations.yaml")}), |value| {
-        integr_yaml2json(value, integration.integr_name()).unwrap_or_else(|e| {
-            let e = format!("Problem converting integration to JSON: {}", e);
-            json!({"detail": e.to_string()})
-        })
-    });
-
-    match (value.get("detail"), value_from_integrations.get("detail")) {
-        (None, None) => {
+    
+    let value_from_integrations = value_from_integrations.map_or(
+        Err(IntegrationError::IntegrationErrorPlainText(format!("tool {tool_name} is not defined in integrations.yaml"))),
+        |value| integr_yaml2json(value, integration.integr_name())
+    );
+    
+    match (value.is_ok(), value_from_integrations.is_ok()) {
+        (true, true) => {
             Err(format!("Tool {tool_name} exists in both {tool_name}.yaml and integrations.yaml. Consider removing one of them."))
         },
-        (Some(_), None) => {
+        (false, true) => {
             let mut extra = IntegrationExtra::default();
             extra.integr_path = integrations_yaml_path.to_string_lossy().to_string();
-            Ok((value_from_integrations, extra))
+            Ok((value_from_integrations.unwrap(), extra))
         },
-        (None, Some(_)) => {
-            Ok((value, extra))
+        (true, false) => {
+            Ok((value.unwrap(), extra))
         }
-        (Some(_), Some(_)) => {
-            Ok((value, IntegrationExtra::default()))
+        (false, false) => {
+            let mut extra = IntegrationExtra::default();
+            let e = value.unwrap_err();
+            extra.error_log.push(e);
+            Ok((serde_json::Value::Null, extra))
         }
     }
 }
