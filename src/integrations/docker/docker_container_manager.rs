@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::{sync::Arc, sync::Weak, time::SystemTime};
+use std::future::Future;
 use async_tar::Builder;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -80,6 +81,10 @@ impl IntegrationSession for DockerContainerSession {
     fn is_expired(&self) -> bool {
         let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         self.last_usage_ts + self.session_timeout_after_inactivity.as_secs() < current_time
+    }
+
+    fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
+        Box::new(async { "".to_string() })  // TODO
     }
 }
 

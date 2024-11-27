@@ -18,4 +18,4 @@ mod tool_search;
 #[cfg(feature="vecdb")]
 mod tool_locate_search;
 pub mod tool_patch;
-pub mod tool_cmdline;
+mod tool_cmdline;

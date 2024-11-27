@@ -104,27 +104,26 @@ pub struct CmdlineSession {
     service_name: String,
 }
 
-impl CmdlineSession {
-    pub async fn try_stop(&mut self) -> String {
-        info!("CMDLINE SERVICE STOP workdir {}:\n{:?}", self.cmdline_workdir, self.cmdline_string);
-        let t0 = tokio::time::Instant::now();
-        match Box::into_pin(self.cmdline_process.kill()).await {
-            Ok(_) => {
-                format!("Success, it took {:.3}s to stop it.\n\n", t0.elapsed().as_secs_f64())
-            },
-            Err(e) => {
-                tracing::warn!("Failed to kill service '{}'. Error: {}. Assuming process died on its own.", self.service_name, e);
-                format!("Failed to kill service. Error: {}.\nAssuming process died on its own, let's continue.\n\n", e)
-            }
-        }
-    }
-}
-
 impl IntegrationSession for CmdlineSession {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn is_expired(&self) -> bool { false }
+    fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
+        Box::new(async {
+            info!("SERVICE STOP workdir {}:\n{:?}", self.cmdline_workdir, self.cmdline_string);
+            let t0 = tokio::time::Instant::now();
+            match Box::into_pin(self.cmdline_process.kill()).await {
+                Ok(_) => {
+                    format!("Success, it took {:.3}s to stop it.\n\n", t0.elapsed().as_secs_f64())
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to kill service '{}'. Error: {}. Assuming process died on its own.", self.service_name, e);
+                    format!("Failed to kill service. Error: {}.\nAssuming process died on its own, let's continue.\n\n", e)
+                }
+            }
+        })
+    }
 }
 
 fn _replace_args(x: &str, args_str: &HashMap<String, String>) -> String {
@@ -253,7 +252,7 @@ async fn execute_background_command(
             let mut session_locked = session_arc.lock().await;
             let session = session_locked.as_any_mut().downcast_mut::<CmdlineSession>().unwrap();
             actions_log.push_str(&format!("Stopping it...\n"));
-            let stop_log = session.try_stop().await;
+            let stop_log = Box::into_pin(session.try_stop()).await;
             actions_log.push_str(&stop_log);
         }
         gcx.write().await.integration_sessions.remove(&session_key);
