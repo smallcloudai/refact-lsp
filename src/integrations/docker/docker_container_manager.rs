@@ -58,21 +58,6 @@ enum DockerContainerConnectionEnum {
     LocalPort(String),
 }
 
-impl Drop for DockerContainerSession {
-    fn drop(&mut self) {
-        if let Some(gcx) = self.weak_gcx.upgrade() {
-            let container_id = self.container_id.clone();
-            tokio::spawn(async move {
-                if let Err(e) = docker_container_kill(gcx, &container_id).await {
-                    error!("Failed to cleanup docker container session: {}", e);
-                }
-            });
-        } else {
-            info!("Detected program shutdown, quit.");
-        }
-    }
-}
-
 impl IntegrationSession for DockerContainerSession {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
@@ -84,7 +69,23 @@ impl IntegrationSession for DockerContainerSession {
     }
 
     fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
-        Box::new(async { "".to_string() })  // TODO
+        Box::new(async {
+            if let Some(gcx) = self.weak_gcx.upgrade() {
+                let container_id = self.container_id.clone();
+                match docker_container_kill(gcx, &container_id).await {
+                    Ok(()) => format!("Cleanup docker container session: {}", container_id),
+                    Err(e) => {
+                        let message = format!("Failed to cleanup docker container session: {}", e);
+                        error!(message);
+                        message
+                    }
+                }
+            } else {
+                let message = "Detected program shutdown, quit.".to_string();
+                info!(message);
+                message
+            }
+        })
     }
 }
 
