@@ -9,23 +9,18 @@ use serde_json::{Value, json};
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
-use std::collections::HashSet;
-
 use crate::ast::ast_indexer_thread::AstIndexService;
-use crate::ast::ast_structs::{AstDB, AstDefinition};
 use crate::at_commands::at_commands::AtCommandsContext;
-use crate::call_validation::{CodeCompletionPost, ContextFile, SamplingParameters};
+use crate::call_validation::{CodeCompletionPost, SamplingParameters};
 use crate::global_context::GlobalContext;
 use crate::completion_cache;
 use crate::scratchpad_abstract::{FinishReason, HasTokenizerAndEot, ScratchpadAbstract};
-use crate::postprocessing::pp_context_files::postprocess_context_files;
+use crate::scratchpads::completon_rag::retrieve_ast_based_extra_context;
 use crate::telemetry::snippets_collection;
 use crate::telemetry::telemetry_structs;
 
 
 const DEBUG: bool = false;
-const TAKE_USAGES_AROUND_CURSOR: usize = 20;
-
 
 pub struct FillInTheMiddleScratchpad {
     pub t: HasTokenizerAndEot,
@@ -73,38 +68,6 @@ impl FillInTheMiddleScratchpad {
             .replace(&self.fim_suffix, "")
             .replace(&self.t.eos, "")
             .replace(&self.t.eot, "")
-    }
-}
-
-fn add_context_to_prompt(
-    context_format: &String,
-    prompt: &String,
-    postprocessed_messages: &Vec<ContextFile>,
-) -> String {
-    let mut context_files = vec![];
-    if context_format == "starcoder" {
-        for m in postprocessed_messages {
-            let s = format!(
-                "{}{}{}{}",
-                "<file_sep>",
-                m.file_name,
-                "\n",
-                m.file_content
-            );
-            context_files.push(s);
-        }
-        if !context_files.is_empty() {
-            context_files.insert(0, "<repo_name>default_repo".to_string());
-            context_files.push("<file_sep>".to_string())
-        }
-        format!(
-            "{}{}",
-            context_files.join(""),
-            prompt,
-        )
-    } else {
-        tracing::warn!("context_format \"{}\" not recognized", context_format);
-        return prompt.clone();
     }
 }
 
@@ -268,76 +231,29 @@ impl ScratchpadAbstract for FillInTheMiddleScratchpad {
             return Err(format!("order \"{}\" not recognized", self.order));
         }
         let fim_ms = fim_t0.elapsed().as_millis() as i32;
+        self.context_used["fim_ms"] = Value::from(fim_ms);
+        self.context_used["n_ctx".to_string()] = Value::from(n_ctx as i64);
+        self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
+        info!(" -- /post fim {}ms-- ", fim_ms);
+
 
         if use_rag && rag_tokens_n > 0 {
-            info!(" -- rag search starts --");
-            self.context_used = serde_json::json!({});
-
-            let rag_t0 = Instant::now();
-            let mut ast_context_file_vec: Vec<ContextFile> = if let Some(ast) = &self.ast_service {
-                let ast_index = ast.lock().await.ast_index.clone();
-                _cursor_position_to_context_file(ast_index.clone(), cpath.to_string_lossy().to_string(), pos.line, &mut self.context_used).await
-            } else {
-                vec![]
-            };
-
-            let to_buckets_ms = rag_t0.elapsed().as_millis() as i32;
-
-            if fim_line1 != i32::MAX && fim_line2 != i32::MIN {
-                // disable (usefulness==-1) the FIM region around the cursor from getting into the results
-                let fim_ban = ContextFile {
-                    file_name: cpath.to_string_lossy().to_string(),
-                    file_content: "".to_string(),
-                    line1: (fim_line1 + 1) as usize,
-                    line2: (fim_line2 + 1) as usize,
-                    symbols: vec![],
-                    gradient_type: -1,
-                    usefulness: -1.0,
-                };
-                ast_context_file_vec.push(fim_ban);
-            }
-
-            info!(" -- post processing starts --");
-            let post_t0 = Instant::now();
-            let mut pp_settings = {
+            let pp_settings = {
                 let ccx_locked = ccx.lock().await;
                 ccx_locked.postprocess_parameters.clone()
             };
-            if pp_settings.max_files_n == 0 {
-                pp_settings.max_files_n = 5;
-            }
-            let postprocessed_messages = postprocess_context_files(
+            let extra_context = retrieve_ast_based_extra_context(
                 self.global_context.clone(),
-                &mut ast_context_file_vec,
-                self.t.tokenizer.clone(),
+                self.ast_service.clone(),
+                &self.t,
+                &cpath,
+                &pos,
+                (fim_line1, fim_line2),
+                pp_settings,
                 rag_tokens_n,
-                false,
-                &pp_settings,
+                &mut self.context_used
             ).await;
-
-            prompt = add_context_to_prompt(&self.t.context_format, &prompt, &postprocessed_messages);
-            let rag_ms = rag_t0.elapsed().as_millis() as i32;
-            let post_ms = post_t0.elapsed().as_millis() as i32;
-            info!(" -- /post fim {}ms, buckets {}ms, post {}ms -- ",
-                fim_ms,
-                to_buckets_ms, post_ms
-            );
-
-            // Done, only reporting is left
-            //context_to_fim_debug_page(&postprocessed_messages);
-            let attached_files: Vec<_> = postprocessed_messages.iter().map(|x| {
-                json!({
-                    "file_name": x.file_name,
-                    "file_content": x.file_content,
-                    "line1": x.line1,
-                    "line2": x.line2,
-                })
-            }).collect();
-            self.context_used["attached_files"] = Value::Array(attached_files);
-            self.context_used["fim_ms"] = Value::from(fim_ms);
-            self.context_used["rag_ms"] = Value::from(rag_ms);
-            self.context_used["n_ctx".to_string()] = Value::from(n_ctx as i64);
-            self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
+            prompt = format!("{extra_context}{prompt}");
         }
 
         if DEBUG {
@@ -469,70 +385,3 @@ fn _cut_result(text: &str, eot_token: &str, multiline: bool) -> String {
     let ans = text.split_at(cut_at).0.to_string();
     ans.replace("\r", "")
 }
-
-async fn _cursor_position_to_context_file(
-    ast_index: Arc<AMutex<AstDB>>,
-    cpath: String,
-    cursor_line: i32,
-    context_used: &mut Value,
-) -> Vec<ContextFile> {
-    if cursor_line < 0 || cursor_line > 65535 {
-        tracing::error!("cursor line {} out of range", cursor_line);
-        return vec![]
-    }
-    let cursor_line = (cursor_line + 1) as usize;  // count from 1
-    let usages: Vec<(usize, String)> = crate::ast::ast_db::doc_usages(ast_index.clone(), &cpath).await;
-    // uline in usage counts from 1
-
-    let mut distances: Vec<(i32, String, usize)> = usages.into_iter().map(|(line, usage)| {
-        let distance = (line as i32 - cursor_line as i32).abs();
-        (distance, usage, line)
-    }).collect();
-    distances.sort_by_key(|&(distance, _, _)| distance);
-    let nearest_usages: Vec<(usize, String)> = distances.into_iter().take(TAKE_USAGES_AROUND_CURSOR).map(|(_, usage, line)| (line, usage)).collect();
-
-    if DEBUG {
-        info!("nearest_usages\n{:#?}", nearest_usages);
-    }
-
-    let unique_paths: HashSet<_> = nearest_usages.into_iter().map(|(_line, double_colon_path)| double_colon_path).collect();
-    let mut output = vec![];
-    let mut bucket_declarations = vec![];
-    for double_colon_path in unique_paths {
-        if DEBUG {
-            info!("adding {} to context", double_colon_path);
-        }
-        let defs: Vec<Arc<AstDefinition>> = crate::ast::ast_db::definitions(ast_index.clone(), double_colon_path.as_str()).await;
-        if defs.len() != 1 {
-            tracing::warn!("hmm, number of definitions for {} is {} which is not one", double_colon_path, defs.len());
-        }
-        for def in defs {
-            output.push(ContextFile {
-                file_name: def.cpath.clone(),
-                file_content: "".to_string(),
-                line1: def.full_line1(),
-                line2: def.full_line2(),
-                symbols: vec![def.path_drop0()],
-                gradient_type: -1,
-                usefulness: 100.,
-            });
-            let usage_dict = json!({
-                "file_path": def.cpath.clone(),
-                "line1": def.full_line1(),
-                "line2": def.full_line2(),
-                "name": def.path_drop0(),
-            });
-            bucket_declarations.push(usage_dict);
-        }
-    }
-    context_used["bucket_declarations"] = json!(bucket_declarations);
-
-    info!("FIM context\n{:#?}", output);
-    output
-}
-
-//     // context["cursor_symbols"] = Value::Array(search_traces.cursor_symbols.iter()
-//     // context["bucket_declarations"] = Value::Array(search_traces.bucket_declarations.iter()
-//     // context["bucket_usage_of_same_stuff"] = Value::Array(search_traces.bucket_usage_of_same_stuff.iter()
-//     // context["bucket_high_overlap"] = Value::Array(search_traces.bucket_high_overlap.iter()
-//     // context["bucket_imports"] = Value::Array(search_traces.bucket_imports.iter()

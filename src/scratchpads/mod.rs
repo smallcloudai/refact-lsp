@@ -15,6 +15,7 @@ pub mod code_completion_replace;
 pub mod multimodality;
 mod comments_parser;
 mod passthrough_convert_messages;
+mod completon_rag;
 
 use crate::ast::ast_indexer_thread::AstIndexService;
 use crate::call_validation::{ChatMessage, CodeCompletionPost};

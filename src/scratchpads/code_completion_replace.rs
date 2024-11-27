@@ -16,26 +16,33 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use std::time::Instant;
 use std::vec;
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex as AMutex;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
+use crate::scratchpads::completon_rag::retrieve_ast_based_extra_context;
 
 const DEBUG: bool = false;
-const SYSTEM_PROMPT: &str = r#"You are given a code file and a <BLOCK_OF_CODE> from that file. 
-An unfinished line in this block is marked with the <CURSOR>. 
+const SYSTEM_PROMPT: &str = r#"You are given a code file, <BLOCK_OF_CODE> from that file and an extra context from other files. 
+An unfinished line in the <BLOCK_OF_CODE> is marked with the <CURSOR>. 
 Your task is to complete the code after the <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context.
 Produce a single <REWRITTEN_BLOCK_OF_CODE> containing all changes and nothing more.
 Ensure the rewritten block includes all necessary updates such as code completion, function definitions, or comments."#;
-const SYSTEM_PROMPT_USING_A_COMMENT: &str = r#"You are given a code file, a <BLOCK_OF_CODE> from that file, and a user's intention.
-Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position.
+const SYSTEM_PROMPT_USERS_INTENTION: &str = r#"You are given a code file, <BLOCK_OF_CODE> from that file, an extra context from other files, and a user's intention.
+Rewrite the <BLOCK_OF_CODE> to fulfill the user's intention, starting from the <CURSOR> position using the provided context.
 Produce a SINGLE <REWRITTEN_BLOCK_OF_CODE> containing all changes and nothing more.
 Ensure the rewritten block includes all necessary updates such as code completion, function definitions, or comments.
 Strictly follow the user's intention.
 User's intention:
 <comment>"#;
 const SUBBLOCK_CUT_TOKENS_N: usize = 3;
+const SUBBLOCK_REQUIRED_TOKENS: usize = 128;
+const CURSORFILE_MIN_TOKENS: usize = 128;
+const MAX_NEW_TOKENS: usize = 1024;  // it's quite high since we want to avoid having a stripped message
+const TEMPERATURE_INITIAL: f32 = 0.2;
+const TEMPERATURE_NOCACHE: f32 = 0.6;
 
 #[derive(Debug, Clone)]
 pub struct SubBlock {
@@ -145,13 +152,13 @@ impl SubBlock {
     }
 }
 
-fn prepare_main_file(
+fn prepare_cursor_file(
     tokenizer: &HasTokenizerAndEot,
     max_tokens: usize,
     file_name: &PathBuf,
     file_text: &Rope,
     cursor_pos: &CursorPosition,
-) -> Result<(String, usize), String> {
+) -> Result<(String, usize, (usize, usize)), String> {
     let mut output_lines: VecDeque<String> = VecDeque::new();
     let mut tokens_used: usize = 0;
     let mut line_idx_offset: i32 = 1;
@@ -160,11 +167,13 @@ fn prepare_main_file(
         output_lines.push_front(line.to_string());
         tokens_used += tokenizer.count_tokens(line).unwrap_or(0) as usize;
         if tokens_used > max_tokens {
-            return Err("Tokens limit is too small to fit the main file".to_string());
+            return Err("Tokens limit is too small to fit the cursor file".to_string());
         }
     } else {
         return Err("Cannot retrieve the cursor line from the given file".to_string());
     }
+    let mut line1: usize = usize::MAX;
+    let mut line2: usize = usize::MIN;
     loop {
         if cursor_pos.line - line_idx_offset >= 0 {
             let line = file_text.line((cursor_pos.line - line_idx_offset) as usize);
@@ -174,6 +183,7 @@ fn prepare_main_file(
                     break;
                 }
                 output_lines.push_front(line.to_string());
+                line1 = (cursor_pos.line - line_idx_offset) as usize;
             }
         }
         if cursor_pos.line + line_idx_offset < file_text.len_lines() as i32 {
@@ -184,6 +194,7 @@ fn prepare_main_file(
                     break;
                 }
                 output_lines.push_back(line.to_string());
+                line2 = (cursor_pos.line + line_idx_offset) as usize;
             }
         }
 
@@ -205,7 +216,7 @@ fn prepare_main_file(
         file_name.to_string_lossy()
     );
     let tokens_used = tokenizer.count_tokens(&data).unwrap_or(0) as usize;
-    Ok((data, tokens_used))
+    Ok((data, tokens_used, (line1, line2)))
 }
 
 fn prepare_subblock(
@@ -522,8 +533,8 @@ pub struct CodeCompletionReplaceScratchpad {
     pub context_used: Value,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
-    pub _ast_service: Option<Arc<AMutex<AstIndexService>>>,
-    pub _global_context: Arc<ARwLock<GlobalContext>>,
+    pub ast_service: Option<Arc<AMutex<AstIndexService>>>,
+    pub global_context: Arc<ARwLock<GlobalContext>>,
 }
 
 impl CodeCompletionReplaceScratchpad {
@@ -550,8 +561,8 @@ impl CodeCompletionReplaceScratchpad {
             context_used: json!({}),
             data4cache,
             data4snippet,
-            _ast_service: ast_service,
-            _global_context: global_context,
+            ast_service,
+            global_context,
         }
     }
 
@@ -643,16 +654,16 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
             let ccx_locked = ccx.lock().await;
             (ccx_locked.n_ctx, ccx_locked.global_context.clone())
         };
-        // let use_rag = !self.t.context_format.is_empty() && self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
-        sampling_parameters_to_patch.max_new_tokens = 256;
-        sampling_parameters_to_patch.temperature = Some(0.2);
+        let completion_t0 = Instant::now();
+        let use_rag = self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
+        sampling_parameters_to_patch.max_new_tokens = MAX_NEW_TOKENS;
+        sampling_parameters_to_patch.temperature = if !self.post.no_cache { Some(TEMPERATURE_INITIAL) } else { Some(TEMPERATURE_NOCACHE) };
         sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
         if !self.post.inputs.multiline {
             sampling_parameters_to_patch.stop.push("\n".to_string());
         }
-
         let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
-        let mut source = self
+        let source = self
             .post
             .inputs
             .sources
@@ -662,79 +673,92 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
         let mut prompt = self.token_bos.clone();
         prompt.push_str(self.keyword_syst.as_str());
         if let Some(comment) = retrieve_a_comment(&source, &cpath, &self.post.inputs.cursor) {
-            prompt.push_str(&SYSTEM_PROMPT_USING_A_COMMENT.replace("<comment>", &comment));
-            sampling_parameters_to_patch.max_new_tokens = 512;
-            sampling_parameters_to_patch.temperature = Some(0.2);
-            sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
+            prompt.push_str(&SYSTEM_PROMPT_USERS_INTENTION.replace("<comment>", &comment));
         } else {
             prompt.push_str(SYSTEM_PROMPT);
         }
         prompt.push_str(self.token_esc.as_str());
 
-        let mut available_tokens =
-            n_ctx.saturating_sub(self.t.count_tokens(prompt.as_str())? as usize);
-        // let mut rag_tokens_n = if self.post.rag_tokens_n > 0 {
-        //     self.post.rag_tokens_n.min(4096).max(50)
-        // } else {
-        //     ((available_tokens as f64 * self.t.rag_ratio) as usize).min(4096).max(50)
-        // };
-        // available_tokens = available_tokens.saturating_sub(rag_tokens_n);
-        available_tokens = available_tokens
-            .saturating_sub(1 + self.t.count_tokens(self.keyword_user.as_str())? as usize);
-        available_tokens = available_tokens
-            .saturating_sub(1 + self.t.count_tokens(self.keyword_asst.as_str())? as usize);
-        let main_file_available_tokens = (available_tokens as f64 * 0.9) as usize;
-        let subblock_available_tokens = available_tokens
-            .saturating_sub(main_file_available_tokens)
-            .min(256)
-            .max(32);
+        let mut available_tokens = n_ctx.saturating_sub(self.t.count_tokens(prompt.as_str())? as usize);
+        let rag_tokens_n = if use_rag {
+            let rag_tokens_n = if self.post.rag_tokens_n > 0 {
+                self.post.rag_tokens_n
+            } else {
+                ((available_tokens as f64 * self.t.rag_ratio) as usize).max(50)
+            };
+            available_tokens = available_tokens.saturating_sub(rag_tokens_n);
+            rag_tokens_n
+        } else {
+            0
+        };
+        available_tokens = available_tokens.saturating_sub(2 + 2 * self.t.count_tokens(self.keyword_user.as_str())? as usize);
+        available_tokens = available_tokens.saturating_sub(1 + self.t.count_tokens(self.keyword_asst.as_str())? as usize);
+        let subblock_required_tokens = SUBBLOCK_REQUIRED_TOKENS;
+        let cursor_file_available_tokens = available_tokens.saturating_sub(subblock_required_tokens);
+        if cursor_file_available_tokens <= CURSORFILE_MIN_TOKENS {
+            return Err(format!("not enough tokens for the cursor file: {cursor_file_available_tokens} <= {CURSORFILE_MIN_TOKENS}"));
+        }
 
-        source = self.cleanup_prompt(&source);
-        let text = Rope::from_str(&*source);
-
-        let (file_content, _file_content_tokens_count) = prepare_main_file(
+        let text = Rope::from_str(&*self.cleanup_prompt(&source));
+        let (file_content, _, (line1, line2)) = prepare_cursor_file(
             &self.t,
-            main_file_available_tokens,
+            cursor_file_available_tokens,
             &cpath,
             &text,
             &self.post.inputs.cursor,
         )?;
-        let (subblock, _subblock_tokens_count) = prepare_subblock(
+        let (subblock, _) = prepare_subblock(
             &self.t,
-            subblock_available_tokens,
+            subblock_required_tokens,
             &text,
             &self.post.inputs.cursor,
-            10,
+            10
         )?;
+        if use_rag {
+            let pp_settings = {
+                let ccx_locked = ccx.lock().await;
+                ccx_locked.postprocess_parameters.clone()
+            };
+            let extra_context = retrieve_ast_based_extra_context(
+                self.global_context.clone(),
+                self.ast_service.clone(),
+                &self.t,
+                &cpath,
+                &self.post.inputs.cursor,
+                (line1 as i32, line2 as i32),
+                pp_settings,
+                rag_tokens_n,
+                &mut self.context_used
+            ).await;
+            prompt.push_str(self.keyword_user.as_str());
+            prompt.push_str(extra_context.as_str());
+            prompt.push_str(self.token_esc.as_str());
+        }
         self.cursor_subblock = Some(subblock);
-        self.new_line_symbol = if self
-            .cursor_subblock
-            .as_ref()
-            .unwrap()
-            .cursor_line
-            .ends_with("\r\n")
-        {
+        self.new_line_symbol = if self.cursor_subblock.as_ref().unwrap().cursor_line.ends_with("\r\n") {
             Some("\r\n".to_string())
         } else {
             Some("\n".to_string())
         };
+        // Editing file and the subblock within it to rewrite by the model
         prompt.push_str(self.keyword_user.as_str());
-        prompt.push_str(
-            format!(
-                "{file_content}\n{}",
-                self.cursor_subblock.as_ref().unwrap().prompt(&self.t)?
-            )
-            .as_str(),
-        );
+        prompt.push_str(format!("{file_content}\n{}", self.cursor_subblock.as_ref().unwrap().prompt(&self.t)?).as_str());
         prompt.push_str(self.token_esc.as_str());
+        // Prefilling part
         prompt.push_str(self.keyword_asst.as_str());
         prompt.push_str(
             self.cursor_subblock
                 .as_mut()
                 .unwrap()
                 .prefilling_prompt(&self.t)?
-                .as_str(),
+                .as_str()
         );
+
+        let completion_ms = completion_t0.elapsed().as_millis() as i32;
+        self.context_used["fim_ms"] = Value::from(completion_ms);
+        self.context_used["n_ctx".to_string()] = Value::from(n_ctx as i64);
+        self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
+        info!(" -- /post completion {}ms-- ", completion_ms);
 
         if DEBUG {
             info!("chat prompt\n{}", prompt);
@@ -814,8 +838,8 @@ pub struct CodeCompletionReplacePassthroughScratchpad {
     pub context_used: Value,
     pub data4cache: completion_cache::CompletionSaveToCache,
     pub data4snippet: snippets_collection::SaveSnippet,
-    pub _ast_service: Option<Arc<AMutex<AstIndexService>>>,
-    pub _global_context: Arc<ARwLock<GlobalContext>>,
+    pub ast_service: Option<Arc<AMutex<AstIndexService>>>,
+    pub global_context: Arc<ARwLock<GlobalContext>>,
 }
 
 impl CodeCompletionReplacePassthroughScratchpad {
@@ -837,8 +861,8 @@ impl CodeCompletionReplacePassthroughScratchpad {
             context_used: json!({}),
             data4cache,
             data4snippet,
-            _ast_service: ast_service,
-            _global_context: global_context,
+            ast_service,
+            global_context,
         }
     }
 }
@@ -847,11 +871,20 @@ impl CodeCompletionReplacePassthroughScratchpad {
 impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
     async fn apply_model_adaptation_patch(
         &mut self,
-        _patch: &Value,
+        patch: &Value,
         _exploration_tools: bool,
         _agentic_tools: bool,
         _should_execute_remotely: bool,
     ) -> Result<(), String> {
+        self.t.context_format = patch
+            .get("context_format")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string();
+        self.t.rag_ratio = patch
+            .get("rag_ratio")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.5);
         Ok(())
     }
 
@@ -864,14 +897,14 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
             let ccx_locked = ccx.lock().await;
             (ccx_locked.n_ctx, ccx_locked.global_context.clone())
         };
-        // let use_rag = !self.t.context_format.is_empty() && self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
-        sampling_parameters_to_patch.temperature = Some(0.2);
-        sampling_parameters_to_patch.max_new_tokens = 1024;
+        let completion_t0 = Instant::now();
+        let use_rag = self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
+        sampling_parameters_to_patch.max_new_tokens = MAX_NEW_TOKENS;
+        sampling_parameters_to_patch.temperature = if !self.post.no_cache { Some(TEMPERATURE_INITIAL) } else { Some(TEMPERATURE_NOCACHE) };
         sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
         if !self.post.inputs.multiline {
             sampling_parameters_to_patch.stop.push("\n".to_string());
         }
-
         let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
         let source = self
             .post
@@ -886,14 +919,12 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
             messages.push(ChatMessage {
                 role: "system".to_string(),
                 content: ChatContent::SimpleText(
-                    SYSTEM_PROMPT_USING_A_COMMENT.replace("<comment>", &comment),
+                    SYSTEM_PROMPT_USERS_INTENTION.replace("<comment>", &comment),
                 ),
                 tool_calls: None,
                 tool_call_id: "".to_string(),
                 ..Default::default()
             });
-            sampling_parameters_to_patch.temperature = Some(0.2);
-            sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
         } else {
             messages.push(ChatMessage {
                 role: "system".to_string(),
@@ -901,44 +932,70 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
                 ..Default::default()
             });
         }
-        let available_tokens = n_ctx.saturating_sub(
-            self.t
-                .count_tokens(&messages[0].content.content_text_only())? as usize
-                + 3,
+        let mut available_tokens = n_ctx.saturating_sub(
+            self.t.count_tokens(&messages[0].content.content_text_only())? as usize + 3,
         );
-        let main_file_available_tokens = (available_tokens as f64 * 0.9) as usize;
-        let subblock_available_tokens = available_tokens
-            .saturating_sub(main_file_available_tokens)
-            .min(256)
-            .max(32);
+        let rag_tokens_n = if use_rag {
+            let rag_tokens_n = if self.post.rag_tokens_n > 0 {
+                self.post.rag_tokens_n
+            } else {
+                ((available_tokens as f64 * self.t.rag_ratio) as usize).max(50)
+            };
+            available_tokens = available_tokens.saturating_sub(rag_tokens_n);
+            rag_tokens_n
+        } else {
+            0
+        };
+        let subblock_required_tokens = SUBBLOCK_REQUIRED_TOKENS;
+        let cursor_file_available_tokens = available_tokens.saturating_sub(subblock_required_tokens);
+        if cursor_file_available_tokens <= CURSORFILE_MIN_TOKENS {
+            return Err(format!("not enough tokens for the cursor file: {cursor_file_available_tokens} <= {CURSORFILE_MIN_TOKENS}"));
+        }
 
         let text = Rope::from_str(&*source);
-        let (file_content, _file_content_tokens_count) = prepare_main_file(
+        let (file_content, _file_content_tokens_count, (line1, line2)) = prepare_cursor_file(
             &self.t,
-            main_file_available_tokens,
+            cursor_file_available_tokens,
             &cpath,
             &text,
             &self.post.inputs.cursor,
         )?;
         let (subblock, _subblock_tokens_count) = prepare_subblock(
             &self.t,
-            subblock_available_tokens,
+            subblock_required_tokens,
             &text,
             &self.post.inputs.cursor,
             10,
         )?;
+        if use_rag {
+            let pp_settings = {
+                let ccx_locked = ccx.lock().await;
+                ccx_locked.postprocess_parameters.clone()
+            };
+            let extra_context = retrieve_ast_based_extra_context(
+                self.global_context.clone(),
+                self.ast_service.clone(),
+                &self.t,
+                &cpath,
+                &self.post.inputs.cursor,
+                (line1 as i32, line2 as i32),
+                pp_settings,
+                rag_tokens_n,
+                &mut self.context_used
+            ).await;
+            messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::SimpleText(extra_context),
+                ..Default::default()
+            });
+        }
         self.cursor_subblock = Some(subblock);
-        self.new_line_symbol = if self
-            .cursor_subblock
-            .as_ref()
-            .unwrap()
-            .cursor_line
-            .ends_with("\r\n")
-        {
+        self.new_line_symbol = if self.cursor_subblock.as_ref().unwrap().cursor_line.ends_with("\r\n") {
             Some("\r\n".to_string())
         } else {
             Some("\n".to_string())
         };
+        // Editing file and the subblock within it to rewrite by the model
         messages.push(ChatMessage {
             role: "user".to_string(),
             content: ChatContent::SimpleText(format!(
@@ -947,6 +1004,7 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
             )),
             ..Default::default()
         });
+        // Prefilling part
         messages.push(ChatMessage {
             role: "assistant".to_string(),
             content: ChatContent::SimpleText(
@@ -963,6 +1021,13 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         }))
         .unwrap();
         let prompt = format!("PASSTHROUGH {json_messages}").to_string();
+        
+        let completion_ms = completion_t0.elapsed().as_millis() as i32;
+        self.context_used["fim_ms"] = Value::from(completion_ms);
+        self.context_used["n_ctx".to_string()] = Value::from(n_ctx as i64);
+        self.context_used["rag_tokens_limit".to_string()] = Value::from(rag_tokens_n as i64);
+        info!(" -- /post completion {}ms-- ", completion_ms);
+        
         if DEBUG {
             info!("chat prompt\n{}", prompt);
             info!(
