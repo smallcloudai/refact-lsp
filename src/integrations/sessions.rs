@@ -17,28 +17,23 @@ pub fn get_session_hashmap_key(integration_name: &str, base_key: &str) -> String
 }
 
 async fn remove_expired_sessions(gcx: Arc<ARwLock<GlobalContext>>) {
-    let sessions = {
-        let gcx_locked = gcx.read().await;
-        gcx_locked.integration_sessions.iter()
-            .map(|(key, session)| (key.to_string(), session.clone()))
-            .collect::<Vec<_>>()
-    };
-
-    let mut expired_keys = Vec::new();
-    for (key, session) in sessions {
-        let session_locked = session.lock().await;
-        if session_locked.is_expired() {
-            expired_keys.push(key);
-        }
-    }
-
-    {
+    let expired_sessions = {
         let mut gcx_locked = gcx.write().await;
-        for key in expired_keys {
-            if let Some(session) = gcx_locked.integration_sessions.remove(&key) {
-                Box::into_pin(session.lock().await.try_stop()).await;
+        let sessions = gcx_locked.integration_sessions.iter()
+            .map(|(key, session)| (key.to_string(), session.clone()))
+            .collect::<Vec<_>>();
+        let mut expired_sessions = vec![];
+        for (key, session) in &sessions {
+            let session_locked = session.lock().await;
+            if session_locked.is_expired() {
+                gcx_locked.integration_sessions.remove(key);
+                expired_sessions.push(session.clone());
             }
         }
+        expired_sessions
+    };
+    for session in expired_sessions {
+        Box::into_pin(session.lock().await.try_stop()).await;
     }
     // sessions still keeps a reference on all sessions, just in case a destructor is called in the block above
 }

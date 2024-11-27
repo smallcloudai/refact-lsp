@@ -57,7 +57,7 @@ impl IntegrationSession for PdbSession
     }
 
     fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
-        Box::new(async { "".to_string() })  // TODO
+        Box::new(async { "".to_string() })
     }
 }
 
