@@ -459,3 +459,46 @@ async fn docker_container_kill(
     info!("Removed docker container {container_id}.");
     Ok(())
 }
+
+pub async fn docker_container_get_lsp_command(gcx: Arc<ARwLock<GlobalContext>>) -> Result<Vec<String>, String> {
+    let (address_url, api_key, verbose, ast, ast_max_files, vecdb, reset_memory, vecdb_max_files, experimental) = {
+        let gcx_locked = gcx.read().await;
+        (
+            gcx_locked.cmdline.address_url.clone(), 
+            gcx_locked.cmdline.api_key.clone(), 
+            gcx_locked.cmdline.verbose.clone(), 
+            gcx_locked.cmdline.ast.clone(), 
+            gcx_locked.cmdline.ast_max_files.clone(), 
+            gcx_locked.cmdline.vecdb.clone(),
+            gcx_locked.cmdline.reset_memory.clone(), 
+            gcx_locked.cmdline.vecdb_max_files.clone(), 
+            gcx_locked.cmdline.experimental.clone(), 
+        )
+    };
+
+    let mut command = vec![
+        DEFAULT_CONTAINER_LSP_PATH.to_string(),
+        "--http-port".to_string(),
+        TARGET_LSP_PORT.to_string(),
+        "--logs-stderr".to_string(),
+        "--address-url".to_string(),
+        address_url,
+        "--api-key".to_string(),
+        api_key,
+        "--inside-container".to_string(),
+    ];
+
+    if vecdb { 
+        command.push("--vecdb".to_string());
+        command.push(format!("--vecdb-max-files={vecdb_max_files}"));
+    }
+    if ast { 
+        command.push("--ast".to_string());
+        command.push(format!("--ast-max-files={ast_max_files}"));
+    }
+    if verbose { command.push("--verbose".to_string()) }
+    if reset_memory { command.push("--reset-memory".to_string()) }
+    if experimental { command.push("--experimental".to_string()) }
+    
+    Ok(command)
+}

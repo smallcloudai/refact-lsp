@@ -14,6 +14,7 @@ use crate::integrations::running_integrations::load_integration_tools;
 use crate::tools::tools_description::Tool;
 use crate::integrations::docker::docker_ssh_tunnel_utils::{SshConfig, forward_remote_docker_if_needed};
 use crate::integrations::docker::docker_container_manager::Port;
+use crate::integrations::docker::docker_compose_manager::docker_compose_start;
 
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct SettingsDocker {
@@ -177,6 +178,12 @@ impl Tool for ToolDocker {
             let ccx_locked = ccx.lock().await;
             ccx_locked.global_context.clone()
         };
+
+        let p = docker_compose_start(&self, "test", gcx.clone()).await?;
+        match tokio::fs::read_to_string(&p).await {
+            Ok(content) => tracing::info!("Content of {:?}: {}", p, content),
+            Err(e) => tracing::error!("Failed to read {:?}: {}", p, e),
+        }
         
         let (stdout, _) = self.command_execute(&command, gcx.clone(), true, false).await?;
 
