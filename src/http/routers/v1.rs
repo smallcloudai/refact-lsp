@@ -68,6 +68,8 @@ pub mod chat_based_handlers;
 pub mod handlers_memdb;
 #[cfg(feature="vecdb")]
 pub mod vecdb;
+
+
 pub fn make_v1_router() -> Router {
     let builder = Router::new()
         .route("/ping", telemetry_get!(handle_v1_ping))
