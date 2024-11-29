@@ -197,21 +197,17 @@ impl Tool for ToolChrome {
     }
 
     fn tool_description(&self) -> ToolDesc {
-        let mut supported_commands = vec![
+        let supported_commands = vec![
             "open_tab <desktop|mobile> <tab_id>",
             "navigate_to <uri> <tab_id>",
-            "screenshot <tab_id>",
+            "screenshot <plain|highlight_before_click> <tab_id>",
             // "html <tab_id>",
             "reload <tab_id>",
             "press_key_at <enter|esc|pageup|pagedown|home|end> <tab_id>",
             "type_text_at <text> <tab_id>",
             "tab_log <tab_id>",
+            "click_at <x> <y> <tab_id>",
         ];
-        if self.supports_clicks {
-            supported_commands.extend(vec![
-                "click_at <x> <y> <tab_id>",
-            ]);
-        }
         let description = format!(
             "One or several commands separated by newline. \
              The <tab_id> is an integer, for example 10, for you to identify the tab later. \
@@ -293,17 +289,34 @@ async fn setup_chrome_session(
 
 async fn screenshot_jpeg_base64(
     tab: Arc<AMutex<ChromeTab>>,
-    capture_beyond_viewport: bool,
-) -> Result<MultimodalElement, String> {
+    highlight: bool,
+) -> Result<(Vec<String>, MultimodalElement), String> {
+    let mut interactive_element_map = vec![];
     let jpeg_base64_data = {
         let tab_lock = tab.lock().await;
-        tab_lock.headless_tab.call_method(Page::CaptureScreenshot {
-            format: Some(Page::CaptureScreenshotFormatOption::Jpeg),
-            clip: None,
-            quality: Some(75),
-            from_surface: Some(true),
-            capture_beyond_viewport: Some(capture_beyond_viewport),
-        }).map_err(|e| e.to_string())?.data
+        match {
+            if highlight {
+                interactive_element_map = highlight_elements(&tab_lock.headless_tab)
+                    .await.map_err(|e| e.to_string())?;
+            }
+            let data = tab_lock.headless_tab.call_method(Page::CaptureScreenshot {
+                format: Some(Page::CaptureScreenshotFormatOption::Jpeg),
+                clip: None,
+                quality: Some(75),
+                from_surface: Some(true),
+                capture_beyond_viewport: Some(false),
+            }).map_err(|e| e.to_string())?.data;
+            Ok::<String, String>(data)
+        } {
+            Ok(data) => {
+                remove_highlight(&tab_lock.headless_tab).await.map_err(|e| e.to_string())?;
+                data
+            },
+            Err(e) => {
+                remove_highlight(&tab_lock.headless_tab).await.map_err(|e| e.to_string())?;
+                return Err(e)
+            }
+        }
     };
 
     let mut data = base64::prelude::BASE64_STANDARD
@@ -317,15 +330,35 @@ async fn screenshot_jpeg_base64(
         // NOTE: the tool operates on resized image well without a special model notification
         let (nwidth, nheight) = (scale_factor * image.width() as f32, scale_factor * image.height() as f32);
         image = image.resize(nwidth as u32, nheight as u32, FilterType::Lanczos3);
+        let mut interactive_element_map_scaled = vec![];
+        for (label, x, y) in interactive_element_map {
+            let (scaled_x, scaled_y) = ((x as f32 * scale_factor) as i32, (y as f32 * scale_factor) as i32);
+            interactive_element_map_scaled.push((label, scaled_x, scaled_y));
+        }
+        interactive_element_map = interactive_element_map_scaled;
         // NOTE: we should store screenshot_scale_factor for every resized screenshot, not for a tab!
         let mut tab_lock = tab.lock().await;
         tab_lock.screenshot_scale_factor = scale_factor as f64;
     }
 
+    let mut tool_log = vec![];
+    if highlight && interactive_element_map.len() > 0 {
+        tool_log.push("Clickable elements are highlighted with red rectangles and numbered labels at the top left.".to_string());
+        tool_log.push("The interactive elements map to the rendered page as  <numbered label>: <x>, <y> .".to_string());
+        for (label, x, y) in interactive_element_map {
+            tool_log.push(format!("{}: {}, {}", label, x, y));
+        }
+    }
+
     data = Vec::new();
     image.write_to(&mut Cursor::new(&mut data), ImageFormat::Jpeg).map_err(|e| e.to_string())?;
 
-    MultimodalElement::new("image/jpeg".to_string(), base64::prelude::BASE64_STANDARD.encode(data))
+    let multimodal_el = MultimodalElement::new(
+        "image/jpeg".to_string(),
+        base64::prelude::BASE64_STANDARD.encode(data)
+    ).map_err(|e| e.to_string())?;
+
+    Ok((tool_log, multimodal_el))
 }
 
 async fn session_open_tab(
@@ -453,13 +486,18 @@ async fn chrome_command_exec(
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
                 session_get_tab_arc(chrome_session, &args.tab_id).await?
             };
+            let highlight = match args.mode {
+                ScreenshotMode::HIGHLIGHT => true,
+                _ => false,
+            };
             let log = {
                 // NOTE: this operation is not atomic, unfortunately
-                match screenshot_jpeg_base64(tab.clone(), false).await {
-                    Ok(multimodal_el) => {
+                match screenshot_jpeg_base64(tab.clone(), highlight).await {
+                    Ok((log, multimodal_el)) => {
                         multimodal_els.push(multimodal_el);
                         let tab_lock = tab.lock().await;
-                        format!("made a screenshot of {}", tab_lock.state_string())
+                        let log_str = log.join("\n");
+                        vec![log_str, format!("made a screenshot of {}", tab_lock.state_string())].join("\n\n")
                     },
                     Err(e) => {
                         let tab_lock = tab.lock().await;
@@ -628,8 +666,15 @@ struct NavigateToArgs {
     tab_id: String,
 }
 
+#[derive(Clone, Debug)]
+enum ScreenshotMode {
+    PLAIN,
+    HIGHLIGHT,
+}
+
 #[derive(Debug)]
 struct ScreenshotArgs {
+    mode: ScreenshotMode,
     tab_id: String,
 }
 
@@ -723,12 +768,22 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
             }))
         },
         "screenshot" => {
-            if parsed_args.len() < 1 {
-                return Err(format!("`screenshot` requires 1 argument: `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [mode_str, tab_id] => {
+                    let mode = match mode_str.to_lowercase().as_str() {
+                        "plain" => ScreenshotMode::PLAIN,
+                        "highlight_before_click" => ScreenshotMode::HIGHLIGHT,
+                        _ => return Err(format!("Unknown screenshot mode: {}.", mode_str)),
+                    };
+                    Ok(Command::Screenshot(ScreenshotArgs {
+                        mode: mode.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments 'mode', 'tab_id'".to_string())
+                }
             }
-            Ok(Command::Screenshot(ScreenshotArgs {
-                tab_id: parsed_args[0].clone(),
-            }))
         },
         "html" => {
             if parsed_args.len() < 1 {
@@ -811,4 +866,93 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         },
         _ => Err(format!("Unknown command: {:?}.", command_name)),
     }
+}
+
+async fn highlight_elements(tab: &Arc<HeadlessTab>) -> Result<Vec<(String, i32, i32)>, String> {
+    let func = "
+    (function () {
+        const clickableElements = document.querySelectorAll('a, button, [onclick], [role=\"button\"]');
+        let results = [];
+        clickableElements.forEach(element => {
+            if (element) {
+                const rect = element.getBoundingClientRect();
+                if (rect.width * rect.height > 0) {
+                    element.style.outline = '2px solid red';
+                    element.setAttribute('browser-user-highlight-id', 'screenshot-highlight');
+                    const label_text = (results.length + 1).toString();
+
+                    const label = document.createElement('div');
+                    label.className = 'screenshot-highlight-label';
+                    label.style.position = 'fixed';
+                    label.style.background = 'red';
+                    label.style.color = 'white';
+                    label.style.padding = '2px 6px';
+                    label.style.borderRadius = '10px';
+                    label.style.fontSize = '12px';
+                    label.style.zIndex = '9999999';
+                    label.textContent = label_text;
+                    label.style.top = (rect.top - 20) + 'px';
+                    label.style.left = rect.left + 'px';
+                    document.body.appendChild(label);
+
+                    midpoint_x = rect.left + rect.width / 2;
+                    midpoint_y = rect.top + rect.height / 2;
+                    midpoint_text = `${label_text}: ${parseInt(midpoint_x)}, ${parseInt(midpoint_y)}`;
+                    results.push(midpoint_text);
+                }
+            }
+        });
+        return results;
+    })();";
+
+    let result = tab.evaluate(func, false).map_err(|e| e.to_string())?;
+    if let Some(preview) = result.preview {
+        let mut interactive_element_map = vec![];
+        for pp in preview.properties {
+            if let Some(value) = pp.value.clone() {
+                let parts: Vec<String> = value.to_string().split(':').map(|x| x.to_string()).collect();
+                if parts.len() != 2 {
+                    continue;
+                }
+                let label = parts[0].trim().to_string();
+                let coords: Vec<&str> = parts[1].trim().split(',').collect();
+                if coords.len() != 2 {
+                    continue;
+                }
+                let (x, y) = match {
+                    let x = coords[0].trim().parse::<i32>().map_err(|e| e.to_string())?;
+                    let y = coords[1].trim().parse::<i32>().map_err(|e| e.to_string())?;
+                    Ok::<(i32, i32), String>((x, y))
+                } {
+                    Ok((x, y)) => (x, y),
+                    Err(_) => continue,
+                };
+                interactive_element_map.push((label, x, y));
+            }
+        }
+        return Ok(interactive_element_map);
+    }
+    if let Some(e) = result.description {
+        return Err(e);
+    }
+    Err("Unexpected error while highlighting clickable elements".to_string())
+}
+
+async fn remove_highlight(tab: &Arc<HeadlessTab>) -> Result<(), String> {
+    let func = "
+    (function () {
+        const highlightedElements = document.querySelectorAll('[browser-user-highlight-id=\"screenshot-highlight\"]');
+		highlightedElements.forEach(element => {
+			element.style.outline = '';
+			element.removeAttribute('browser-user-highlight-id');
+		});
+		const labels = document.querySelectorAll('.screenshot-highlight-label');
+		labels.forEach(label => label.remove());
+    })();";
+
+    let result = tab.evaluate(func, false).map_err(|e| e.to_string())?;
+    if let Some(e) = result.description {
+        return Err(e);
+    }
+    Ok(())
 }
