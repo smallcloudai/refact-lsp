@@ -15,7 +15,7 @@ use crate::call_validation::{ChatContent, ChatMessage};
 use crate::scratchpads::multimodality::MultimodalElement;
 use crate::postprocessing::pp_command_output::{CmdlineOutputFilter, output_mini_postprocessing};
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
-use crate::integrations::integr_abstract::Integration;
+use crate::integrations::integr_abstract::IntegrationTrait;
 
 use tokio::time::sleep;
 use chrono::DateTime;
@@ -35,7 +35,7 @@ use image::{ImageFormat, ImageReader};
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
-pub struct IntegrationChrome {
+pub struct SettingsChrome {
     pub chrome_path: Option<String>,
     pub window_width: Option<u32>,
     pub window_height: Option<u32>,
@@ -48,7 +48,7 @@ fn default_headless() -> bool { true }
 
 #[derive(Debug, Default)]
 pub struct ToolChrome {
-    pub integration_chrome: IntegrationChrome,
+    pub settings_chrome: SettingsChrome,
     pub supports_clicks: bool,
 }
 
@@ -122,35 +122,33 @@ impl IntegrationSession for ChromeSession
     }
 }
 
-impl Integration for ToolChrome {
+impl IntegrationTrait for ToolChrome {
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
-        let integration_github = serde_json::from_value::<IntegrationChrome>(value.clone())
-            .map_err(|e|e.to_string())?;
-        self.integration_chrome = integration_github;
+        match serde_json::from_value::<SettingsChrome>(value.clone()) {
+            Ok(settings_chrome) => self.settings_chrome = settings_chrome,
+            Err(e) => {
+                tracing::error!("Failed to apply settings: {}\n{:?}", e, value);
+                return Err(e.to_string());
+            }
+        }
         Ok(())
     }
 
-    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
-        let integration_github = serde_yaml::from_value::<IntegrationChrome>(value.clone()).map_err(|e| {
-            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-            format!("{}{}", e.to_string(), location)
-        })?;
-        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    fn integr_settings_as_json(&self) -> Value {
+        serde_json::to_value(&self.settings_chrome).unwrap()
     }
 
     fn integr_upgrade_to_tool(&self, integr_name: &String) -> Box<dyn Tool + Send> {
         Box::new(ToolChrome {
-            integration_chrome: self.integration_chrome.clone(),
-            supports_clicks: false}
-        ) as Box<dyn Tool + Send>
+            settings_chrome: self.settings_chrome.clone(),
+            supports_clicks: false,
+        }) as Box<dyn Tool + Send>
     }
 
-    fn integr_settings_as_json(&self) -> Result<Value, String> {
-        serde_json::to_value(&self.integration_chrome).map_err(|e| e.to_string())
+    fn integr_schema(&self) -> &str
+    {
+        CHROME_INTEGRATION_SCHEMA
     }
-
-    fn integr_settings_default(&self) -> String { DEFAULT_CHROME_INTEGRATION_YAML.to_string() }
-    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/732/732205.png".to_string() }
 }
 
 #[async_trait]
@@ -259,7 +257,7 @@ impl Tool for ToolChrome {
 
 async fn setup_chrome_session(
     gcx: Arc<ARwLock<GlobalContext>>,
-    args: &IntegrationChrome,
+    args: &SettingsChrome,
     session_hashmap_key: &String,
 ) -> Result<Vec<String>, String> {
     let mut setup_log = vec![];
@@ -845,7 +843,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
 async fn interact_with_chrome(
     gcx: Arc<ARwLock<GlobalContext>>,
     chat_id: &String,
-    integration_chrome: &IntegrationChrome,
+    integration_chrome: &SettingsChrome,
     command: &Command,
 ) -> Result<Vec<MultimodalElement>, String> {
     let session_hashmap_key = get_session_hashmap_key("chrome", &chat_id);
@@ -882,18 +880,53 @@ async fn screenshot_jpeg_base64(tab: &Arc<Tab>, capture_beyond_viewport: bool) -
     MultimodalElement::new("image/jpeg".to_string(), jpeg_data)
 }
 
-const DEFAULT_CHROME_INTEGRATION_YAML: &str = r#"
-# Chrome integration
-
-# This can be path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read
-# more here https://developer.chrome.com/blog/chrome-for-testing/?utm_source=Fibery&utm_medium=iframely
-#chrome_path: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-# Or you can give it ws:// path, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server/
-# In that case start chrome with --remote-debugging-port
-# chrome_path: "ws://127.0.0.1:6006/"
-# window_width: 1024
-# window_height: 768
-# idle_browser_timeout: 600
+const CHROME_INTEGRATION_SCHEMA: &str = r#"
+fields:
+  chrome_path:
+    f_type: string_long
+    f_desc: "Path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read more here https://developer.chrome.com/blog/chrome-for-testing. You can also give it ws:// path, in that case start chrome with --remote-debugging-port, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server"
+    f_placeholder: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing or ws://127.0.0.1:4444/"
+  window_width:
+    f_type: string_short
+    f_desc: "Width of the browser window."
+    f_default: "1024"
+  window_height:
+    f_type: string_short
+    f_desc: "Height of the browser window."
+    f_default: "768"
+  idle_browser_timeout:
+    f_type: string_short
+    f_desc: "Idle timeout for the browser in seconds."
+    f_default: "600"
+  headless:
+    f_type: bool
+    f_desc: "Run Chrome in headless mode."
+    f_default: true
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+smartlinks:
+  - sl_label: "Test"
+    sl_chat:
+      - role: "user"
+        content: |
+          🔧 The chrome tool should be visible now. To test the tool, navigate to a website, take a screenshot, and express satisfaction and relief if it works. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt. The current config file is %CURRENT_CONFIG%.
+docker:
+  filter_label: ""
+  filter_image: "standalone-chrome"
+  new_container_default:
+    image: "selenium/standalone-chrome:latest"
+    environment: []
+  smartlinks:
+    - sl_label: "Add Chrome Container"
+      sl_chat:
+        - role: "user"
+          content: |
+            🔧 Your job is to create a chrome container, using the image and environment from new_container_default section in the current config file: %CURRENT_CONFIG%. Follow the system prompt.
+  smartlinks_for_each_container:
+    - sl_label: "Use for integration"
+      sl_chat:
+        - role: "user"
+          content: |
+            🔧 Your job is to modify chrome config in the current file to connect through websockets to the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
 "#;
-=======
->>>>>>> main
