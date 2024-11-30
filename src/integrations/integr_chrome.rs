@@ -343,12 +343,19 @@ async fn screenshot_jpeg_base64(
         tab_lock.screenshot_scale_factor = scale_factor as f64;
     }
 
+    let mut interactive_element_map_visible = vec![];
+    for (label, x, y) in interactive_element_map {
+        if x < image.width() as i32 && y < image.height() as i32 {
+            interactive_element_map_visible.push((label, x, y));
+        }
+    }
+
     let mut tool_log = vec![];
-    if highlight && interactive_element_map.len() > 0 {
+    if highlight && interactive_element_map_visible.len() > 0 {
         tool_log.push("Clickable elements are highlighted with red rectangles and numbered labels at the top left.".to_string());
-        tool_log.push("The interactive elements map to the rendered page as  <numbered label>: <x>, <y> .".to_string());
-        for (label, x, y) in interactive_element_map {
-            tool_log.push(format!("{}: {}, {}", label, x, y));
+        tool_log.push("The interactive elements map to the rendered page:".to_string());
+        for (label, x, y) in interactive_element_map_visible {
+            tool_log.push(format!("label `{}` center is ({}, {})", label, x, y));
         }
     }
 
@@ -871,31 +878,42 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
 }
 
 async fn highlight_elements(tab: &Arc<HeadlessTab>) -> Result<Vec<(String, i32, i32)>, String> {
+    // NOTE: for now there is the problem with input, no label for it unfortunately
     let func = "
     (function () {
-        const clickableElements = document.querySelectorAll('a, button, [onclick], [role=\"button\"]');
+        const clickableElements = document.querySelectorAll(
+            'a, button, details, embed, input, menu, menuitem, object, select, textarea, summary, [onclick], [role=\"button\"]'
+        );
         let results = [];
         clickableElements.forEach(element => {
             if (element) {
                 const rect = element.getBoundingClientRect();
-                if (rect.width * rect.height > 0) {
+                if (rect.left >= 0 && rect.top >= 0 && rect.width * rect.height > 0) {
                     element.style.outline = '2px solid red';
                     element.setAttribute('browser-user-highlight-id', 'screenshot-highlight');
+
                     const label_text = (results.length + 1).toString();
 
                     const label = document.createElement('div');
                     label.className = 'screenshot-highlight-label';
-                    label.style.position = 'fixed';
                     label.style.background = 'red';
                     label.style.color = 'white';
                     label.style.padding = '2px 6px';
                     label.style.borderRadius = '10px';
                     label.style.fontSize = '12px';
-                    label.style.zIndex = '9999999';
                     label.textContent = label_text;
-                    label.style.top = (rect.top - 20) + 'px';
-                    label.style.left = rect.left + 'px';
-                    document.body.appendChild(label);
+
+                    label.style.position = 'absolute';
+                    label.style.zIndex = '999999';
+                    label.style.top = '0';
+                    label.style.left = '0';
+
+                    // Set the parent element's position to relative if not already set
+                    if (getComputedStyle(element).position === 'static') {
+                        element.style.position = 'relative'; // Establish a positioning context
+                    }
+
+                    element.appendChild(label);
 
                     midpoint_x = rect.left + rect.width / 2;
                     midpoint_y = rect.top + rect.height / 2;
