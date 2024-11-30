@@ -80,7 +80,7 @@ pub async fn read_integrations_yaml(gcx: Arc<ARwLock<GlobalContext>>) -> Result<
 
 pub async fn tools_merged_and_filtered(
     gcx: Arc<ARwLock<GlobalContext>>,
-    supports_clicks: bool,
+    _supports_clicks: bool,
 ) -> Result<IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>>, String> {
     let (ast_on, vecdb_on, allow_experimental) = {
         let gcx_locked = gcx.read().await;
@@ -133,7 +133,7 @@ pub async fn tools_merged_and_filtered(
             tools_all.insert("pdb".to_string(), Arc::new(AMutex::new(Box::new(ToolPdb::new_from_yaml(pdb_config)?) as Box<dyn Tool + Send>)));
         }
         if let Some(chrome_config) = integrations_value.get("chrome") {
-            tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(ToolChrome::new_from_yaml(chrome_config, supports_clicks)?) as Box<dyn Tool + Send>)));
+            tools_all.insert("chrome".to_string(), Arc::new(AMutex::new(Box::new(ToolChrome::new_from_yaml(chrome_config)?) as Box<dyn Tool + Send>)));
         }
         if let Some(postgres_config) = integrations_value.get("postgres") {
             tools_all.insert("postgres".to_string(), Arc::new(AMutex::new(Box::new(ToolPostgres::new_from_yaml(postgres_config)?) as Box<dyn Tool + Send>)));

@@ -46,7 +46,6 @@ fn default_headless() -> bool { true }
 
 pub struct ToolChrome {
     integration_chrome: IntegrationChrome,
-    supports_clicks: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -117,15 +116,12 @@ impl IntegrationSession for ChromeSession
 }
 
 impl ToolChrome {
-    pub fn new_from_yaml(v: &serde_yaml::Value, supports_clicks: bool,) -> Result<Self, String> {
+    pub fn new_from_yaml(v: &serde_yaml::Value) -> Result<Self, String> {
         let integration_chrome = serde_yaml::from_value::<IntegrationChrome>(v.clone()).map_err(|e| {
             let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
             format!("{}{}", e.to_string(), location)
         })?;
-        Ok(Self {
-            integration_chrome,
-            supports_clicks,
-        })
+        Ok(Self { integration_chrome })
     }
 }
 
@@ -197,10 +193,16 @@ impl Tool for ToolChrome {
     }
 
     fn tool_description(&self) -> ToolDesc {
+        let tool_description = vec![
+            "A real web browser with graphical interface.",
+            "Notes about screenshot modes:",
+            "- plain mode is for visual validation and exploration;",
+            "- highlight mode gets clickable elements map to use it for click command.",
+        ].join("\n");
         let supported_commands = vec![
             "open_tab <desktop|mobile> <tab_id>",
             "navigate_to <uri> <tab_id>",
-            "screenshot <plain|highlight_before_click> <tab_id>",
+            "screenshot <plain|highlight> <tab_id>",
             // "html <tab_id>",
             "reload <tab_id>",
             "press_key_at <enter|esc|pageup|pagedown|home|end> <tab_id>",
@@ -208,7 +210,7 @@ impl Tool for ToolChrome {
             "tab_log <tab_id>",
             "click_at <x> <y> <tab_id>",
         ];
-        let description = format!(
+        let commands_description = format!(
             "One or several commands separated by newline. \
              The <tab_id> is an integer, for example 10, for you to identify the tab later. \
              Supported commands:\n{}", supported_commands.join("\n"));
@@ -216,11 +218,11 @@ impl Tool for ToolChrome {
             name: "chrome".to_string(),
             agentic: true,
             experimental: true,
-            description: "A real web browser with graphical interface.".to_string(),
+            description: tool_description,
             parameters: vec![ToolParam {
                 name: "commands".to_string(),
                 param_type: "string".to_string(),
-                description,
+                description: commands_description,
             }],
             parameters_required: vec!["commands".to_string()],
         }
@@ -772,7 +774,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 [mode_str, tab_id] => {
                     let mode = match mode_str.to_lowercase().as_str() {
                         "plain" => ScreenshotMode::PLAIN,
-                        "highlight_before_click" => ScreenshotMode::HIGHLIGHT,
+                        "highlight" => ScreenshotMode::HIGHLIGHT,
                         _ => return Err(format!("Unknown screenshot mode: {}.", mode_str)),
                     };
                     Ok(Command::Screenshot(ScreenshotArgs {
