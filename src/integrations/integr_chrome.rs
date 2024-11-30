@@ -289,12 +289,12 @@ async fn setup_chrome_session(
     Ok(setup_log)
 }
 
-async fn screenshot_jpeg_base64(
+async fn capture_screenshot_base64(
     tab: Arc<AMutex<ChromeTab>>,
     highlight: bool,
 ) -> Result<(Vec<String>, MultimodalElement), String> {
     let mut interactive_element_map = vec![];
-    let jpeg_base64_data = {
+    let base64_data = {
         let tab_lock = tab.lock().await;
         match {
             if highlight {
@@ -302,9 +302,9 @@ async fn screenshot_jpeg_base64(
                     .await.map_err(|e| e.to_string())?;
             }
             let data = tab_lock.headless_tab.call_method(Page::CaptureScreenshot {
-                format: Some(Page::CaptureScreenshotFormatOption::Jpeg),
+                format: Some(Page::CaptureScreenshotFormatOption::Png),
                 clip: None,
-                quality: Some(75),
+                quality: None,
                 from_surface: Some(true),
                 capture_beyond_viewport: Some(false),
             }).map_err(|e| e.to_string())?.data;
@@ -322,8 +322,8 @@ async fn screenshot_jpeg_base64(
     };
 
     let mut data = base64::prelude::BASE64_STANDARD
-        .decode(jpeg_base64_data).map_err(|e| e.to_string())?;
-    let reader = ImageReader::with_format(Cursor::new(data), ImageFormat::Jpeg);
+        .decode(base64_data).map_err(|e| e.to_string())?;
+    let reader = ImageReader::with_format(Cursor::new(data), ImageFormat::Png);
     let mut image = reader.decode().map_err(|e| e.to_string())?;
 
     let max_dimension = 800.0;
@@ -360,10 +360,10 @@ async fn screenshot_jpeg_base64(
     }
 
     data = Vec::new();
-    image.write_to(&mut Cursor::new(&mut data), ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+    image.write_to(&mut Cursor::new(&mut data), ImageFormat::Png).map_err(|e| e.to_string())?;
 
     let multimodal_el = MultimodalElement::new(
-        "image/jpeg".to_string(),
+        "image/png".to_string(),
         base64::prelude::BASE64_STANDARD.encode(data)
     ).map_err(|e| e.to_string())?;
 
@@ -501,7 +501,7 @@ async fn chrome_command_exec(
             };
             let log = {
                 // NOTE: this operation is not atomic, unfortunately
-                match screenshot_jpeg_base64(tab.clone(), highlight).await {
+                match capture_screenshot_base64(tab.clone(), highlight).await {
                     Ok((log, multimodal_el)) => {
                         multimodal_els.push(multimodal_el);
                         let tab_lock = tab.lock().await;
