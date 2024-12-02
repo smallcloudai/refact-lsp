@@ -23,6 +23,8 @@ use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use headless_chrome::protocol::cdp::types::Event;
+use headless_chrome::protocol::cdp::DOM::Enable as DOMEnable;
+use headless_chrome::protocol::cdp::CSS::Enable as CSSEnable;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::fmt;
@@ -211,6 +213,7 @@ impl Tool for ToolChrome {
             "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
             "eval <tab_id> <expression>",
+            "styles <tab_id> <element_selector>",
         ];
         if self.supports_clicks {
             supported_commands.extend(vec![
@@ -412,6 +415,7 @@ enum Command {
     PressKeyAt(PressKeyAtArgs),
     TabLog(TabArgs),
     Eval(EvalArgs),
+    Styles(StylesArgs),
 }
 
 async fn chrome_command_exec(
@@ -625,8 +629,41 @@ async fn chrome_command_exec(
             };
             let log = {
                 let tab_lock = tab.lock().await;
-                let result = tab_lock.headless_tab.evaluate(args.expression.as_str(), false).map_err(|e| e.to_string())?;
-                format!("{:?}", result)
+                match tab_lock.headless_tab.evaluate(args.expression.as_str(), false) {
+                    Ok(result) => {
+                        format!("eval result at {}: {:?}", tab_lock.state_string(), result)
+                    },
+                    Err(e) => {
+                        format!("eval failed at {}: {}", tab_lock.state_string(), e.to_string())
+                    },
+                }
+            };
+            tool_log.push(log);
+        },
+        Command::Styles(args) => {
+            let tab = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                session_get_tab_arc(chrome_session, &args.tab_id).await?
+            };
+            let log = {
+                let tab_lock = tab.lock().await;
+                match {
+                    tab_lock.headless_tab.call_method(DOMEnable(None)).map_err(|e| e.to_string())?;
+                    tab_lock.headless_tab.call_method(CSSEnable(None)).map_err(|e| e.to_string())?;
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    let computed_styles = element.get_computed_styles().map_err(|e| e.to_string())?;
+                    Ok::<String, String>(computed_styles.iter()
+                        .map(|s| format!("{}: {}", s.name, s.value))
+                        .collect::<Vec<String>>().join("\n"))
+                } {
+                    Ok(styles_str) => {
+                        format!("styles for element `{}` at {}:\n{}", args.selector, tab_lock.state_string(), styles_str)
+                    },
+                    Err(e) => {
+                        format!("styles get failed at {}: {}", tab_lock.state_string(), e.to_string())
+                    },
+                }
             };
             tool_log.push(log);
         },
@@ -697,6 +734,12 @@ struct PressKeyAtArgs {
 struct EvalArgs {
     tab_id: String,
     expression: String,
+}
+
+#[derive(Debug)]
+struct StylesArgs {
+    tab_id: String,
+    selector: String,
 }
 
 fn parse_single_command(command: &String) -> Result<Command, String> {
@@ -848,6 +891,19 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 },
                 _ => {
                     Err("Missing one or several arguments `tab_id`, `expression`.".to_string())
+                }
+            }
+        },
+        "styles" => {
+            match parsed_args.as_slice() {
+                [tab_id, selector] => {
+                    Ok(Command::Styles(StylesArgs {
+                        selector: selector.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `selector`.".to_string())
                 }
             }
         },
