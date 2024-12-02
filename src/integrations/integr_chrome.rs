@@ -202,18 +202,18 @@ impl Tool for ToolChrome {
 
     fn tool_description(&self) -> ToolDesc {
         let mut supported_commands = vec![
-            "open_tab <desktop|mobile> <tab_id>",
-            "navigate_to <uri> <tab_id>",
+            "open_tab <tab_id> <desktop|mobile>",
+            "navigate_to <tab_id> <uri>",
             "screenshot <tab_id>",
             // "html <tab_id>",
             "reload <tab_id>",
-            "press_key_at <enter|esc|pageup|pagedown|home|end> <tab_id>",
-            "type_text_at <text> <tab_id>",
+            "press_key_at <tab_id> <enter|esc|pageup|pagedown|home|end>",
+            "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
         ];
         if self.supports_clicks {
             supported_commands.extend(vec![
-                "click_at <x> <y> <tab_id>",
+                "click_at <tab_id> <x> <y>",
             ]);
         }
         let description = format!(
@@ -704,55 +704,75 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
 
     match command_name.as_str() {
         "open_tab" => {
-            if parsed_args.len() < 2 {
-                return Err(format!("`open_tab` requires 2 arguments: `<device|mobile>` and `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [tab_id, device_str] => {
+                    let device = match device_str.as_str() {
+                        "desktop" => DeviceType::DESKTOP,
+                        "mobile" => DeviceType::MOBILE,
+                        _ => return Err(format!("unknown device type: {}. Should be either `desktop` or `mobile`.", parsed_args[0]))
+                    };
+                    Ok(Command::OpenTab(OpenTabArgs {
+                        device: device.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `<device|mobile>`".to_string())
+                }
             }
-            let device = match parsed_args[0].as_str() {
-                "desktop" => DeviceType::DESKTOP,
-                "mobile" => DeviceType::MOBILE,
-                _ => return Err(format!("unknown device type: {}. Should be either `desktop` or `mobile`.", parsed_args[0]))
-            };
-            Ok(Command::OpenTab(OpenTabArgs {
-                device,
-                tab_id: parsed_args[1].clone(),
-            }))
         },
         "navigate_to" => {
-            if parsed_args.len() < 2 {
-                return Err(format!("`navigate_to` requires 2 arguments: `uri` and `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [tab_id, uri] => {
+                    Ok(Command::NavigateTo(NavigateToArgs {
+                        uri: uri.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `uri`".to_string())
+                }
             }
-            Ok(Command::NavigateTo(NavigateToArgs {
-                uri: parsed_args[0].clone(),
-                tab_id: parsed_args[1].clone(),
-            }))
         },
         "screenshot" => {
-            if parsed_args.len() < 1 {
-                return Err(format!("`screenshot` requires 1 argument: `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [tab_id] => {
+                    Ok(Command::Screenshot(ScreenshotArgs {
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`".to_string())
+                }
             }
-            Ok(Command::Screenshot(ScreenshotArgs {
-                tab_id: parsed_args[0].clone(),
-            }))
         },
         "html" => {
-            if parsed_args.len() < 1 {
-                return Err(format!("`html` requires 1 argument: `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [tab_id] => {
+                    Ok(Command::Html(HtmlArgs {
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`".to_string())
+                }
             }
-            Ok(Command::Html(HtmlArgs {
-                tab_id: parsed_args[0].clone(),
-            }))
         },
         "reload" => {
-            if parsed_args.len() < 1 {
-                return Err(format!("`reload` requires 1 argument: `tab_id`. Provided: {:?}", parsed_args));
+            match parsed_args.as_slice() {
+                [tab_id] => {
+                    Ok(Command::Reload(ReloadArgs {
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`".to_string())
+                }
             }
-            Ok(Command::Reload(ReloadArgs {
-                tab_id: parsed_args[0].clone(),
-            }))
         },
         "click_at" => {
             match parsed_args.as_slice() {
-                [x_str, y_str, tab_id] => {
+                [tab_id, x_str, y_str] => {
                     let x = x_str.parse::<f64>().map_err(|e| format!("Failed to parse x: {}", e))?;
                     let y = y_str.parse::<f64>().map_err(|e| format!("Failed to parse y: {}", e))?;
                     let point = Point { x, y };
@@ -762,26 +782,26 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments 'x', 'y', 'tab_id'".to_string())
+                    Err("Missing one or several arguments `tab_id`, `x`, 'y`".to_string())
                 }
             }
         },
         "type_text_at" => {
             match parsed_args.as_slice() {
-                [text, tab_id] => {
+                [tab_id, text] => {
                     Ok(Command::TypeTextAt(TypeTextAtArgs {
                         text: text.clone(),
                         tab_id: tab_id.clone(),
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments 'text', 'tab_id'".to_string())
+                    Err("Missing one or several arguments `tab_id`, `text`".to_string())
                 }
             }
         },
         "press_key_at" => {
             match parsed_args.as_slice() {
-                [key_str, tab_id] => {
+                [tab_id, key_str] => {
                     let key = match key_str.to_lowercase().as_str() {
                         "enter" => Key::ENTER,
                         "esc" => Key::ESC,
@@ -797,7 +817,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments 'key', 'tab_id'".to_string())
+                    Err("Missing one or several arguments `tab_id`, `key`".to_string())
                 }
             }
         },
@@ -809,7 +829,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments 'tab_id'".to_string())
+                    Err("Missing one or several arguments `tab_id`".to_string())
                 }
             }
         },
