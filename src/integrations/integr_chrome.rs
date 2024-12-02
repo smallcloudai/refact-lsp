@@ -210,6 +210,7 @@ impl Tool for ToolChrome {
             "press_key_at <tab_id> <enter|esc|pageup|pagedown|home|end>",
             "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
+            "eval <tab_id> <expression>",
         ];
         if self.supports_clicks {
             supported_commands.extend(vec![
@@ -403,13 +404,14 @@ async fn session_get_tab_arc(
 enum Command {
     OpenTab(OpenTabArgs),
     NavigateTo(NavigateToArgs),
-    Screenshot(ScreenshotArgs),
-    Html(HtmlArgs),
-    Reload(ReloadArgs),
+    Screenshot(TabArgs),
+    Html(TabArgs),
+    Reload(TabArgs),
     ClickAt(ClickAtArgs),
     TypeTextAt(TypeTextAtArgs),
     PressKeyAt(PressKeyAtArgs),
-    TabLog(TabLogArgs),
+    TabLog(TabArgs),
+    Eval(EvalArgs),
 }
 
 async fn chrome_command_exec(
@@ -614,10 +616,28 @@ async fn chrome_command_exec(
             let filter = CmdlineOutputFilter::default();
             let filtered_log = output_mini_postprocessing(&filter, tab_log.as_str());
             tool_log.push(filtered_log.clone());
-        }
+        },
+        Command::Eval(args) => {
+            let tab = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                session_get_tab_arc(chrome_session, &args.tab_id).await?
+            };
+            let log = {
+                let tab_lock = tab.lock().await;
+                let result = tab_lock.headless_tab.evaluate(args.expression.as_str(), false).map_err(|e| e.to_string())?;
+                format!("{:?}", result)
+            };
+            tool_log.push(log);
+        },
     }
 
     Ok((tool_log, multimodal_els))
+}
+
+#[derive(Debug)]
+struct TabArgs {
+    tab_id: String,
 }
 
 #[derive(Debug)]
@@ -629,21 +649,6 @@ struct OpenTabArgs {
 #[derive(Debug)]
 struct NavigateToArgs {
     uri: String,
-    tab_id: String,
-}
-
-#[derive(Debug)]
-struct ScreenshotArgs {
-    tab_id: String,
-}
-
-#[derive(Debug)]
-struct HtmlArgs {
-    tab_id: String,
-}
-
-#[derive(Debug)]
-struct ReloadArgs {
     tab_id: String,
 }
 
@@ -689,9 +694,9 @@ struct PressKeyAtArgs {
 }
 
 #[derive(Debug)]
-struct TabLogArgs {
-    // wait_secs: u32,
+struct EvalArgs {
     tab_id: String,
+    expression: String,
 }
 
 fn parse_single_command(command: &String) -> Result<Command, String> {
@@ -737,7 +742,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         "screenshot" => {
             match parsed_args.as_slice() {
                 [tab_id] => {
-                    Ok(Command::Screenshot(ScreenshotArgs {
+                    Ok(Command::Screenshot(TabArgs {
                         tab_id: tab_id.clone(),
                     }))
                 },
@@ -749,7 +754,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         "html" => {
             match parsed_args.as_slice() {
                 [tab_id] => {
-                    Ok(Command::Html(HtmlArgs {
+                    Ok(Command::Html(TabArgs {
                         tab_id: tab_id.clone(),
                     }))
                 },
@@ -761,7 +766,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         "reload" => {
             match parsed_args.as_slice() {
                 [tab_id] => {
-                    Ok(Command::Reload(ReloadArgs {
+                    Ok(Command::Reload(TabArgs {
                         tab_id: tab_id.clone(),
                     }))
                 },
@@ -824,12 +829,25 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         "tab_log" => {
             match parsed_args.as_slice() {
                 [tab_id] => {
-                    Ok(Command::TabLog(TabLogArgs {
+                    Ok(Command::TabLog(TabArgs {
                         tab_id: tab_id.clone(),
                     }))
                 },
                 _ => {
                     Err("Missing one or several arguments `tab_id`".to_string())
+                }
+            }
+        },
+        "eval" => {
+            match parsed_args.as_slice() {
+                [tab_id, expression] => {
+                    Ok(Command::Eval(EvalArgs {
+                        expression: expression.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `expression`.".to_string())
                 }
             }
         },
