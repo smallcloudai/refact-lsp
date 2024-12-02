@@ -214,10 +214,11 @@ impl Tool for ToolChrome {
             "tab_log <tab_id>",
             "eval <tab_id> <expression>",
             "styles <tab_id> <element_selector>",
+            "click_at_element <tab_id> <element_selector>",
         ];
         if self.supports_clicks {
             supported_commands.extend(vec![
-                "click_at <tab_id> <x> <y>",
+                "click_at_point <tab_id> <x> <y>",
             ]);
         }
         let description = format!(
@@ -410,12 +411,13 @@ enum Command {
     Screenshot(TabArgs),
     Html(TabArgs),
     Reload(TabArgs),
-    ClickAt(ClickAtArgs),
+    ClickAtPoint(ClickAtPointArgs),
+    ClickAtElement(TabElementArgs),
     TypeTextAt(TypeTextAtArgs),
     PressKeyAt(PressKeyAtArgs),
     TabLog(TabArgs),
     Eval(EvalArgs),
-    Styles(StylesArgs),
+    Styles(TabElementArgs),
 }
 
 async fn chrome_command_exec(
@@ -531,7 +533,7 @@ async fn chrome_command_exec(
             };
             tool_log.push(log);
         },
-        Command::ClickAt(args) => {
+        Command::ClickAtPoint(args) => {
             let tab = {
                 let mut chrome_session_locked = chrome_session.lock().await;
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
@@ -553,6 +555,29 @@ async fn chrome_command_exec(
                     },
                     Err(e) => {
                         format!("clicked `{} {}` failed at {}: {}", args.point.x, args.point.y, tab_lock.state_string(), e.to_string())
+                    },
+                }
+            };
+            tool_log.push(log);
+        },
+        Command::ClickAtElement(args) => {
+            let tab = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                session_get_tab_arc(chrome_session, &args.tab_id).await?
+            };
+            let log = {
+                let tab_lock = tab.lock().await;
+                match {
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    element.click().map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                } {
+                    Ok(_) => {
+                        format!("clicked `{}` at {}", args.selector, tab_lock.state_string())
+                    },
+                    Err(e) => {
+                        format!("click at element `{}` failed at {}: {}", args.selector, tab_lock.state_string(), e.to_string())
                     },
                 }
             };
@@ -690,7 +715,7 @@ struct NavigateToArgs {
 }
 
 #[derive(Debug)]
-struct ClickAtArgs {
+struct ClickAtPointArgs {
     point: Point,
     tab_id: String,
 }
@@ -737,7 +762,7 @@ struct EvalArgs {
 }
 
 #[derive(Debug)]
-struct StylesArgs {
+struct TabElementArgs {
     tab_id: String,
     selector: String,
 }
@@ -818,19 +843,32 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 }
             }
         },
-        "click_at" => {
+        "click_at_point" => {
             match parsed_args.as_slice() {
                 [tab_id, x_str, y_str] => {
                     let x = x_str.parse::<f64>().map_err(|e| format!("Failed to parse x: {}", e))?;
                     let y = y_str.parse::<f64>().map_err(|e| format!("Failed to parse y: {}", e))?;
                     let point = Point { x, y };
-                    Ok(Command::ClickAt(ClickAtArgs {
+                    Ok(Command::ClickAtPoint(ClickAtPointArgs {
                         point,
                         tab_id: tab_id.clone(),
                     }))
                 },
                 _ => {
                     Err("Missing one or several arguments `tab_id`, `x`, 'y`".to_string())
+                }
+            }
+        },
+        "click_at_element" => {
+            match parsed_args.as_slice() {
+                [tab_id, selector] => {
+                    Ok(Command::ClickAtElement(TabElementArgs {
+                        selector: selector.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `selector`".to_string())
                 }
             }
         },
@@ -897,7 +935,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         "styles" => {
             match parsed_args.as_slice() {
                 [tab_id, selector] => {
-                    Ok(Command::Styles(StylesArgs {
+                    Ok(Command::Styles(TabElementArgs {
                         selector: selector.clone(),
                         tab_id: tab_id.clone(),
                     }))
