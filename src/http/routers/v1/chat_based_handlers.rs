@@ -148,6 +148,8 @@ Simplify age check logic for accessing permissions by using a single expression
 - Make sure the commit messages are descriptive enough to convey why the change is being made without being too verbose.
 - If applicable, add `Fixes #<issue-number>` or other references to link the commit to specific tickets.
 - Avoid wording: "Updated", "Modified", or "Changed" without explicitly stating *why*—focus on *intent*."#;
+const N_CTX: usize = 32000;
+const TEMPERATURE: f32 = 0.5;
 
 
 fn remove_fencing(message: &String) -> String {
@@ -184,7 +186,7 @@ pub async fn handle_v1_commit_message_from_diff(
     let post = serde_json::from_slice::<CommitMessageFromDiffPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
     if post.diff.is_empty() {
-        return Err(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, "The given diff is empty".to_string()))
+        return Err(ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, "The provided diff is empty".to_string()))
     }
 
     let messages = if let Some(text) = &post.text {
@@ -227,8 +229,8 @@ pub async fn handle_v1_commit_message_from_diff(
 
     let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(
         AtCommandsContext::new(
-            global_context.clone(), 
-            32000, 
+            global_context.clone(),
+            N_CTX, 
             1, 
             false, 
             messages.clone(), 
@@ -244,7 +246,7 @@ pub async fn handle_v1_commit_message_from_diff(
         vec![],
         None,
         false,
-        Some(0.5),
+        Some(TEMPERATURE),
         None,
         1,
         None,
@@ -263,7 +265,7 @@ pub async fn handle_v1_commit_message_from_diff(
         }))
         .flatten()
         .flatten()
-        .ok_or(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "No commit message found".to_string()))?;
+        .ok_or(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, "No commit message was generated".to_string()))?;
     Ok(
         Response::builder()
             .status(StatusCode::OK)
