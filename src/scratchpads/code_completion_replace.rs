@@ -26,7 +26,7 @@ use crate::ast::ast_db::doc_defs;
 use crate::ast::ast_structs::AstDefinition;
 use crate::scratchpads::completon_rag::retrieve_ast_based_extra_context;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 const SYSTEM_PROMPT: &str = r#"You are given a code file, <BLOCK_OF_CODE> from that file and an extra context from other files. 
 An unfinished line in the <BLOCK_OF_CODE> is marked with the <CURSOR>. 
 Your task is to complete the code after the <CURSOR> by rewriting the <BLOCK_OF_CODE> using the provided context and make the <REWRITTEN_BLOCK_OF_CODE>.
