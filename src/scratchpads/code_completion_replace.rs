@@ -199,14 +199,15 @@ async fn prepare_subblock(
     }
 
     if let Some(symbol) = get_cursor_symbol_from_doc(ast_service.clone(), cpath, cursor_pos).await {
-        for idx in symbol.full_line1().saturating_sub(1)..symbol.full_line2() {
+        let min_rows_to_include = 2;
+        for idx in symbol.full_line1().saturating_sub(1)..symbol.full_line2() + 1 {
             let line = file_text.line(idx).to_string();
             tokens_used += tokenizer.count_tokens(&line).unwrap_or(0) as usize;
             if idx < cursor_pos.line as usize {
                 subblock.before_lines.push(line);
             } else if idx > cursor_pos.line as usize {
                 subblock.after_lines_extra.push(line.clone());
-                if tokens_used <= max_tokens {
+                if tokens_used <= max_tokens || subblock.after_lines.len() < min_rows_to_include {
                     subblock.after_lines.push(line);
                 }
             }
@@ -401,7 +402,7 @@ fn process_n_choices(
         .enumerate()
         .map(|(i, x)| {
             if DEBUG {
-                info!("unprocessed {i} response_n_choice\n{:?}", x);
+                info!("unprocessed {i} response_n_choice\n{}", x);
             }
             if finish_reasons[i] == FinishReason::Stop && !x.contains("```") {
                 return json!({
@@ -1030,7 +1031,6 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         info!(" -- /post completion {}ms-- ", completion_ms);
         
         if DEBUG {
-            info!("chat prompt\n{}", prompt);
             info!(
                 "chat re-encode whole prompt again gives {} tokens",
                 self.t.count_tokens(prompt.as_str())?
