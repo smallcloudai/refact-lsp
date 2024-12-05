@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
@@ -58,8 +58,8 @@ enum DeviceType {
     MOBILE,
 }
 
-impl fmt::Display for DeviceType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for DeviceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             DeviceType::DESKTOP => write!(f, "desktop"),
             DeviceType::MOBILE => write!(f, "mobile"),
@@ -138,7 +138,7 @@ impl IntegrationTrait for ToolChrome {
         serde_json::to_value(&self.settings_chrome).unwrap()
     }
 
-    fn integr_upgrade_to_tool(&self, integr_name: &String) -> Box<dyn Tool + Send> {
+    fn integr_upgrade_to_tool(&self, _integr_name: &String) -> Box<dyn Tool + Send> {
         Box::new(ToolChrome {
             settings_chrome: self.settings_chrome.clone(),
             supports_clicks: false,
@@ -173,7 +173,7 @@ impl Tool for ToolChrome {
         };
 
         let session_hashmap_key = get_session_hashmap_key("chrome", &chat_id);
-        let mut tool_log = setup_chrome_session(gcx.clone(), &self.integration_chrome, &session_hashmap_key).await?;
+        let mut tool_log = setup_chrome_session(gcx.clone(), &self.settings_chrome, &session_hashmap_key).await?;
 
         let command_session = {
             let gcx_locked = gcx.read().await;
@@ -691,8 +691,8 @@ enum Key {
     END,
 }
 
-impl fmt::Display for Key {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Key::ENTER => write!(f, "Enter"),
             Key::ESC => write!(f, "Escape"),
@@ -838,53 +838,12 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         _ => Err(format!("Unknown command: {:?}.", command_name)),
     }
 }
-<<<<<<< HEAD
-
-async fn interact_with_chrome(
-    gcx: Arc<ARwLock<GlobalContext>>,
-    chat_id: &String,
-    integration_chrome: &SettingsChrome,
-    command: &Command,
-) -> Result<Vec<MultimodalElement>, String> {
-    let session_hashmap_key = get_session_hashmap_key("chrome", &chat_id);
-    let setup_log = setup_chrome_session(gcx.clone(), &integration_chrome, &session_hashmap_key).await?;
-
-    let command_session = {
-        let gcx_locked = gcx.read().await;
-        gcx_locked.integration_sessions.get(&session_hashmap_key)
-            .ok_or(format!("Error getting chrome session for chat: {}", chat_id))?
-            .clone()
-    };
-    let mut command_session_locked = command_session.lock().await;
-    let chrome_session = command_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
-
-    let (execute_log, mut multimodal_els) = command.execute(chrome_session).await?;
-
-    let tool_log = setup_log.iter().chain(execute_log.iter()).map(|s| s.clone()).collect::<Vec<_>>();
-    multimodal_els.push(MultimodalElement::new(
-        "text".to_string(), tool_log.join("\n")
-    )?);
-
-    Ok(multimodal_els)
-}
-
-async fn screenshot_jpeg_base64(tab: &Arc<Tab>, capture_beyond_viewport: bool) -> Result<MultimodalElement, String> {
-    let jpeg_data = tab.call_method(Page::CaptureScreenshot {
-        format: Some(Page::CaptureScreenshotFormatOption::Jpeg),
-        clip: None,
-        quality: Some(75),
-        from_surface: Some(true),
-        capture_beyond_viewport: Some(capture_beyond_viewport),
-    }).map_err(|e| e.to_string())?.data;
-
-    MultimodalElement::new("image/jpeg".to_string(), jpeg_data)
-}
 
 const CHROME_INTEGRATION_SCHEMA: &str = r#"
 fields:
   chrome_path:
     f_type: string_long
-    f_desc: "Path to your chrome binary. You can install with "npx @puppeteer/browsers install chrome@stable", read more here https://developer.chrome.com/blog/chrome-for-testing. You can also give it ws:// path, in that case start chrome with --remote-debugging-port, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server"
+    f_desc: "Path to your chrome binary. You can install with \"npx @puppeteer/browsers install chrome@stable\", read more here https://developer.chrome.com/blog/chrome-for-testing. You can also give it ws:// path, in that case start chrome with --remote-debugging-port, read more here https://developer.chrome.com/docs/devtools/remote-debugging/local-server"
     f_placeholder: "/Users/me/my_path/chrome/mac_arm-130.0.6723.69/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing or ws://127.0.0.1:4444/"
   window_width:
     f_type: string_short
@@ -901,7 +860,7 @@ fields:
   headless:
     f_type: bool
     f_desc: "Run Chrome in headless mode."
-    f_default: true
+    f_default: "true"
 available:
   on_your_laptop_possible: true
   when_isolated_possible: true
@@ -916,7 +875,7 @@ docker:
   filter_image: "standalone-chrome"
   new_container_default:
     image: "selenium/standalone-chrome:latest"
-    environment: []
+    environment: {}
   smartlinks:
     - sl_label: "Add Chrome Container"
       sl_chat:
