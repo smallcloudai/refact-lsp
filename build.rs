@@ -9,7 +9,6 @@ fn main() -> shadow_rs::SdResult<()> {
     let output_file_path = format!("{}/available_icons.rs", out_dir);
     let mut output_file = File::create(&output_file_path).expect("Failed to create output file");
 
-    // Write the preamble for the generated file
     writeln!(
         output_file,
         "use std::collections::HashMap;\n\npub fn get_available_icons() -> HashMap<&'static str, &'static [u8]> {{\n    let mut icons = HashMap::new();"
@@ -29,7 +28,6 @@ fn main() -> shadow_rs::SdResult<()> {
 
             let constant_name = format!("{}_ICON_BYTES", file_stem.to_uppercase());
 
-            // Write the constant definition
             writeln!(
                 output_file,
                 "    pub const {}: &[u8] = &{:?};",
@@ -37,7 +35,6 @@ fn main() -> shadow_rs::SdResult<()> {
             )
                 .expect("Failed to write constant definition");
 
-            // Add the constant to the HashMap
             writeln!(
                 output_file,
                 "    icons.insert(\"{}.png\", {});",
@@ -47,7 +44,6 @@ fn main() -> shadow_rs::SdResult<()> {
         }
     }
 
-    // Close the function and finalize the HashMap
     writeln!(output_file, "    icons\n}}").expect("Failed to write closing brace");
 
     shadow_rs::new()
