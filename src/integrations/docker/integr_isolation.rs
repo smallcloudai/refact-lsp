@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
-use shadow_rs::str_replace;
+
 use crate::integrations::docker::integr_docker::{serialize_num_to_str, deserialize_str_to_num};
 use crate::integrations::docker::docker_container_manager::Port;
 use crate::integrations::integr_abstract::IntegrationTrait;
@@ -69,7 +69,7 @@ impl IntegrationTrait for IntegrationIsolation {
     }
 }
 
-pub const ISOLATION_INTEGRATION_SCHEMA_PREFIX: &str = r#"
+pub const ISOLATION_INTEGRATION_SCHEMA: &str = r#"
 fields:
   container_workspace_folder:
     f_type: string_long
@@ -96,15 +96,4 @@ available:
   on_your_laptop_possible: true
   when_isolated_possible: false
 smartlinks: []
-icon:
-  f_type: string
-  f_desc: "Base64-encoded icon."
-  f_default: "{{BASE64_IMAGE}}"
 "#;
-
-pub const ISOLATION_INTEGRATION_SCHEMA: &str = {
-    mod generated {
-        include!(concat!(env!("OUT_DIR"), "/docker_icon.rs"));
-    }
-    str_replace!(ISOLATION_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::DOCKER_ICON_BASE64)
-};

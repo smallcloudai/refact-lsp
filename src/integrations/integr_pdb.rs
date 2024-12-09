@@ -339,20 +339,8 @@ fn format_error(error_title: &str, error: &str) -> String
     }
 }
 
-const PDB_INTEGRATION_SCHEMA_PREFIX: &str = r#"
+const DEFAULT_PDB_INTEGRATION_YAML: &str = r#"
 # Python debugger
 
 # python_path: "/opt/homebrew/bin/python3"  # Uncomment to set a custom python path, defaults to "python3"
-
-icon:
-  f_type: string
-  f_desc: "Base64-encoded icon."
-  f_default: "{{BASE64_IMAGE}}"
 "#;
-
-pub const PDB_INTEGRATION_SCHEMA: &str = {
-    mod generated {
-        include!(concat!(env!("OUT_DIR"), "/pdb_icon.rs"));
-    }
-    str_replace!(PDB_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::PDB_ICON_BASE64)
-};

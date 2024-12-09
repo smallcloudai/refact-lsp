@@ -5,7 +5,6 @@ use tokio::sync::Mutex as AMutex;
 use serde::Deserialize;
 use serde::Serialize;
 use async_trait::async_trait;
-use shadow_rs::str_replace;
 use tokio::process::Command;
 use tracing::info;
 
@@ -240,7 +239,7 @@ impl Tool for ToolCmdline {
     }
 }
 
-pub const CMDLINE_INTEGRATION_SCHEMA_PREFIX: &str = r#"
+pub const CMDLINE_INTEGRATION_SCHEMA: &str = r#"
 fields:
   command:
     f_type: string_long
@@ -270,15 +269,4 @@ description: |
 available:
   on_your_laptop_possible: true
   when_isolated_possible: true
-icon:
-  f_type: string
-  f_desc: "Base64-encoded icon."
-  f_default: "{{BASE64_IMAGE}}"
 "#;
-
-pub const CMDLINE_INTEGRATION_SCHEMA: &str = {
-    mod generated {
-        include!(concat!(env!("OUT_DIR"), "/cmdline_icon.rs"));
-    }
-    str_replace!(CMDLINE_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::CMDLINE_ICON_BASE64)
-};

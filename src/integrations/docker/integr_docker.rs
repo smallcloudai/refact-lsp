@@ -5,7 +5,7 @@ use tokio::sync::{Mutex as AMutex, RwLock as ARwLock};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shadow_rs::str_replace;
+
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ContextEnum};
 use crate::global_context::GlobalContext;
@@ -264,7 +264,7 @@ fn command_append_label_if_creates_resource(command_args: &mut Vec<String>, labe
     }
 }
 
-pub const DOCKER_INTEGRATION_SCHEMA_PREFIX: &str = r#"
+pub const DOCKER_INTEGRATION_SCHEMA: &str = r#"
 fields:
   label:
     f_type: string_short
@@ -309,14 +309,4 @@ smartlinks:
         content: |
           🔧 The docker tool should be visible now. To test the tool, list the running containers, briefly describe the containers and express
           satisfaction and relief if it works, and change nothing. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
-icon:
-  f_type: string
-  f_desc: "Base64-encoded icon."
-  f_default: "{{BASE64_IMAGE}}"
 "#;
-pub const DOCKER_INTEGRATION_SCHEMA: &str = {
-    mod generated {
-        include!(concat!(env!("OUT_DIR"), "/docker_icon.rs"));
-    }
-    str_replace!(DOCKER_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::DOCKER_ICON_BASE64)
-};

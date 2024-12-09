@@ -32,7 +32,7 @@ use base64::Engine;
 use std::io::Cursor;
 use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
-use shadow_rs::str_replace;
+
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SettingsChrome {
@@ -840,7 +840,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
     }
 }
 
-const CHROME_INTEGRATION_SCHEMA_PREFIX: &str = r#"
+const CHROME_INTEGRATION_SCHEMA: &str = r#"
 fields:
   chrome_path:
     f_type: string_long
@@ -903,14 +903,4 @@ docker:
         - role: "user"
           content: |
             🔧 Your job is to modify chrome config in the current file to connect through websockets to the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
-icon:
-  f_type: string
-  f_desc: "Base64-encoded icon."
-  f_default: "{{BASE64_IMAGE}}"
 "#;
-pub const CHROME_INTEGRATION_SCHEMA: &str = {
-    mod generated {
-        include!(concat!(env!("OUT_DIR"), "/chrome_icon.rs"));
-    }
-    str_replace!(CHROME_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::CHROME_ICON_BASE64)
-};
