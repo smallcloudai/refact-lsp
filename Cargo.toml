@@ -17,7 +17,6 @@ vecdb = ["arrow", "arrow-array", "arrow-schema", "lance", "vectordb"]
 
 [build-dependencies]
 shadow-rs = "0.36.0"
-base64 = "0.22.1"
 
 [dependencies]
 sled = { version = "0.34", default-features = false, features = [] }
