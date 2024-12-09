@@ -19,7 +19,6 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 
 use tokio::time::sleep;
 use chrono::DateTime;
-use reqwest::Client;
 use std::path::PathBuf;
 use headless_chrome::{Browser, LaunchOptions, Tab as HeadlessTab};
 use headless_chrome::browser::tab::point::Point;
@@ -229,14 +228,15 @@ impl Tool for ToolChrome {
         let mut supported_commands = vec![
             "open_tab <tab_id> <desktop|mobile>",
             "navigate_to <tab_id> <uri>",
+            "scroll_to <tab_id> <element_selector>",
             "screenshot <tab_id>",
-            // "html <tab_id>",
+            "html <tab_id> <element_selector>",
             "reload <tab_id>",
             "press_key_at <tab_id> <enter|esc|pageup|pagedown|home|end>",
             "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
             "eval <tab_id> <expression>",
-            "styles <tab_id> <element_selector>",
+            "styles <tab_id> <element_selector> <property_filter>",
             "click_at_element <tab_id> <element_selector>",
         ];
         if self.supports_clicks {
@@ -311,7 +311,7 @@ async fn setup_chrome_session(
             path,
             window_size,
             idle_browser_timeout,
-            headless: args.headless.parse::<bool>().unwrap_or(true),
+            headless: args.headless.parse::<bool>().unwrap_or(false),
             ..Default::default()
         };
        
@@ -437,8 +437,9 @@ async fn session_get_tab_arc(
 enum Command {
     OpenTab(OpenTabArgs),
     NavigateTo(NavigateToArgs),
+    ScrollTo(TabElementArgs),
     Screenshot(TabArgs),
-    Html(TabArgs),
+    Html(TabElementArgs),
     Reload(TabArgs),
     ClickAtPoint(ClickAtPointArgs),
     ClickAtElement(TabElementArgs),
@@ -446,7 +447,7 @@ enum Command {
     PressKeyAt(PressKeyAtArgs),
     TabLog(TabArgs),
     Eval(EvalArgs),
-    Styles(TabElementArgs),
+    Styles(StylesArgs),
 }
 
 async fn chrome_command_exec(
@@ -488,6 +489,29 @@ async fn chrome_command_exec(
             };
             tool_log.push(log);
         },
+        Command::ScrollTo(args) => {
+            let tab: Arc<AMutex<ChromeTab>> = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                session_get_tab_arc(chrome_session, &args.tab_id).await?
+            };
+            let log = {
+                let tab_lock = tab.lock().await;
+                match {
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    element.scroll_into_view().map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                } {
+                    Ok(_) => {
+                        format!("scroll_to `{}` successful: {}.", args.selector, tab_lock.state_string())
+                    },
+                    Err(e) => {
+                        format!("scroll_to `{}` failed: {}.", args.selector, e.to_string())
+                    },
+                }
+            };
+            tool_log.push(log);
+        },
         Command::Screenshot(args) => {
             let tab = {
                 let mut chrome_session_locked = chrome_session.lock().await;
@@ -511,7 +535,6 @@ async fn chrome_command_exec(
             tool_log.push(log);
         },
         Command::Html(args) => {
-            // NOTE: removed from commands list, please rewrite me...
             let tab = {
                 let mut chrome_session_locked = chrome_session.lock().await;
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
@@ -519,18 +542,13 @@ async fn chrome_command_exec(
             };
             let log = {
                 let tab_lock = tab.lock().await;
-                let url = tab_lock.headless_tab.get_url();
                 match {
-                    let client = Client::builder()
-                        .build()
-                        .map_err(|e| e.to_string())?;
-                    let response = client.get(url.clone()).send().await.map_err(|e| e.to_string())?;
-                    if response.status().is_success() {
-                        let html = response.text().await.map_err(|e| e.to_string())?;
-                        Ok(html)
-                    } else {
-                        Err(format!("status: {}", response.status()))
-                    }
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    // TODO: filter out html
+                    let html = element
+                        .call_js_fn("function() { return this.innerHTML }", vec![], false)
+                        .map_err(|e| e.to_string())?.value.unwrap();
+                    Ok::<String, String>(String::from(html.as_str().unwrap()))
                 } {
                     Ok(html) => {
                         format!("innerHtml of {}:\n\n{}", tab_lock.state_string(), html)
@@ -707,15 +725,26 @@ async fn chrome_command_exec(
                     tab_lock.headless_tab.call_method(CSSEnable(None)).map_err(|e| e.to_string())?;
                     let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
                     let computed_styles = element.get_computed_styles().map_err(|e| e.to_string())?;
-                    Ok::<String, String>(computed_styles.iter()
+                    let mut styles_filtered = computed_styles.iter()
+                        .filter(|s| s.name.contains(args.property_filter.as_str()))
                         .map(|s| format!("{}: {}", s.name, s.value))
-                        .collect::<Vec<String>>().join("\n"))
+                        .collect::<Vec<String>>();
+                    let max_lines_output = 30;
+                    if styles_filtered.len() > max_lines_output {
+                        let skipped_message = format!("Skipped {} properties. Specify filter if you need to see more.", styles_filtered.len() - max_lines_output);
+                        styles_filtered = styles_filtered[..max_lines_output].to_vec();
+                        styles_filtered.push(skipped_message)
+                    }
+                    if styles_filtered.is_empty() {
+                        styles_filtered.push("No properties for given filter.".to_string());
+                    }
+                    Ok::<String, String>(styles_filtered.join("\n"))
                 } {
                     Ok(styles_str) => {
-                        format!("styles for element `{}` at {}:\n{}", args.selector, tab_lock.state_string(), styles_str)
+                        format!("Style properties for element `{}` at {}:\n{}", args.selector, tab_lock.state_string(), styles_str)
                     },
                     Err(e) => {
-                        format!("styles get failed at {}: {}", tab_lock.state_string(), e.to_string())
+                        format!("Styles get failed at {}: {}", tab_lock.state_string(), e.to_string())
                     },
                 }
             };
@@ -796,6 +825,13 @@ struct TabElementArgs {
     selector: String,
 }
 
+#[derive(Debug)]
+struct StylesArgs {
+    tab_id: String,
+    selector: String,
+    property_filter: String,
+}
+
 fn parse_single_command(command: &String) -> Result<Command, String> {
     let args = shell_words::split(&command).map_err(|e| e.to_string())?;
     if args.is_empty() {
@@ -836,6 +872,19 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 }
             }
         },
+        "scroll_to" => {
+            match parsed_args.as_slice() {
+                [tab_id, selector] => {
+                    Ok(Command::ScrollTo(TabElementArgs {
+                        selector: selector.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `selector`".to_string())
+                }
+            }
+        },
         "screenshot" => {
             match parsed_args.as_slice() {
                 [tab_id] => {
@@ -850,13 +899,14 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         },
         "html" => {
             match parsed_args.as_slice() {
-                [tab_id] => {
-                    Ok(Command::Html(TabArgs {
+                [tab_id, selector] => {
+                    Ok(Command::Html(TabElementArgs {
+                        selector: selector.clone(),
                         tab_id: tab_id.clone(),
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments `tab_id`".to_string())
+                    Err("Missing one or several arguments `tab_id`, `selector`".to_string())
                 }
             }
         },
@@ -963,10 +1013,11 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         },
         "styles" => {
             match parsed_args.as_slice() {
-                [tab_id, selector] => {
-                    Ok(Command::Styles(TabElementArgs {
+                [tab_id, selector, property_filter] => {
+                    Ok(Command::Styles(StylesArgs {
                         selector: selector.clone(),
                         tab_id: tab_id.clone(),
+                        property_filter: property_filter.clone(),
                     }))
                 },
                 _ => {
