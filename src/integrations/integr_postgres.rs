@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use shadow_rs::str_replace;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
 use crate::integrations::integr_abstract::IntegrationTrait;
@@ -178,7 +179,7 @@ impl Tool for ToolPostgres {
 // "#;
 
 
-pub const POSTGRES_INTEGRATION_SCHEMA: &str = r#"
+pub const POSTGRES_INTEGRATION_SCHEMA_PREFIX: &str = r#"
 fields:
   host:
     f_type: string_long
@@ -249,6 +250,16 @@ docker:
         - role: "user"
           content: |
             🔧 Your job is to modify postgres connection config in the current file to match the variables from the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
+icon:
+  f_type: string
+  f_desc: "Base64-encoded icon."
+  f_default: "{{BASE64_IMAGE}}"
 "#;
-
 // To think about: PGPASSWORD PGHOST PGUSER PGPORT PGDATABASE maybe tell the model to set that in variables.yaml as well
+
+pub const POSTGRES_INTEGRATION_SCHEMA: &str = {
+    mod generated {
+        include!(concat!(env!("OUT_DIR"), "/postgres_icon.rs"));
+    }
+    str_replace!(POSTGRES_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::POSTGRES_ICON_BASE64)
+};

@@ -146,9 +146,21 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
     Ok(parsed_args)
 }
 
-const DEFAULT_GITHUB_INTEGRATION_YAML: &str = r#"
+const GITHUB_INTEGRATION_SCHEMA_PREFIX: &str = r#"
 # GitHub integration
 
 # GH_TOKEN: "GH_xxx"                      # To get a token, check out https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
 # gh_binary_path: "/opt/homebrew/bin/gh"  # Uncomment to set a custom path for the gh binary, defaults to "gh"
+
+icon:
+  f_type: string
+  f_desc: "Base64-encoded icon."
+  f_default: "{{BASE64_IMAGE}}"
 "#;
+
+pub const GITHUB_INTEGRATION_SCHEMA: &str = {
+    mod generated {
+        include!(concat!(env!("OUT_DIR"), "/github_icon.rs"));
+    }
+    str_replace!(GITHUB_INTEGRATION_SCHEMA_PREFIX, "{{BASE64_IMAGE}}", generated::GITHUB_ICON_BASE64)
+};
