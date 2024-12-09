@@ -13,7 +13,6 @@ use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::integrations::go_to_configuration_message;
 use crate::tools::tool_patch_aux::tickets_parsing::get_tickets_from_messages;
-use crate::agentic::generate_follow_up_message::generate_follow_up_message;
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct LinksPost {
@@ -161,23 +160,23 @@ pub async fn handle_v1_links(
         });
     }
 
-    // hmm maybe (post.meta.chat_mode == ChatMode::EXPLORE || post.meta.chat_mode == ChatMode::AGENT)
-    if post.meta.chat_mode != ChatMode::NO_TOOLS && links.is_empty() && post.messages.len() > 2 {
-        let follow_up_messages: Vec<String> = generate_follow_up_message(post.messages.clone(), gcx.clone(), &post.model_name, &post.meta.chat_id).await
-            .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error generating follow-up message: {}", e)))?;
-        for follow_up_message in follow_up_messages {
-            tracing::info!("follow-up {:?}", follow_up_message);
+    let last_user_idx = post.messages.iter().rposition(|m| m.role == "user").unwrap_or_default();
+    let last_assistant_idx = post.messages.iter().rposition(|m| m.role == "assistant").unwrap_or_default();
+
+    if last_assistant_idx > last_user_idx {
+        if let Some(proposed_continuation) = regex::Regex::new(r"🔄PROPOSED_CONTINUATION ```(.*?)```").unwrap()
+            .captures(&post.messages[last_assistant_idx].content.content_text_only())
+            .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        {
             links.push(Link {
                 action: LinkAction::FollowUp,
-                text: follow_up_message,
+                text: proposed_continuation,
                 goto: None,
                 current_config_file: None,
-                link_tooltip: format!(""),
+                link_tooltip: String::new(),
             });
         }
     }
-
-    tracing::info!("generated links2: {:?}", links);
 
     Ok(Response::builder()
         .status(StatusCode::OK)
