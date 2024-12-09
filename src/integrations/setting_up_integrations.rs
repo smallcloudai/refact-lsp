@@ -9,7 +9,6 @@ use tokio::fs as async_fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::global_context::GlobalContext;
-use crate::integrations::IntegrationInfo;
 // use crate::tools::tools_description::Tool;
 // use crate::yaml_configs::create_configs::{integrations_enabled_cfg, read_yaml_into_value};
 
@@ -32,7 +31,6 @@ pub struct IntegrationRecord {
     pub when_isolated: bool,
     #[serde(skip_serializing)]
     pub config_unparsed: serde_json::Value,
-    pub experimental: bool,
 }
 
 #[derive(Serialize, Default)]
@@ -46,7 +44,7 @@ pub fn read_integrations_d(
     global_config_dir: &PathBuf,
     integrations_yaml_path: &String,
     vars_for_replacements: &HashMap<String, String>,
-    lst: &Vec<IntegrationInfo>,
+    lst: &[&str],
     error_log: &mut Vec<YamlError>,
 ) -> Vec<IntegrationRecord> {
     let mut result = Vec::new();
@@ -61,8 +59,8 @@ pub fn read_integrations_d(
     for project_config_dir in project_config_dirs {
         // Read config_folder/integr_name.yaml and make a record, even if the file doesn't exist
         let config_dir = if project_config_dir == "" { global_config_dir.clone() } else { PathBuf::from(project_config_dir.clone()) };
-        for integr in lst.iter() {
-            let path_str = join_config_path(&config_dir, &integr.name);
+        for integr_name in lst.iter() {
+            let path_str = join_config_path(&config_dir, integr_name);
             let path = PathBuf::from(path_str.clone());
             let (_integr_name, project_path) = match split_path_into_project_and_integration(&path) {
                 Ok(x) => x,
@@ -71,7 +69,7 @@ pub fn read_integrations_d(
                     continue;
                 }
             };
-            files_to_read.push((path_str, integr.clone(), project_path));
+            files_to_read.push((path_str, integr_name.to_string(), project_path));
         }
         // Find special files that start with cmdline_* and service_*
         if let Ok(entries) = fs::read_dir(config_dir.join("integrations.d")) {
@@ -85,20 +83,19 @@ pub fn read_integrations_d(
                 }
                 let file_name_str_no_yaml = file_name_str.trim_end_matches(".yaml").to_string();
                 if file_name_str.starts_with("cmdline_") || file_name_str.starts_with("service_") {
-                    files_to_read.push((entry.path().to_string_lossy().to_string(), IntegrationInfo {name: file_name_str_no_yaml.to_string(), experimental: false}, project_config_dir.clone()));
+                    files_to_read.push((entry.path().to_string_lossy().to_string(), file_name_str_no_yaml.to_string(), project_config_dir.clone()));
                 }
             }
         }
     }
 
-    for (path_str, integr, project_path) in files_to_read {
+    for (path_str, integr_name, project_path) in files_to_read {
         let path = PathBuf::from(&path_str);
         // let short_pp = if project_path.is_empty() { format!("global") } else { crate::nicer_logs::last_n_chars(&project_path, 15) };
         let mut rec: IntegrationRecord = Default::default();
         rec.project_path = project_path.clone();
-        rec.integr_name = integr.name.clone();
+        rec.integr_name = integr_name.clone();
         rec.icon_path = format!("/integration-icon/{integr_name}.png");
-        rec.experimental = integr.experimental;
         rec.integr_config_path = path_str.clone();
         rec.integr_config_exists = path.exists();
         if rec.integr_config_exists {
@@ -152,12 +149,11 @@ pub fn read_integrations_d(
                                     rec.config_unparsed = serde_json::to_value(value.clone()).unwrap();
                                     result.push(rec);
                                     tracing::info!("{} detected prefix `{}`", short_yaml, key_str);
-                                } else if let Some(integr_info) = lst.iter().find(|info| info.name == key_str) {
+                                } else if lst.contains(&key_str) {
                                     let mut rec: IntegrationRecord = Default::default();
                                     rec.integr_config_path = integrations_yaml_path.clone();
                                     rec.integr_name = key_str.to_string();
                                     rec.icon_path = format!("/integration-icon/{key_str}.png");
-                                    rec.experimental = integr_info.experimental;
                                     rec.integr_config_exists = true;
                                     rec.config_unparsed = serde_json::to_value(value.clone()).unwrap();
                                     result.push(rec);
@@ -300,7 +296,7 @@ pub async fn integrations_all(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> IntegrationResult {
     let (config_dirs, global_config_dir) = get_config_dirs(gcx.clone()).await;
-    let lst = crate::integrations::integrations_list();
+    let lst: Vec<&str> = crate::integrations::integrations_list();
     let mut error_log: Vec<YamlError> = Vec::new();
     let integrations_yaml_path = get_integrations_yaml_path(gcx.clone()).await;
     let vars_for_replacements = get_vars_for_replacements(gcx.clone()).await;
@@ -434,8 +430,8 @@ mod tests {
     #[tokio::test]
     async fn test_integration_schemas() {
         let integrations = crate::integrations::integrations_list();
-        for integr_info in integrations {
-            let integration_box = crate::integrations::integration_from_name(&integr_info.name).unwrap();
+        for name in integrations {
+            let integration_box = crate::integrations::integration_from_name(name).unwrap();
             let schema_json = {
                 let y: serde_yaml::Value = serde_yaml::from_str(integration_box.integr_schema()).unwrap();
                 let j = serde_json::to_value(y).unwrap();
@@ -448,9 +444,9 @@ mod tests {
             let schema_struct_yaml = serde_json::to_value(&schema_struct).unwrap();
             let compare_me2 = serde_yaml::to_string(&schema_struct_yaml).unwrap();
             if compare_me1 != compare_me2 {
-                eprintln!("schema mismatch for integration `{}`:\nOriginal:\n{}\nSerialized:\n{}", integr_info.name, compare_me1, compare_me2);
-                let original_file_path = format!("/tmp/original_schema_{}.yaml", integr_info.name);
-                let serialized_file_path = format!("/tmp/serialized_schema_{}.yaml", integr_info.name);
+                eprintln!("schema mismatch for integration `{}`:\nOriginal:\n{}\nSerialized:\n{}", name, compare_me1, compare_me2);
+                let original_file_path = format!("/tmp/original_schema_{}.yaml", name);
+                let serialized_file_path = format!("/tmp/serialized_schema_{}.yaml", name);
                 let mut original_file = File::create(&original_file_path).unwrap();
                 let mut serialized_file = File::create(&serialized_file_path).unwrap();
                 original_file.write_all(compare_me1.as_bytes()).unwrap();

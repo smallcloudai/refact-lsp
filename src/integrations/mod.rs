@@ -65,23 +65,18 @@ pub fn icon_from_name(_n: &str) -> String
     return "".to_string();
 }
 
-#[derive(Clone)]
-pub struct IntegrationInfo {
-    pub name: String,
-    pub experimental: bool,
-}
-
-pub fn integrations_list() -> Vec<IntegrationInfo> {
+pub fn integrations_list() -> Vec<&'static str> {
     vec![
-        // IntegrationInfo { name: "github".to_string(), experimental: false },
-        // IntegrationInfo { name: "gitlab".to_string(), experimental: false },
-        // IntegrationInfo { name: "pdb".to_string(), experimental: false },
-        IntegrationInfo { name: "postgres".to_string(), experimental: false },
-        // IntegrationInfo { name: "chrome".to_string(), experimental: false },
-        IntegrationInfo { name: "cmdline_TEMPLATE".to_string(), experimental: false },
-        IntegrationInfo { name: "service_TEMPLATE".to_string(), experimental: false },
-        IntegrationInfo { name: "docker".to_string(), experimental: false },
-        IntegrationInfo { name: "isolation".to_string(), experimental: true },
+        // "github",
+        // "gitlab",
+        // "pdb",
+        "postgres",
+        "chrome",
+        "cmdline_TEMPLATE",
+        "service_TEMPLATE",
+        // "chrome",
+        "docker",
+        "isolation"
     ]
 }
 

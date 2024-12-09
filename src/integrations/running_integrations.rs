@@ -33,7 +33,7 @@ pub async fn load_integrations(
     let integrations_yaml_path = crate::integrations::setting_up_integrations::get_integrations_yaml_path(gcx.clone()).await;
 
     let mut error_log: Vec<crate::integrations::setting_up_integrations::YamlError> = Vec::new();
-    let lst = crate::integrations::integrations_list();
+    let lst: Vec<&str> = crate::integrations::integrations_list();
     let vars_for_replacements = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone()).await;
     let records = crate::integrations::setting_up_integrations::read_integrations_d(&config_dirs, &global_config_dir, &integrations_yaml_path, &vars_for_replacements, &lst, &mut error_log);
 
