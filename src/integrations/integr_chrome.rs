@@ -236,7 +236,7 @@ impl Tool for ToolChrome {
             "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
             "eval <tab_id> <expression>",
-            "styles <tab_id> <element_selector>",
+            "styles <tab_id> <element_selector> <property_filter>",
             "click_at_element <tab_id> <element_selector>",
         ];
         if self.supports_clicks {
@@ -446,7 +446,7 @@ enum Command {
     PressKeyAt(PressKeyAtArgs),
     TabLog(TabArgs),
     Eval(EvalArgs),
-    Styles(TabElementArgs),
+    Styles(StylesArgs),
 }
 
 async fn chrome_command_exec(
@@ -707,15 +707,26 @@ async fn chrome_command_exec(
                     tab_lock.headless_tab.call_method(CSSEnable(None)).map_err(|e| e.to_string())?;
                     let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
                     let computed_styles = element.get_computed_styles().map_err(|e| e.to_string())?;
-                    Ok::<String, String>(computed_styles.iter()
+                    let mut styles_filtered = computed_styles.iter()
+                        .filter(|s| s.name.contains(args.property_filter.as_str()))
                         .map(|s| format!("{}: {}", s.name, s.value))
-                        .collect::<Vec<String>>().join("\n"))
+                        .collect::<Vec<String>>();
+                    let max_lines_output = 30;
+                    if styles_filtered.len() > max_lines_output {
+                        let skipped_message = format!("Skipped {} properties. Specify filter if you need to see more.", styles_filtered.len() - max_lines_output);
+                        styles_filtered = styles_filtered[..max_lines_output].to_vec();
+                        styles_filtered.push(skipped_message)
+                    }
+                    if styles_filtered.is_empty() {
+                        styles_filtered.push("No properties for given filter.".to_string());
+                    }
+                    Ok::<String, String>(styles_filtered.join("\n"))
                 } {
                     Ok(styles_str) => {
-                        format!("styles for element `{}` at {}:\n{}", args.selector, tab_lock.state_string(), styles_str)
+                        format!("Style properties for element `{}` at {}:\n{}", args.selector, tab_lock.state_string(), styles_str)
                     },
                     Err(e) => {
-                        format!("styles get failed at {}: {}", tab_lock.state_string(), e.to_string())
+                        format!("Styles get failed at {}: {}", tab_lock.state_string(), e.to_string())
                     },
                 }
             };
@@ -794,6 +805,13 @@ struct EvalArgs {
 struct TabElementArgs {
     tab_id: String,
     selector: String,
+}
+
+#[derive(Debug)]
+struct StylesArgs {
+    tab_id: String,
+    selector: String,
+    property_filter: String,
 }
 
 fn parse_single_command(command: &String) -> Result<Command, String> {
@@ -963,10 +981,11 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         },
         "styles" => {
             match parsed_args.as_slice() {
-                [tab_id, selector] => {
-                    Ok(Command::Styles(TabElementArgs {
+                [tab_id, selector, property_filter] => {
+                    Ok(Command::Styles(StylesArgs {
                         selector: selector.clone(),
                         tab_id: tab_id.clone(),
+                        property_filter: property_filter.clone(),
                     }))
                 },
                 _ => {
