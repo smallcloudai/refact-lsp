@@ -229,6 +229,7 @@ impl Tool for ToolChrome {
         let mut supported_commands = vec![
             "open_tab <tab_id> <desktop|mobile>",
             "navigate_to <tab_id> <uri>",
+            "scroll_to <tab_id> <element_selector>",
             "screenshot <tab_id>",
             // "html <tab_id>",
             "reload <tab_id>",
@@ -437,6 +438,7 @@ async fn session_get_tab_arc(
 enum Command {
     OpenTab(OpenTabArgs),
     NavigateTo(NavigateToArgs),
+    ScrollTo(TabElementArgs),
     Screenshot(TabArgs),
     Html(TabArgs),
     Reload(TabArgs),
@@ -483,6 +485,29 @@ async fn chrome_command_exec(
                     },
                     Err(e) => {
                         format!("navigate_to `{}` failed: {}. If you're trying to open a local file, add a file:// prefix.", args.uri, e.to_string())
+                    },
+                }
+            };
+            tool_log.push(log);
+        },
+        Command::ScrollTo(args) => {
+            let tab: Arc<AMutex<ChromeTab>> = {
+                let mut chrome_session_locked = chrome_session.lock().await;
+                let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
+                session_get_tab_arc(chrome_session, &args.tab_id).await?
+            };
+            let log = {
+                let tab_lock = tab.lock().await;
+                match {
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    element.scroll_into_view().map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                } {
+                    Ok(_) => {
+                        format!("scroll_to `{}` successful: {}.", args.selector, tab_lock.state_string())
+                    },
+                    Err(e) => {
+                        format!("scroll_to `{}` failed: {}.", args.selector, e.to_string())
                     },
                 }
             };
@@ -851,6 +876,19 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 },
                 _ => {
                     Err("Missing one or several arguments `tab_id`, `uri`".to_string())
+                }
+            }
+        },
+        "scroll_to" => {
+            match parsed_args.as_slice() {
+                [tab_id, selector] => {
+                    Ok(Command::ScrollTo(TabElementArgs {
+                        selector: selector.clone(),
+                        tab_id: tab_id.clone(),
+                    }))
+                },
+                _ => {
+                    Err("Missing one or several arguments `tab_id`, `selector`".to_string())
                 }
             }
         },
