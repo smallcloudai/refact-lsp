@@ -19,7 +19,6 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 
 use tokio::time::sleep;
 use chrono::DateTime;
-use reqwest::Client;
 use std::path::PathBuf;
 use headless_chrome::{Browser, LaunchOptions, Tab as HeadlessTab};
 use headless_chrome::browser::tab::point::Point;
@@ -231,7 +230,7 @@ impl Tool for ToolChrome {
             "navigate_to <tab_id> <uri>",
             "scroll_to <tab_id> <element_selector>",
             "screenshot <tab_id>",
-            // "html <tab_id>",
+            "html <tab_id> <element_selector>",
             "reload <tab_id>",
             "press_key_at <tab_id> <enter|esc|pageup|pagedown|home|end>",
             "type_text_at <tab_id> <text>",
@@ -312,7 +311,7 @@ async fn setup_chrome_session(
             path,
             window_size,
             idle_browser_timeout,
-            headless: args.headless.parse::<bool>().unwrap_or(true),
+            headless: args.headless.parse::<bool>().unwrap_or(false),
             ..Default::default()
         };
        
@@ -440,7 +439,7 @@ enum Command {
     NavigateTo(NavigateToArgs),
     ScrollTo(TabElementArgs),
     Screenshot(TabArgs),
-    Html(TabArgs),
+    Html(TabElementArgs),
     Reload(TabArgs),
     ClickAtPoint(ClickAtPointArgs),
     ClickAtElement(TabElementArgs),
@@ -536,7 +535,6 @@ async fn chrome_command_exec(
             tool_log.push(log);
         },
         Command::Html(args) => {
-            // NOTE: removed from commands list, please rewrite me...
             let tab = {
                 let mut chrome_session_locked = chrome_session.lock().await;
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
@@ -544,18 +542,13 @@ async fn chrome_command_exec(
             };
             let log = {
                 let tab_lock = tab.lock().await;
-                let url = tab_lock.headless_tab.get_url();
                 match {
-                    let client = Client::builder()
-                        .build()
-                        .map_err(|e| e.to_string())?;
-                    let response = client.get(url.clone()).send().await.map_err(|e| e.to_string())?;
-                    if response.status().is_success() {
-                        let html = response.text().await.map_err(|e| e.to_string())?;
-                        Ok(html)
-                    } else {
-                        Err(format!("status: {}", response.status()))
-                    }
+                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
+                    // TODO: filter out html
+                    let html = element
+                        .call_js_fn("function() { return this.innerHTML }", vec![], false)
+                        .map_err(|e| e.to_string())?.value.unwrap();
+                    Ok::<String, String>(String::from(html.as_str().unwrap()))
                 } {
                     Ok(html) => {
                         format!("innerHtml of {}:\n\n{}", tab_lock.state_string(), html)
@@ -906,13 +899,14 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
         },
         "html" => {
             match parsed_args.as_slice() {
-                [tab_id] => {
-                    Ok(Command::Html(TabArgs {
+                [tab_id, selector] => {
+                    Ok(Command::Html(TabElementArgs {
+                        selector: selector.clone(),
                         tab_id: tab_id.clone(),
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments `tab_id`".to_string())
+                    Err("Missing one or several arguments `tab_id`, `selector`".to_string())
                 }
             }
         },
