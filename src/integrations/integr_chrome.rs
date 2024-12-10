@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use base64::Engine;
 use std::io::Cursor;
+use headless_chrome::protocol::cdp::Runtime::{RemoteObject, RemoteObjectSubtype};
 use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
 
@@ -431,6 +432,34 @@ fn get_inner_html(
     Ok(result.value.unwrap().to_string())
 }
 
+fn format_remote_object(
+    remote_object: &RemoteObject,
+) -> String {
+    let mut result = vec![];
+    if let Some(subtype) = remote_object.subtype.clone() {
+        result.push(format!("subtype {:?}", subtype));
+    }
+    if let Some(class_name) = remote_object.class_name.clone() {
+        result.push(format!("class_name {:?}", class_name));
+    }
+    if let Some(value) = remote_object.value.clone() {
+        result.push(format!("value {:?}", value));
+    }
+    if let Some(unserializable_value) = remote_object.unserializable_value.clone() {
+        result.push(format!("unserializable_value {:?}", unserializable_value));
+    }
+    if let Some(description) = remote_object.description.clone() {
+        result.push(format!("description {:?}", description));
+    }
+    if let Some(preview) = remote_object.preview.clone() {
+        result.push(format!("preview {:?}", preview));
+    }
+    if let Some(custom_preview) = remote_object.custom_preview.clone() {
+        result.push(format!("custom_preview {:?}", custom_preview));
+    }
+    format!("result: {}", result.join(", "))
+}
+
 async fn session_open_tab(
     chrome_session: &mut ChromeSession,
     tab_id: &String,
@@ -773,8 +802,8 @@ async fn chrome_command_exec(
             let log = {
                 let tab_lock = tab.lock().await;
                 match tab_lock.headless_tab.evaluate(args.expression.as_str(), false) {
-                    Ok(result) => {
-                        format!("eval result at {}: {:?}", tab_lock.state_string(), result)
+                    Ok(remote_object) => {
+                        format_remote_object(&remote_object)
                     },
                     Err(e) => {
                         format!("eval failed at {}: {}", tab_lock.state_string(), e.to_string())
