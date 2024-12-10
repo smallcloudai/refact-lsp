@@ -497,7 +497,6 @@ async fn session_open_tab(
     device: &DeviceType,
     settings_chrome: &SettingsChrome,
 ) -> Result<String, String> {
-    // get window size and scale factors from config!
     match chrome_session.tabs.get(tab_id) {
         Some(tab) => {
             let tab_lock = tab.lock().await;
@@ -541,7 +540,6 @@ async fn session_open_tab(
                 },
             };
             headless_tab.call_method(method).map_err(|e| e.to_string())?;
-            // headless_tab.call_method(Emulation::ClearDeviceMetricsOverride(None)).map_err(|e| e.to_string())?;
             let tab = Arc::new(AMutex::new(ChromeTab::new(headless_tab, device, tab_id)));
             let tab_lock = tab.lock().await;
             let tab_log = Arc::clone(&tab_lock.tab_log);
