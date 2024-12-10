@@ -20,7 +20,7 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 use tokio::time::sleep;
 use chrono::DateTime;
 use std::path::PathBuf;
-use headless_chrome::{Browser, LaunchOptions, Tab as HeadlessTab};
+use headless_chrome::{Browser, Element, LaunchOptions, Tab as HeadlessTab};
 use headless_chrome::browser::tab::point::Point;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
@@ -366,6 +366,71 @@ async fn screenshot_jpeg_base64(
     MultimodalElement::new("image/jpeg".to_string(), base64::prelude::BASE64_STANDARD.encode(data))
 }
 
+fn get_inner_html(
+    element: &Element,
+) -> Result<String, String> {
+    let func = r"
+    function() {
+        function wrap_html(text, depth) {
+            return '  '.repeat(depth) + text + '\n';
+        }
+
+        function budget_html(el, max_depth, symbols_budget) {
+            let innerHtml = '';
+            let elements = [el]
+            for (let depth = 0; depth < max_depth; depth++) {
+                let expanded_html = '';
+                let expanded_elements = [];
+                elements.forEach(el => {
+                    if (typeof el === 'string') {
+                        expanded_html += el;
+                        expanded_elements.push(el);
+                    } else {
+                        if (el.innerHTML.length > 0) {
+                            let tagHtml = el.outerHTML.split(el.innerHTML);
+                            const tag_open = wrap_html(tagHtml[0], depth);
+                            expanded_html += tag_open;
+                            expanded_elements.push(tag_open);
+                            const children = Array.from(el.children);
+                            if (children.length > 0) {
+                                expanded_html += wrap_html('...', depth + 1)
+                                Array.from(el.children).forEach(child => {
+                                    expanded_elements.push(child);
+                                });
+                            } else if (el.innerText.length > 0) {
+                                const tag_text = wrap_html(el.innerText, depth + 1);
+                                expanded_html += tag_text;
+                                expanded_elements.push(tag_text);
+                            }
+                            if (tagHtml.length > 1) {
+                                const tag_close = wrap_html(tagHtml[1], depth);
+                                expanded_html += tag_close
+                                expanded_elements.push(tag_close);
+                            }
+                        } else {
+                            const tag = wrap_html(el.outerHTML, depth);
+                            expanded_html += tag;
+                            expanded_elements.push(tag);
+                        }
+                    }
+                });
+                if (expanded_html.length > symbols_budget) {
+                    break;
+                }
+                if (expanded_html.length === innerHtml.length) {
+                    break;
+                }
+                innerHtml = expanded_html;
+                elements = expanded_elements;
+            }
+            return innerHtml;
+        }
+        return budget_html(this, 100, 3000);
+    }";
+    let result = element.call_js_fn(func, vec![], false).map_err(|e| e.to_string())?;
+    Ok(result.value.unwrap().to_string())
+}
+
 async fn session_open_tab(
     chrome_session: &mut ChromeSession,
     tab_id: &String,
@@ -543,18 +608,24 @@ async fn chrome_command_exec(
             let log = {
                 let tab_lock = tab.lock().await;
                 match {
-                    let element = tab_lock.headless_tab.find_element(&args.selector).map_err(|e| e.to_string())?;
-                    // TODO: filter out html
-                    let html = element
-                        .call_js_fn("function() { return this.innerHTML }", vec![], false)
-                        .map_err(|e| e.to_string())?.value.unwrap();
-                    Ok::<String, String>(String::from(html.as_str().unwrap()))
+                    let elements = tab_lock.headless_tab.find_elements(&args.selector).map_err(|e| e.to_string())?;
+                    if elements.len() == 0 {
+                        Err("No elements found".to_string())
+                    } else {
+                        let mut elements_log = vec![];
+                        let first_element = elements.first().unwrap();
+                        elements_log.push(get_inner_html(first_element)?);
+                        if elements.len() > 2 {
+                            elements_log.push(format!("\n\nShown html for first of {} elements", elements.len()));
+                        }
+                        Ok::<String, String>(elements_log.join("\n"))
+                    }
                 } {
                     Ok(html) => {
-                        format!("innerHtml of {}:\n\n{}", tab_lock.state_string(), html)
+                        format!("html of `{}`:\n\n{}", args.selector, html)
                     },
                     Err(e) => {
-                        format!("can't fetch innerHtml of {}: {}", tab_lock.state_string(), e.to_string())
+                        format!("can't fetch html of `{}`: {}", args.selector, e.to_string())
                     },
                 }
             };
