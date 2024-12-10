@@ -1184,11 +1184,9 @@ fields:
   chrome_path:
     f_type: string_long
     f_desc: "Path to Google Chrome or Chromium binary. If empty, it searches for Google Chrome in your system"
-    f_placeholder: ""
   idle_browser_timeout:
     f_type: string_short
     f_desc: "Idle timeout for the browser in seconds."
-    f_default: ""
     f_extra: true
   headless:
     f_type: string_short
@@ -1198,47 +1196,38 @@ fields:
   window_width:
     f_type: string_short
     f_desc: "Width of the browser window."
-    f_default: ""
     f_extra: true
   window_height:
     f_type: string_short
     f_desc: "Height of the browser window."
-    f_default: ""
     f_extra: true
   window_scale:
     f_type: string_short
     f_desc: "Scale factor of the browser window."
-    f_default: ""
     f_extra: true
   mobile_window_width:
     f_type: string_short
     f_desc: "Width of the browser window in mobile mode."
-    f_default: ""
     f_extra: true
   mobile_window_height:
     f_type: string_short
     f_desc: "Height of the browser window in mobile mode."
-    f_default: ""
     f_extra: true
   mobile_window_scale:
     f_type: string_short
     f_desc: "Scale factor of the browser window in mobile mode."
-    f_default: ""
     f_extra: true
   tablet_window_width:
     f_type: string_short
     f_desc: "Width of the browser window in tablet mode."
-    f_default: ""
     f_extra: true
   tablet_window_height:
     f_type: string_short
     f_desc: "Height of the browser window in tablet mode."
-    f_default: ""
     f_extra: true
   tablet_window_scale:
     f_type: string_short
     f_desc: "Scale factor of the browser window in tablet mode."
-    f_default: ""
     f_extra: true
 available:
   on_your_laptop_possible: true
