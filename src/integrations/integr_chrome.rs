@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use base64::Engine;
 use std::io::Cursor;
-use headless_chrome::protocol::cdp::Runtime::{RemoteObject, RemoteObjectSubtype};
+use headless_chrome::protocol::cdp::Runtime::RemoteObject;
 use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
 
@@ -39,14 +39,31 @@ use image::{ImageFormat, ImageReader};
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SettingsChrome {
     pub chrome_path: String,
-    #[serde(default )]
-    pub window_width: String,
-    #[serde(default)]
-    pub window_height: String,
     #[serde(default)]
     pub idle_browser_timeout: String,
     #[serde(default)]
     pub headless: String,
+    // desktop
+    #[serde(default)]
+    pub window_width: String,
+    #[serde(default)]
+    pub window_height: String,
+    #[serde(default)]
+    pub scale_factor: String,
+    #[serde(default)]
+    // mobile
+    pub mobile_window_width: String,
+    #[serde(default)]
+    pub mobile_window_height: String,
+    #[serde(default)]
+    pub mobile_scale_factor: String,
+    // tablet
+    #[serde(default)]
+    pub tablet_window_width: String,
+    #[serde(default)]
+    pub tablet_window_height: String,
+    #[serde(default)]
+    pub tablet_scale_factor: String,
 }
 
 #[derive(Debug, Default)]
@@ -59,6 +76,7 @@ pub struct ToolChrome {
 enum DeviceType {
     DESKTOP,
     MOBILE,
+    TABLET,
 }
 
 impl std::fmt::Display for DeviceType {
@@ -66,6 +84,7 @@ impl std::fmt::Display for DeviceType {
         match self {
             DeviceType::DESKTOP => write!(f, "desktop"),
             DeviceType::MOBILE => write!(f, "mobile"),
+            DeviceType::TABLET => write!(f, "tablet"),
         }
     }
 }
@@ -196,7 +215,7 @@ impl Tool for ToolChrome {
                     break
                 }
             };
-            match chrome_command_exec(&parsed_command, command_session.clone()).await {
+            match chrome_command_exec(&parsed_command, command_session.clone(), &self.settings_chrome).await {
                 Ok((execute_log, command_multimodal_els)) => {
                     tool_log.extend(execute_log);
                     mutlimodal_els.extend(command_multimodal_els);
@@ -227,7 +246,7 @@ impl Tool for ToolChrome {
 
     fn tool_description(&self) -> ToolDesc {
         let mut supported_commands = vec![
-            "open_tab <tab_id> <desktop|mobile>",
+            "open_tab <tab_id> <desktop|mobile|tablet>",
             "navigate_to <tab_id> <uri>",
             "scroll_to <tab_id> <element_selector>",
             "screenshot <tab_id>",
@@ -302,8 +321,6 @@ async fn setup_chrome_session(
         setup_log.push("Connect to existing web socket.".to_string());
         Browser::connect_with_timeout(debug_ws_url, idle_browser_timeout).map_err(|e| e.to_string())
     } else {
-
-        // let path = PathBuf::from(args.chrome_path.clone());
         let mut path: Option<PathBuf> = None;
         if !args.chrome_path.is_empty() {
             path = Some(PathBuf::from(args.chrome_path.clone()));
@@ -312,10 +329,10 @@ async fn setup_chrome_session(
             path,
             window_size,
             idle_browser_timeout,
-            headless: args.headless.parse::<bool>().unwrap_or(false),
+            headless: args.headless.parse::<bool>().unwrap_or(true),
             ..Default::default()
         };
-
+       
         setup_log.push("Started new chrome process.".to_string());
         Browser::new(launch_options).map_err(|e| e.to_string())
     }?;
@@ -460,11 +477,27 @@ fn format_remote_object(
     format!("result: {}", result.join(", "))
 }
 
+fn set_device_metrics_method(
+    width: u32,
+    height: u32,
+    device_scale_factor: f64,
+    mobile: bool,
+) -> Emulation::SetDeviceMetricsOverride {
+    Emulation::SetDeviceMetricsOverride {
+        width, height, device_scale_factor, mobile,
+        scale: None, screen_width: None, screen_height: None,
+        position_x: None, position_y: None, dont_set_visible_size: None,
+        screen_orientation: None, viewport: None, display_feature: None,
+    }
+}
+
 async fn session_open_tab(
     chrome_session: &mut ChromeSession,
     tab_id: &String,
     device: &DeviceType,
+    settings_chrome: &SettingsChrome,
 ) -> Result<String, String> {
+    // get window size and scale factors from config!
     match chrome_session.tabs.get(tab_id) {
         Some(tab) => {
             let tab_lock = tab.lock().await;
@@ -472,28 +505,43 @@ async fn session_open_tab(
         },
         None => {
             let headless_tab = chrome_session.browser.new_tab().map_err(|e| e.to_string())?;
-            match device {
-                DeviceType::MOBILE => {
-                    headless_tab.call_method(Emulation::SetDeviceMetricsOverride {
-                        width: 375,
-                        height: 812,
-                        device_scale_factor: 0.0,
-                        mobile: true,
-                        scale: None,
-                        screen_width: None,
-                        screen_height: None,
-                        position_x: None,
-                        position_y: None,
-                        dont_set_visible_size: None,
-                        screen_orientation: None,
-                        viewport: None,
-                        display_feature: None,
-                    }).map_err(|e| e.to_string())?;
-                },
+            let method = match device {
                 DeviceType::DESKTOP => {
-                    headless_tab.call_method(Emulation::ClearDeviceMetricsOverride(None)).map_err(|e| e.to_string())?;
-                }
-            }
+                    let (width, height) = match (settings_chrome.window_width.parse::<u32>(), settings_chrome.window_height.parse::<u32>()) {
+                        (Ok(width), Ok(height)) => (width, height),
+                        _ => (800, 600),
+                    };
+                    let scale_factor = match settings_chrome.scale_factor.parse::<f64>() {
+                        Ok(scale_factor) => scale_factor,
+                        _ => 0.0,
+                    };
+                    set_device_metrics_method(width, height, scale_factor, false)
+                },
+                DeviceType::MOBILE => {
+                    let (width, height) = match (settings_chrome.mobile_window_width.parse::<u32>(), settings_chrome.mobile_window_height.parse::<u32>()) {
+                        (Ok(width), Ok(height)) => (width, height),
+                        _ => (400, 800),
+                    };
+                    let scale_factor = match settings_chrome.mobile_scale_factor.parse::<f64>() {
+                        Ok(scale_factor) => scale_factor,
+                        _ => 0.0,
+                    };
+                    set_device_metrics_method(width, height, scale_factor, true)
+                },
+                DeviceType::TABLET => {
+                    let (width, height) = match (settings_chrome.tablet_window_width.parse::<u32>(), settings_chrome.tablet_window_height.parse::<u32>()) {
+                        (Ok(width), Ok(height)) => (width, height),
+                        _ => (600, 800),
+                    };
+                    let scale_factor = match settings_chrome.tablet_scale_factor.parse::<f64>() {
+                        Ok(scale_factor) => scale_factor,
+                        _ => 0.0,
+                    };
+                    set_device_metrics_method(width, height, scale_factor, true)
+                },
+            };
+            headless_tab.call_method(method).map_err(|e| e.to_string())?;
+            // headless_tab.call_method(Emulation::ClearDeviceMetricsOverride(None)).map_err(|e| e.to_string())?;
             let tab = Arc::new(AMutex::new(ChromeTab::new(headless_tab, device, tab_id)));
             let tab_lock = tab.lock().await;
             let tab_log = Arc::clone(&tab_lock.tab_log);
@@ -547,6 +595,7 @@ enum Command {
 async fn chrome_command_exec(
     cmd: &Command,
     chrome_session: Arc<AMutex<Box<dyn IntegrationSession>>>,
+    settings_chrome: &SettingsChrome,
 ) -> Result<(Vec<String>, Vec<MultimodalElement>), String> {
     let mut tool_log = vec![];
     let mut multimodal_els = vec![];
@@ -556,7 +605,7 @@ async fn chrome_command_exec(
             let log = {
                 let mut chrome_session_locked = chrome_session.lock().await;
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
-                session_open_tab(chrome_session, &args.tab_id, &args.device).await?
+                session_open_tab(chrome_session, &args.tab_id, &args.device, &settings_chrome).await?
             };
             tool_log.push(log);
         },
@@ -947,7 +996,8 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                     let device = match device_str.as_str() {
                         "desktop" => DeviceType::DESKTOP,
                         "mobile" => DeviceType::MOBILE,
-                        _ => return Err(format!("unknown device type: {}. Should be either `desktop` or `mobile`.", parsed_args[0]))
+                        "tablet" => DeviceType::TABLET,
+                        _ => return Err(format!("unknown device type: {}. Should be `desktop`, `mobile` or `tablet`.", parsed_args[0]))
                     };
                     Ok(Command::OpenTab(OpenTabArgs {
                         device: device.clone(),
@@ -955,7 +1005,7 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                     }))
                 },
                 _ => {
-                    Err("Missing one or several arguments `tab_id`, `<device|mobile>`".to_string())
+                    Err("Missing one or several arguments `tab_id`, `<device|mobile|tablet>`".to_string())
                 }
             }
         },
@@ -1134,14 +1184,6 @@ fields:
   chrome_path:
     f_type: string_long
     f_desc: "Path to Google Chrome or Chromium binary. If empty, it searches for Google Chrome in your system"
-  window_width:
-    f_type: string_short
-    f_desc: "Width of the browser window."
-    f_extra: true
-  window_height:
-    f_type: string_short
-    f_desc: "Height of the browser window."
-    f_extra: true
   idle_browser_timeout:
     f_type: string_short
     f_desc: "Idle timeout for the browser in seconds."
@@ -1150,6 +1192,42 @@ fields:
     f_type: string_short
     f_desc: "Run Chrome in headless mode."
     f_default: "true"
+    f_extra: true
+  window_width:
+    f_type: string_short
+    f_desc: "Width of the browser window."
+    f_extra: true
+  window_height:
+    f_type: string_short
+    f_desc: "Height of the browser window."
+    f_extra: true
+  window_scale:
+    f_type: string_short
+    f_desc: "Scale factor of the browser window."
+    f_extra: true
+  mobile_window_width:
+    f_type: string_short
+    f_desc: "Width of the browser window in mobile mode."
+    f_extra: true
+  mobile_window_height:
+    f_type: string_short
+    f_desc: "Height of the browser window in mobile mode."
+    f_extra: true
+  mobile_window_scale:
+    f_type: string_short
+    f_desc: "Scale factor of the browser window in mobile mode."
+    f_extra: true
+  tablet_window_width:
+    f_type: string_short
+    f_desc: "Width of the browser window in tablet mode."
+    f_extra: true
+  tablet_window_height:
+    f_type: string_short
+    f_desc: "Height of the browser window in tablet mode."
+    f_extra: true
+  tablet_window_scale:
+    f_type: string_short
+    f_desc: "Scale factor of the browser window in tablet mode."
     f_extra: true
 available:
   on_your_laptop_possible: true
