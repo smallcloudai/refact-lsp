@@ -213,14 +213,10 @@ pub async fn migrate_to_config_folder(
         let is_yaml_cfg = is_file && path.extension().and_then(|e| e.to_str()) == Some("yaml");
         let is_integration_dir = file_type.is_dir() && file_name == "integrations.d";
 
-        if is_memdb_file || is_yaml_cfg {
+        if is_memdb_file || is_yaml_cfg || is_integration_dir {
             let new_path = config_dir.join(&file_name);
             move_dir_all(path.to_string_lossy().into_owned(), new_path.to_string_lossy().into_owned()).await?;
-            print!("migrated file {:?} to {:?}", path, new_path);
-        } else if is_integration_dir {
-            let new_path = cache_dir.join(&file_name);
-            move_dir_all(path.to_string_lossy().into_owned(), new_path.to_string_lossy().into_owned()).await?;
-            print!("migrated dir {:?} to {:?}", path, new_path);
+            print!("migrated {:?} to {:?}", path, new_path);
         }
     }
     

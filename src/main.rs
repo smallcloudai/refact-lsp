@@ -75,7 +75,7 @@ async fn main() {
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
     let cache_dir = home_dir.join(".cache/refact");
     let config_dir = home_dir.join(".config/refact");
-    match global_context::migrate_to_config_folder(&cache_dir, &config_dir).await {
+    match global_context::migrate_to_config_folder(&config_dir, &cache_dir).await {
         Ok(_) => {}
         Err(err) => {
             print!("failed to migrate to config folder, exiting: {:?}", err);
