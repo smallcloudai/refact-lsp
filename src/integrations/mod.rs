@@ -16,6 +16,7 @@ pub mod integr_chrome;
 pub mod integr_postgres;
 pub mod integr_cmdline;
 pub mod integr_cmdline_service;
+pub mod integr_shell;
 
 pub mod process_io_utils;
 pub mod docker;
@@ -39,6 +40,7 @@ pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send 
         "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         "chrome" => Ok(Box::new(integr_chrome::ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         "docker" => Ok(Box::new(docker::integr_docker::ToolDocker {..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "shell" => Ok(Box::new(integr_shell::ToolShell {..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         cmdline if cmdline.starts_with("cmdline_") => {
             // let tool_name = cmdline.strip_prefix("cmdline_").unwrap();
             Ok(Box::new(integr_cmdline::ToolCmdline {..Default::default()}) as Box<dyn IntegrationTrait + Send + Sync>)
@@ -62,6 +64,7 @@ pub fn integrations_list(allow_experimental: bool) -> Vec<&'static str> {
         "cmdline_TEMPLATE",
         "service_TEMPLATE",
         "docker",
+        "shell",
     ];
     if allow_experimental {
         integrations.extend(vec![
