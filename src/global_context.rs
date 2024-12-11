@@ -1,11 +1,14 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::Hasher;
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 use std::sync::RwLock as StdRwLock;
+use futures_core::future::BoxFuture;
+use futures_util::FutureExt;
 use hyper::StatusCode;
 use structopt::StructOpt;
 use tokenizers::Tokenizer;
@@ -167,6 +170,60 @@ pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove thi
 
 const CAPS_RELOAD_BACKOFF: u64 = 60;       // seconds
 const CAPS_BACKGROUND_RELOAD: u64 = 3600;  // seconds
+
+
+pub async fn migrate_to_config_folder(
+    config_dir: &PathBuf,
+    cache_dir: &PathBuf
+) -> io::Result<()> {
+    fn move_dir_all(from: String, to: String) -> BoxFuture<'static, io::Result<()>> {
+        async move {
+            let from = PathBuf::from(from);
+            let to = PathBuf::from(to);
+
+            if let Err(err) = tokio::fs::rename(&from, &to).await {
+                if err.kind() == io::ErrorKind::Other {
+                    tokio::fs::create_dir_all(&to).await?;
+                    let mut entries = tokio::fs::read_dir(&from).await?;
+                    while let Some(entry) = entries.next_entry().await? {
+                        let to_path = to.join(entry.file_name());
+                        if entry.file_type().await?.is_dir() {
+                            move_dir_all(entry.path().to_string_lossy().into_owned(), to_path.to_string_lossy().into_owned()).await?;
+                        } else {
+                            tokio::fs::copy(entry.path(), to_path).await?;
+                        }
+                    }
+                    tokio::fs::remove_dir_all(&from).await?;
+                } else {
+                    return Err(err);
+                }
+            }
+            Ok(())
+        }.boxed()
+    }
+    
+    let mut entries = tokio::fs::read_dir(".").await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let file_type = entry.file_type().await?;
+
+        let is_yaml_cfg = file_type.is_file() && path.extension().and_then(|e| e.to_str()) == Some("yaml");
+        let is_integration_dir = file_type.is_dir() && file_name == "integrations.d";
+
+        if is_yaml_cfg {
+            let new_path = config_dir.join(&file_name);
+            move_dir_all(path.to_string_lossy().into_owned(), new_path.to_string_lossy().into_owned()).await?;
+            info!("migrated file {:?} to {:?}", path, new_path);
+        } else if is_integration_dir {
+            let new_path = cache_dir.join(&file_name);
+            move_dir_all(path.to_string_lossy().into_owned(), new_path.to_string_lossy().into_owned()).await?;
+            info!("migrated dir {:?} to {:?}", path, new_path);
+        }
+    }
+    
+    Ok(())
+}
 
 pub async fn try_load_caps_quickly_if_not_present(
     gcx: Arc<ARwLock<GlobalContext>>,
