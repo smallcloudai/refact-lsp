@@ -208,10 +208,12 @@ pub async fn migrate_to_config_folder(
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         let file_type = entry.file_type().await?;
 
-        let is_yaml_cfg = file_type.is_file() && path.extension().and_then(|e| e.to_str()) == Some("yaml");
+        let is_file = file_type.is_file();
+        let is_memdb_file = is_file && file_name.contains("memories.sqlite");
+        let is_yaml_cfg = is_file && path.extension().and_then(|e| e.to_str()) == Some("yaml");
         let is_integration_dir = file_type.is_dir() && file_name == "integrations.d";
 
-        if is_yaml_cfg {
+        if is_memdb_file || is_yaml_cfg {
             let new_path = config_dir.join(&file_name);
             move_dir_all(path.to_string_lossy().into_owned(), new_path.to_string_lossy().into_owned()).await?;
             info!("migrated file {:?} to {:?}", path, new_path);
