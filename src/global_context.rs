@@ -202,7 +202,7 @@ pub async fn migrate_to_config_folder(
         }.boxed()
     }
     
-    let mut entries = tokio::fs::read_dir(".").await?;
+    let mut entries = tokio::fs::read_dir(cache_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
