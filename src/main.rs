@@ -78,7 +78,7 @@ async fn main() {
     match global_context::migrate_to_config_folder(&cache_dir, &config_dir).await {
         Ok(_) => {}
         Err(err) => {
-            info!("Failed to migrate to config folder, exiting: {:?}", err);
+            print!("failed to migrate to config folder, exiting: {:?}", err);
         }
     }
     let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone(), config_dir.clone()).await;
