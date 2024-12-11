@@ -9,7 +9,7 @@
 
 
 pub mod integr_abstract;
-// pub mod integr_github;
+pub mod integr_github;
 // pub mod integr_gitlab;
 // pub mod integr_pdb;
 pub mod integr_chrome;
@@ -33,7 +33,7 @@ use integr_abstract::IntegrationTrait;
 pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send + Sync>, String>
 {
     match n {
-        // "github" => Ok(Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
+        "github" => Ok(Box::new(integr_github::ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         // "gitlab" => Ok(Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         // "pdb" => Ok(Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
         "postgres" => Ok(Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>),
@@ -52,23 +52,9 @@ pub fn integration_from_name(n: &str) -> Result<Box<dyn IntegrationTrait + Send 
     }
 }
 
-#[allow(dead_code)]
-pub fn icon_from_name(_n: &str) -> String
-{
-    // match n {
-    //     // "github" => Box::new(ToolGithub { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-    //     // "gitlab" => Box::new(ToolGitlab { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-    //     // "pdb" => Box::new(ToolPdb { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-    //     "postgres" => Box::new(integr_postgres::ToolPostgres { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-    //     // "chrome" => Box::new(ToolChrome { ..Default::default() }) as Box<dyn IntegrationTrait + Send + Sync>,
-    //     _ => panic!("Unknown integration name: {}", n),
-    // }
-    return "".to_string();
-}
-
 pub fn integrations_list(allow_experimental: bool) -> Vec<&'static str> {
     let mut integrations = vec![
-        // "github",
+        "github",
         // "gitlab",
         // "pdb",
         "postgres",
