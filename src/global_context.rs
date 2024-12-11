@@ -7,8 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 use std::sync::RwLock as StdRwLock;
-use futures_core::future::BoxFuture;
-use futures_util::FutureExt;
 use hyper::StatusCode;
 use structopt::StructOpt;
 use tokenizers::Tokenizer;
