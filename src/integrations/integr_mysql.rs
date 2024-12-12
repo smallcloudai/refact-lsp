@@ -2,7 +2,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::ContextEnum;
 use crate::call_validation::{ChatContent, ChatMessage, ChatUsage};
 use crate::integrations::go_to_configuration_message;
-use crate::tools::tools_description::Tool;
+use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -165,6 +165,31 @@ impl Tool for ToolMysql {
 
     fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn tool_description(&self) -> ToolDesc {
+        let supported_commands = vec![
+            "SHOW DATABASES;",
+            "SHOW TABLES;",
+            "SELECT * FROM <table_name>;",
+            "INSERT INTO <table_name> (column1, column2) VALUES (value1, value2);",
+            "UPDATE <table_name> SET column1 = value1 WHERE condition;",
+            "DELETE FROM <table_name> WHERE condition;",
+            "CREATE TABLE <table_name> (column1 datatype, column2 datatype, ...);",
+            "..."
+        ];
+        ToolDesc {
+            name: "mysql".to_string(),
+            agentic: true,
+            experimental: false,
+            description: "Access to MySQL database for various operations such as querying data, inserting, updating, and deleting records.".to_string(),
+            parameters: vec![ToolParam {
+                name: "query".to_string(),
+                param_type: "string".to_string(),
+                description: format!("A MySQL query. Example queries:\n{}", supported_commands.join("\n"))
+            }],
+            parameters_required: vec!["query".to_string()],
+        }
     }
 }
 
