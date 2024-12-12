@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 
-use crate::tools::tools_description::Tool;
+use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use serde_json::Value;
 use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 
@@ -152,6 +152,34 @@ impl Tool for ToolGithub {
 
     fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn tool_description(&self) -> ToolDesc {
+        let supported_commands = vec![
+            "issue create --title <title> --body <body>",
+            "issue list --state open --label <label>",
+            "pr create --title <title> --body <body> --base <branch> --head <branch>",
+            "pr list --state open --label <label>",
+            "repo clone <repository>",
+            "repo create <name> --public",
+            "repo fork <repository>",
+            "repo list",
+            "workflow run <workflow_id>",
+            "workflow list",
+            "..."
+        ];
+        ToolDesc {
+            name: "github".to_string(),
+            agentic: true,
+            experimental: false,
+            description: "Access to GitHub CLI for various GitHub operations such as creating issues, pull requests, and more.".to_string(),
+            parameters: vec![ToolParam {
+                name: "command".to_string(),
+                param_type: "string".to_string(),
+                description: format!("A GitHub CLI command. Example commands:\n{}", supported_commands.join("\n"))
+            }],
+            parameters_required: vec!["command".to_string()],
+        }
     }
 }
 

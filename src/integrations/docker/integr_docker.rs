@@ -10,7 +10,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatContent, ChatMessage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_abstract::{IntegrationTrait, IntegrationCommon, IntegrationConfirmation};
-use crate::tools::tools_description::Tool;
+use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::docker::docker_ssh_tunnel_utils::{SshConfig, forward_remote_docker_if_needed};
 use crate::integrations::utils::{serialize_num_to_str, deserialize_str_to_num};
 
@@ -182,14 +182,43 @@ impl Tool for ToolDocker {
     fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
     }
+
+    fn tool_description(&self) -> ToolDesc {
+        let supported_commands = vec![
+            "container list --all --no-trunc --format json",
+            "container inspect --format json <container_id>",
+            "container start <container_id>",
+            "container stop <container_id>",
+            "container remove --volumes <container_id>",
+            "container kill <container_id>",
+            "container create --name=<name> --volume=<host_path>:<container_path> --publish=<host_port>:<container_port> --entrypoint <entrypoint> <image_id> -c <command>",
+            "image build -t <tag> <path>",
+            "network create <name>",
+            "volume create <name>",
+            "run -d --name <name> <image>",
+            "..."
+        ];
+        ToolDesc {
+            name: "docker".to_string(),
+            agentic: true,
+            experimental: false,
+            description: "Access to docker cli, in a non-interactive way, don't open a shell.".to_string(),
+            parameters: vec![ToolParam {
+                name: "command".to_string(),
+                param_type: "string".to_string(),
+                description: format!("A docker command. Example commands:\n{}", supported_commands.join("\n"))
+            }],
+            parameters_required: vec!["command".to_string()],
+        }
+    }
 }
 
-fn parse_command(args: &HashMap<String, Value>) -> Result<String, String>{
-    return match args.get("command") {
+fn parse_command(args: &HashMap<String, Value>) -> Result<String, String> {
+    match args.get("command") {
         Some(Value::String(s)) => Ok(s.to_string()),
         Some(v) => Err(format!("argument `command` is not a string: {:?}", v)),
         None => Err("Missing argument `command`".to_string())
-    };
+    }
 }
 
 fn split_command(command: &str) -> Result<Vec<String>, String> {

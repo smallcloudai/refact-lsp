@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
-use crate::tools::tools_description::Tool;
+use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -150,6 +150,34 @@ impl Tool for ToolGitlab {
 
     fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn tool_description(&self) -> ToolDesc {
+        let supported_commands = vec![
+            "issue create --title <title> --description <description>",
+            "issue list --state opened --label <label>",
+            "mr create --title <title> --description <description> --source-branch <branch> --target-branch <branch>",
+            "mr list --state opened --label <label>",
+            "repo clone <repository>",
+            "repo create <name> --visibility public",
+            "repo fork <repository>",
+            "repo list",
+            "pipeline run <pipeline_id>",
+            "pipeline list",
+            "..."
+        ];
+        ToolDesc {
+            name: "gitlab".to_string(),
+            agentic: true,
+            experimental: false,
+            description: "Access to GitLab CLI for various GitLab operations such as creating issues, merge requests, and more.".to_string(),
+            parameters: vec![ToolParam {
+                name: "command".to_string(),
+                param_type: "string".to_string(),
+                description: format!("A GitLab CLI command. Example commands:\n{}", supported_commands.join("\n"))
+            }],
+            parameters_required: vec!["command".to_string()],
+        }
     }
 }
 
