@@ -64,6 +64,9 @@ mod http;
 mod integrations;
 mod privacy;
 mod privacy_compiled_in;
+mod git;
+mod agentic;
+mod trajectories;
 
 #[tokio::main]
 async fn main() {
@@ -71,7 +74,14 @@ async fn main() {
     rayon::ThreadPoolBuilder::new().num_threads(cpu_num / 2).build_global().unwrap();
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
     let cache_dir = home_dir.join(".cache/refact");
-    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone()).await;
+    let config_dir = home_dir.join(".config/refact");
+    match global_context::migrate_to_config_folder(&config_dir, &cache_dir).await {
+        Ok(_) => {}
+        Err(err) => {
+            print!("failed to migrate to config folder, exiting: {:?}", err);
+        }
+    }
+    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone(), config_dir.clone()).await;
     let mut writer_is_stderr = false;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
         writer_is_stderr = true;

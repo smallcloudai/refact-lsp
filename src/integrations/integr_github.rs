@@ -11,32 +11,55 @@ use crate::call_validation::{ContextEnum, ChatMessage, ChatContent};
 
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
+use crate::integrations::integr_abstract::Integration;
 
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[allow(non_snake_case)]
 pub struct IntegrationGitHub {
     pub gh_binary_path: Option<String>,
     pub GH_TOKEN: String,
 }
 
+#[derive(Default)]
 pub struct ToolGithub {
-    integration_github: IntegrationGitHub,
+    pub integration_github: IntegrationGitHub,
 }
 
-impl ToolGithub {
-    pub fn new_from_yaml(gh_config: &serde_yaml::Value) -> Result<Self, String> {
-        let integration_github = serde_yaml::from_value::<IntegrationGitHub>(gh_config.clone())
-            .map_err(|e| {
-                let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
-                format!("{}{}", e.to_string(), location)
-            })?;
-        Ok(Self { integration_github })
+impl Integration for ToolGithub {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+
+    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+        let integration_github = serde_json::from_value::<IntegrationGitHub>(value.clone())
+            .map_err(|e|e.to_string())?;
+        self.integration_github = integration_github;
+        Ok(())
     }
+
+    fn integr_yaml2json(&self, value: &serde_yaml::Value) -> Result<Value, String> {
+        let integration_github = serde_yaml::from_value::<IntegrationGitHub>(value.clone()).map_err(|e| {
+            let location = e.location().map(|loc| format!(" at line {}, column {}", loc.line(), loc.column())).unwrap_or_default();
+            format!("{}{}", e.to_string(), location)
+        })?;
+        serde_json::to_value(&integration_github).map_err(|e| e.to_string())
+    }
+
+    fn integr_upgrade_to_tool(&self, integr_name: &str) -> Box<dyn Tool + Send> {
+        Box::new(ToolGithub {integration_github: self.integration_github.clone()}) as Box<dyn Tool + Send>
+    }
+
+    fn integr_settings_as_json(&self) -> Result<Value, String> {
+        serde_json::to_value(&self.integration_github).map_err(|e| e.to_string())
+    }
+
+    fn integr_settings_default(&self) -> String { DEFAULT_GITHUB_INTEGRATION_YAML.to_string() }
+    fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/25/25231.png".to_string() }
 }
 
 #[async_trait]
 impl Tool for ToolGithub {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+
     async fn tool_execute(
         &mut self,
         _ccx: Arc<AMutex<AtCommandsContext>>,
@@ -122,3 +145,10 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
 
     Ok(parsed_args)
 }
+
+const DEFAULT_GITHUB_INTEGRATION_YAML: &str = r#"
+# GitHub integration
+
+# GH_TOKEN: "GH_xxx"                      # To get a token, check out https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+# gh_binary_path: "/opt/homebrew/bin/gh"  # Uncomment to set a custom path for the gh binary, defaults to "gh"
+"#;
