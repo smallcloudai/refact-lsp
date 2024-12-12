@@ -243,10 +243,6 @@ pub fn read_integrations_d(
 
     // 5. Fill confirmation in each record
     for rec in &mut result {
-        if !rec.integr_config_exists {
-            continue;
-        }
-        
         if let Some(confirmation) = rec.config_unparsed.get("confirmation") {
             rec.ask_user = get_array_of_str_or_empty(&confirmation, "ask_user");
             rec.deny = get_array_of_str_or_empty(&confirmation, "deny");
