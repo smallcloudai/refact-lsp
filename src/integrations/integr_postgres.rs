@@ -70,8 +70,6 @@ impl IntegrationTrait for ToolPostgres {
     {
         POSTGRES_INTEGRATION_SCHEMA
     }
-
-    // fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
 }
 
 impl ToolPostgres {

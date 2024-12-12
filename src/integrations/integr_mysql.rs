@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex as AMutex;
-use crate::integrations::integr_abstract::IntegrationTrait;
+use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -26,15 +26,25 @@ pub struct SettingsMysql {
 
 #[derive(Default)]
 pub struct ToolMysql {
+    pub common:  IntegrationCommon,
     pub settings_mysql: SettingsMysql,
 }
 
 impl IntegrationTrait for ToolMysql {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         match serde_json::from_value::<SettingsMysql>(value.clone()) {
             Ok(settings_mysql) => self.settings_mysql = settings_mysql,
             Err(e) => {
                 tracing::error!("Failed to apply settings: {}\n{:?}", e, value);
+                return Err(e.to_string());
+            }
+        }
+        match serde_json::from_value::<IntegrationCommon>(value.clone()) {
+            Ok(x) => self.common = x,
+            Err(e) => {
+                tracing::error!("Failed to apply common settings: {}\n{:?}", e, value);
                 return Err(e.to_string());
             }
         }
@@ -45,8 +55,13 @@ impl IntegrationTrait for ToolMysql {
         serde_json::to_value(&self.settings_mysql).unwrap()
     }
 
+    fn integr_common(&self) -> IntegrationCommon {
+        self.common.clone()
+    }
+
     fn integr_upgrade_to_tool(&self, _integr_name: &String) -> Box<dyn Tool + Send> {
         Box::new(ToolMysql {
+            common: self.common.clone(),
             settings_mysql: self.settings_mysql.clone()
         }) as Box<dyn Tool + Send>
     }
@@ -55,8 +70,6 @@ impl IntegrationTrait for ToolMysql {
     {
       MYSQL_INTEGRATION_SCHEMA
     }
-
-    // fn icon_link(&self) -> String { "https://cdn-icons-png.flaticon.com/512/5968/5968342.png".to_string() }
 }
 
 impl ToolMysql {
@@ -149,8 +162,11 @@ impl Tool for ToolMysql {
         #[allow(static_mut_refs)]
         unsafe { &mut DEFAULT_USAGE }
     }
-}
 
+    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+        Some(self.integr_common().confirmation)
+    }
+}
 
 pub const MYSQL_INTEGRATION_SCHEMA: &str = r#"
 fields:
@@ -185,9 +201,6 @@ description: |
   On this page you can also see Docker containers with Mysql servers.
   You can ask model to create a new container with a new database for you,
   or ask model to configure the tool to use an existing container with existing database.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -224,4 +237,10 @@ docker:
         - role: "user"
           content: |
             🔧 Your job is to modify mysql connection config in the current file to match the variables from the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: []
+  deny_default: []
 "#;
