@@ -17,7 +17,7 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 use crate::integrations::sessions::{IntegrationSession, get_session_hashmap_key};
 use crate::global_context::GlobalContext;
-use crate::integrations::integr_abstract::IntegrationTrait;
+use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::process_io_utils::{first_n_chars, last_n_chars, last_n_lines, write_to_stdin_and_flush, blocking_read_until_token_or_timeout};
 
@@ -32,6 +32,7 @@ pub struct SettingsPdb {
 
 #[derive(Default)]
 pub struct ToolPdb {
+    pub common:  IntegrationCommon,
     pub settings_pdb: SettingsPdb,
 }
 
@@ -66,28 +67,42 @@ impl IntegrationSession for PdbSession
 }
 
 impl IntegrationTrait for ToolPdb {
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn Any { self }
 
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         match serde_json::from_value::<SettingsPdb>(value.clone()) {
             Ok(settings_pdb) => {
                 info!("PDB settings applied: {:?}", settings_pdb);
                 self.settings_pdb = settings_pdb;
-                Ok(())
             },
             Err(e) => {
                 error!("Failed to apply settings: {}\n{:?}", e, value);
-                Err(e.to_string())
+                return Err(e.to_string());
             }
-        }
+        };
+        match serde_json::from_value::<IntegrationCommon>(value.clone()) {
+            Ok(x) => self.common = x,
+            Err(e) => {
+                error!("Failed to apply common settings: {}\n{:?}", e, value);
+                return Err(e.to_string());
+            }
+        };
+        Ok(())
     }
 
     fn integr_settings_as_json(&self) -> Value {
         serde_json::to_value(&self.settings_pdb).unwrap_or_default()
     }
+
+    fn integr_common(&self) -> IntegrationCommon {
+        self.common.clone()
+    }
     
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
-        Box::new(ToolPdb {settings_pdb: self.settings_pdb.clone()}) as Box<dyn Tool + Send>
+        Box::new(ToolPdb {
+            common: self.common.clone(),
+            settings_pdb: self.settings_pdb.clone()
+        }) as Box<dyn Tool + Send>
     }
 
     fn integr_schema(&self) -> &str { PDB_INTEGRATION_SCHEMA }
@@ -95,7 +110,7 @@ impl IntegrationTrait for ToolPdb {
 
 #[async_trait]
 impl Tool for ToolPdb {
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn Any { self }
 
     async fn tool_execute(
         &mut self,
@@ -184,6 +199,10 @@ impl Tool for ToolPdb {
         static mut DEFAULT_USAGE: Option<ChatUsage> = None;
         #[allow(static_mut_refs)]
         unsafe { &mut DEFAULT_USAGE }
+    }
+
+    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+        Some(self.integr_common().confirmation)
     }
 }
 
@@ -358,9 +377,6 @@ fields:
 description: |
   The PDB integration allows interaction with the Python debugger for inspecting variables and exploring program execution.
   It provides functionality for debugging Python scripts and applications.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -368,4 +384,10 @@ smartlinks:
         content: |
           🔧 The pdb tool should be visible now. To test the tool, start a debugging session for a simple Python script, set a breakpoint, and inspect some variables.
           If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: []
+  deny_user_default: []
 "#;

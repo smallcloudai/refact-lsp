@@ -11,7 +11,7 @@ use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
-use crate::integrations::integr_abstract::IntegrationTrait;
+use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -23,6 +23,7 @@ pub struct SettingsGitHub {
 
 #[derive(Default)]
 pub struct ToolGithub {
+    pub common:  IntegrationCommon,
     pub settings_github: SettingsGitHub,
 }
 
@@ -34,21 +35,35 @@ impl IntegrationTrait for ToolGithub {
             Ok(settings_github) => {
                 info!("Github settings applied: {:?}", settings_github);
                 self.settings_github = settings_github;
-                Ok(())
             },
             Err(e) => {
                 error!("Failed to apply settings: {}\n{:?}", e, value);
-                Err(e.to_string())
+                return Err(e.to_string());
             }
-        }
+        };
+        match serde_json::from_value::<IntegrationCommon>(value.clone()) {
+            Ok(x) => self.common = x,
+            Err(e) => {
+                error!("Failed to apply common settings: {}\n{:?}", e, value);
+                return Err(e.to_string());
+            }
+        };
+        Ok(())
     }
 
     fn integr_settings_as_json(&self) -> Value {
         serde_json::to_value(&self.settings_github).unwrap_or_default()
     }
-    
+
+    fn integr_common(&self) -> IntegrationCommon {
+        self.common.clone()
+    }
+
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
-        Box::new(ToolGithub {settings_github: self.settings_github.clone()}) as Box<dyn Tool + Send>
+        Box::new(ToolGithub {
+            common: self.common.clone(),
+            settings_github: self.settings_github.clone()
+        }) as Box<dyn Tool + Send>
     }
 
     fn integr_schema(&self) -> &str { GITHUB_INTEGRATION_SCHEMA }
@@ -134,6 +149,10 @@ impl Tool for ToolGithub {
         #[allow(static_mut_refs)]
         unsafe { &mut DEFAULT_USAGE }
     }
+
+    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+        Some(self.integr_common().confirmation)
+    }
 }
 
 fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, String> {
@@ -171,9 +190,6 @@ fields:
 description: |
   The GitHub integration allows interaction with GitHub repositories using the GitHub CLI.
   It provides functionality for various GitHub operations such as creating issues, pull requests, and more.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -181,4 +197,10 @@ smartlinks:
         content: |
           🔧 The `github` (`gh`) tool should be visible now. To test the tool, list opened pull requests for `smallcloudai/refact-lsp`, and briefly describe them and express
           happiness, and change nothing. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: ["gh * delete"]
+  deny_user_default: ["gh auth token"]
 "#;

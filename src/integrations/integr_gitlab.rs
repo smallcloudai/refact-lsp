@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 use crate::tools::tools_description::Tool;
-use crate::integrations::integr_abstract::IntegrationTrait;
+use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[allow(non_snake_case)]
@@ -21,6 +21,7 @@ pub struct SettingsGitLab {
 
 #[derive(Default)]
 pub struct ToolGitlab {
+    pub common:  IntegrationCommon,
     pub settings_gitlab: SettingsGitLab,
 }
 
@@ -32,21 +33,35 @@ impl IntegrationTrait for ToolGitlab {
             Ok(settings_gitlab) => {
                 info!("GitLab settings applied: {:?}", settings_gitlab);
                 self.settings_gitlab = settings_gitlab;
-                Ok(())
             },
             Err(e) => {
                 error!("Failed to apply settings: {}\n{:?}", e, value);
-                Err(e.to_string())
+                return Err(e.to_string())
             }
-        }
+        };
+        match serde_json::from_value::<IntegrationCommon>(value.clone()) {
+            Ok(x) => self.common = x,
+            Err(e) => {
+                error!("Failed to apply common settings: {}\n{:?}", e, value);
+                return Err(e.to_string());
+            }
+        };
+        Ok(())
     }
 
     fn integr_settings_as_json(&self) -> Value {
         serde_json::to_value(&self.settings_gitlab).unwrap_or_default()
     }
+
+    fn integr_common(&self) -> IntegrationCommon {
+        self.common.clone()
+    }
     
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
-        Box::new(ToolGitlab {settings_gitlab: self.settings_gitlab.clone()}) as Box<dyn Tool + Send>
+        Box::new(ToolGitlab {
+            common: self.common.clone(),
+            settings_gitlab: self.settings_gitlab.clone()
+        }) as Box<dyn Tool + Send>
     }
 
     fn integr_schema(&self) -> &str { GITLAB_INTEGRATION_SCHEMA }
@@ -132,6 +147,10 @@ impl Tool for ToolGitlab {
         #[allow(static_mut_refs)]
         unsafe { &mut DEFAULT_USAGE }
     }
+
+    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+        Some(self.integr_common().confirmation)
+    }
 }
 
 fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, String> {
@@ -169,9 +188,6 @@ fields:
 description: |
   The GitLab integration allows interaction with GitLab repositories using the GitLab CLI.
   It provides functionality for various GitLab operations such as creating issues, merge requests, and more.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -179,4 +195,10 @@ smartlinks:
         content: |
           🔧 The `gitlab` (`glab`) tool should be visible now. To test the tool, list opened merge requests for your GitLab project, and briefly describe them and express
           happiness, and change nothing. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: ["glab * delete"]
+  deny_user_default: ["glab auth token"]
 "#;
