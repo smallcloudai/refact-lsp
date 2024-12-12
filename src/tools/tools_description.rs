@@ -51,7 +51,7 @@ pub trait Tool: Send + Sync {
 
         if !command_to_match.is_empty() {
             if let Some(rules) = &self.confirmation_info() {
-                let (is_denied, deny_rule) = command_should_be_denied(&command_to_match, &rules.deny_user_default);
+                let (is_denied, deny_rule) = command_should_be_denied(&command_to_match, &rules.deny);
                 if is_denied {
                     return Ok(MatchConfirmDeny {
                         result: MatchConfirmDenyResult::DENY,
@@ -59,7 +59,7 @@ pub trait Tool: Send + Sync {
                         rule: deny_rule.clone(),
                     });
                 }
-                let (needs_confirmation, confirmation_rule) = command_should_be_confirmed_by_user(&command_to_match, &rules.ask_user_default);
+                let (needs_confirmation, confirmation_rule) = command_should_be_confirmed_by_user(&command_to_match, &rules.ask_user);
                 if needs_confirmation {
                     return Ok(MatchConfirmDeny {
                         result: MatchConfirmDenyResult::CONFIRMATION,

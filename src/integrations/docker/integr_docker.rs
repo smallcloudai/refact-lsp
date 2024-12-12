@@ -324,5 +324,5 @@ available:
   when_isolated_possible: false
 confirmation:
   ask_user_default: []
-  deny_user_default: ["docker* rm *", "docker* rmi *", "docker* pause *", "docker* stop *", "docker* kill *"]
+  deny_default: ["docker* rm *", "docker* rmi *", "docker* pause *", "docker* stop *", "docker* kill *"]
 "#;

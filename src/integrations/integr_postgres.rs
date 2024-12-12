@@ -268,7 +268,7 @@ available:
   when_isolated_possible: true
 confirmation:
   ask_user_default: ["psql*[!SELECT]*"]
-  deny_user_default: []
+  deny_default: []
 "#;
 
 // To think about: PGPASSWORD PGHOST PGUSER PGPORT PGDATABASE maybe tell the model to set that in variables.yaml as well
