@@ -201,6 +201,6 @@ available:
   on_your_laptop_possible: true
   when_isolated_possible: true
 confirmation:
-  ask_user_default: ["gh * delete", "gh * close"]
-  deny_default: ["gh auth token"]
+  ask_user_default: ["gh * delete *", "gh * close *"]
+  deny_default: ["gh auth token *"]
 "#;
