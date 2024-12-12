@@ -15,9 +15,9 @@ pub trait IntegrationTrait: Send + Sync {
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct IntegrationAvailable {
     #[serde(default = "default_true")]
-    pub on_your_laptop: bool,
+    pub on_your_laptop_possible: bool,
     #[serde(default = "default_true")]
-    pub when_isolated: bool,
+    pub when_isolated_possible: bool,
 }
 
 fn default_true() -> bool {
@@ -27,15 +27,15 @@ fn default_true() -> bool {
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct IntegrationConfirmation {
     #[serde(default)]
-    pub ask_user: Vec<String>,
+    pub ask_user_default: Vec<String>,
     #[serde(default)]
-    pub deny: Vec<String>,
+    pub deny_user_default: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct IntegrationCommon {
     #[serde(default)]
-    pub available: IntegrationConfirmation,
+    pub available: IntegrationAvailable,
     #[serde(default)]
-    pub confirmation: IntegrationAvailable,
+    pub confirmation: IntegrationConfirmation,
 }
