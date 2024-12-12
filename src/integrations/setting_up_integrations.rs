@@ -262,8 +262,8 @@ pub fn read_integrations_d(
                     continue;
                 }
             };
-            rec.ask_user = get_array_of_str_or_empty(&schema, "confirmation/ask_user_default");
-            rec.deny = get_array_of_str_or_empty(&schema, "confirmation/deny_default");
+            rec.ask_user = get_array_of_str_or_empty(&schema, "/confirmation/ask_user_default");
+            rec.deny = get_array_of_str_or_empty(&schema, "/confirmation/deny_default");
         }
     }
 
@@ -414,12 +414,12 @@ pub async fn integration_config_get(
                         confirmation_ask_user = if j.get("confirmation").is_some() { 
                             get_array_of_str_or_empty(&j, "confirmation/ask_user") 
                         } else { 
-                            get_array_of_str_or_empty(&result.integr_schema, "confirmation/ask_user_default") 
+                            get_array_of_str_or_empty(&result.integr_schema, "/confirmation/ask_user_default") 
                         };
                         confirmation_deny = if j.get("confirmation").is_some() {
                             get_array_of_str_or_empty(&j, "confirmation/deny")
                         } else {
-                            get_array_of_str_or_empty(&result.integr_schema, "confirmation/deny_default")
+                            get_array_of_str_or_empty(&result.integr_schema, "/confirmation/deny_default")
                         };
                         let did_it_work = integration_box.integr_settings_apply(&j);
                         if let Err(e) = did_it_work {
