@@ -200,5 +200,5 @@ available:
   when_isolated_possible: true
 confirmation:
   ask_user_default: ["glab * delete"]
-  deny_user_default: ["glab auth token"]
+  deny_default: ["glab auth token"]
 "#;

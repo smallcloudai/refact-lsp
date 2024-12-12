@@ -202,5 +202,5 @@ available:
   when_isolated_possible: true
 confirmation:
   ask_user_default: ["gh * delete", "gh * close"]
-  deny_user_default: ["gh auth token"]
+  deny_default: ["gh auth token"]
 "#;

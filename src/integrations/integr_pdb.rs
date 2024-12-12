@@ -389,5 +389,5 @@ available:
   when_isolated_possible: true
 confirmation:
   ask_user_default: []
-  deny_user_default: []
+  deny_default: []
 "#;
