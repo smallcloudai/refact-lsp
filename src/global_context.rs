@@ -374,3 +374,114 @@ pub async fn create_global_context(
     }
     (gcx, ask_shutdown_receiver, shutdown_flag, cmdline)
 }
+
+// Macros to add to global context write and read so that it prints when it tries to acquire a lock, 
+// when it actually acquires it, and when it drops it, including the line.
+// It makes code and compilation slower, and a lot of span, use it only to debug deadlocks
+// Tipically changing gcx.write().await -> crate::write_with_debug!(&gcx) works
+
+pub struct DebugWriteGuard<'a> {
+    guard: tokio::sync::RwLockWriteGuard<'a, GlobalContext>,
+    file: &'static str,
+    line: u32,
+}
+
+impl<'a> DebugWriteGuard<'a> {
+    pub fn new(
+        guard: tokio::sync::RwLockWriteGuard<'a, GlobalContext>,
+        file: &'static str,
+        line: u32,
+    ) -> Self {
+        Self { guard, file, line }
+    }
+}
+
+impl<'a> std::ops::Deref for DebugWriteGuard<'a> {
+    type Target = GlobalContext;
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl<'a> std::ops::DerefMut for DebugWriteGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
+}
+
+impl<'a> Drop for DebugWriteGuard<'a> {
+    fn drop(&mut self) {
+        info!(
+            "Released the global context lock (write) (called from {}:{})",
+            self.file, self.line
+        );
+    }
+}
+
+#[macro_export]
+macro_rules! write_with_debug {
+    ($gcx:expr) => {
+        crate::global_context::write_with_debug_impl($gcx, std::file!(), std::line!()).await
+    };
+}
+
+pub async fn write_with_debug_impl<'a>(
+    gcx: &'a Arc<ARwLock<GlobalContext>>,
+    file: &'static str,
+    line: u32,
+) -> DebugWriteGuard<'a> {
+    tracing::info!("Getting the lock of the global context...(write) (called from {file}:{line})");
+    let guard = gcx.write().await;
+    tracing::info!("Acquired the global context lock (write) (called from {file}:{line})");
+    DebugWriteGuard::new(guard, file, line)
+}
+
+pub struct DebugReadGuard<'a> {
+    guard: tokio::sync::RwLockReadGuard<'a, GlobalContext>,
+    file: &'static str,
+    line: u32,
+}
+
+impl<'a> DebugReadGuard<'a> {
+    pub fn new(
+        guard: tokio::sync::RwLockReadGuard<'a, GlobalContext>,
+        file: &'static str,
+        line: u32,
+    ) -> Self {
+        Self { guard, file, line }
+    }
+}
+
+impl<'a> std::ops::Deref for DebugReadGuard<'a> {
+    type Target = GlobalContext;
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl<'a> Drop for DebugReadGuard<'a> {
+    fn drop(&mut self) {
+        tracing::info!(
+            "Released the global context read lock (read) (called from {}:{})",
+            self.file, self.line
+        );
+    }
+}
+
+#[macro_export]
+macro_rules! read_with_debug {
+    ($gcx:expr) => {
+        crate::global_context::read_with_debug_impl($gcx, std::file!(), std::line!()).await
+    };
+}
+
+pub async fn read_with_debug_impl<'a>(
+    gcx: &'a Arc<ARwLock<GlobalContext>>,
+    file: &'static str,
+    line: u32,
+) -> DebugReadGuard<'a> {
+    tracing::info!("Getting the lock of the global context (read)... (called from {file}:{line})");
+    let guard = gcx.read().await;
+    tracing::info!("Acquired the global context lock (read) (called from {file}:{line})");
+    DebugReadGuard::new(guard, file, line)
+}
