@@ -22,6 +22,7 @@ use chrono::DateTime;
 use std::path::PathBuf;
 use headless_chrome::{Browser, Element, LaunchOptions, Tab as HeadlessTab};
 use headless_chrome::browser::tab::point::Point;
+use headless_chrome::browser::tab::ModifierKey;
 use headless_chrome::protocol::cdp::Page;
 use headless_chrome::protocol::cdp::Emulation;
 use headless_chrome::protocol::cdp::types::Event;
@@ -265,7 +266,7 @@ impl Tool for ToolChrome {
             "screenshot <tab_id>",
             "html <tab_id> <element_selector>",
             "reload <tab_id>",
-            "press_key_at <tab_id> <enter|esc|pageup|pagedown|home|end>",
+            "press_key <tab_id> <KeyName> [<Alt|Ctrl|Meta|Shift>,...]",
             "type_text_at <tab_id> <text>",
             "tab_log <tab_id>",
             "eval <tab_id> <expression>",
@@ -604,7 +605,7 @@ enum Command {
     ClickAtPoint(ClickAtPointArgs),
     ClickAtElement(TabElementArgs),
     TypeTextAt(TypeTextAtArgs),
-    PressKeyAt(PressKeyAtArgs),
+    PressKey(PressKeyArgs),
     TabLog(TabArgs),
     Eval(EvalArgs),
     Styles(StylesArgs),
@@ -817,7 +818,7 @@ async fn chrome_command_exec(
             };
             tool_log.push(log);
         },
-        Command::PressKeyAt(args) => {
+        Command::PressKey(args) => {
             let tab = {
                 let mut chrome_session_locked = chrome_session.lock().await;
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
@@ -826,15 +827,17 @@ async fn chrome_command_exec(
             let log = {
                 let tab_lock = tab.lock().await;
                 match {
-                    tab_lock.headless_tab.press_key(args.key.to_string().as_str()).map_err(|e| e.to_string())?;
+                    tab_lock.headless_tab.press_key_with_modifiers(
+                        args.key.as_str(), args.key_modifiers.as_deref())
+                        .map_err(|e| e.to_string())?;
                     tab_lock.headless_tab.wait_until_navigated().map_err(|e| e.to_string())?;
                     Ok::<(), String>(())
                 } {
                     Ok(_) => {
-                        format!("press `{}` at {}", args.key, tab_lock.state_string())
+                        format!("press_key at {}", tab_lock.state_string())
                     },
                     Err(e) => {
-                        format!("press `{}` failed at {}: {}", args.key, tab_lock.state_string(), e.to_string())
+                        format!("press_key failed at {}: {}", tab_lock.state_string(), e.to_string())
                     },
                 }
             };
@@ -972,32 +975,10 @@ struct TypeTextAtArgs {
     tab_id: String,
 }
 
-#[derive(Clone, Debug)]
-enum Key {
-    ENTER,
-    ESC,
-    PAGEUP,
-    PAGEDOWN,
-    HOME,
-    END,
-}
-
-impl std::fmt::Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Key::ENTER => write!(f, "Enter"),
-            Key::ESC => write!(f, "Escape"),
-            Key::PAGEUP => write!(f, "PageUp"),
-            Key::PAGEDOWN => write!(f, "PageDown"),
-            Key::HOME => write!(f, "Home"),
-            Key::END => write!(f, "End"),
-        }
-    }
-}
-
 #[derive(Debug)]
-struct PressKeyAtArgs {
-    key: Key,
+struct PressKeyArgs {
+    key: String,
+    key_modifiers: Option<Vec<ModifierKey>>,
     tab_id: String,
 }
 
@@ -1159,22 +1140,34 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
                 }
             }
         },
-        "press_key_at" => {
+        "press_key" => {
             match parsed_args.as_slice() {
-                [tab_id, key_str] => {
-                    let key = match key_str.to_lowercase().as_str() {
-                        "enter" => Key::ENTER,
-                        "esc" => Key::ESC,
-                        "pageup" => Key::PAGEUP,
-                        "pagedown" => Key::PAGEDOWN,
-                        "home" => Key::HOME,
-                        "end" => Key::END,
-                        _ => return Err(format!("Unknown key: {}", key_str)),
-                    };
-                    Ok(Command::PressKeyAt(PressKeyAtArgs {
-                        key,
+                [tab_id, key] => {
+                    Ok(Command::PressKey(PressKeyArgs {
+                        key: key.clone(),
+                        key_modifiers: None,
                         tab_id: tab_id.clone(),
                     }))
+                },
+                [tab_id, key, key_modifiers] => {
+                    let modifiers: Result<Vec<ModifierKey>, String> = key_modifiers.split(',')
+                        .map(|modifier_str| match modifier_str.trim() {
+                            "Alt" => Ok(ModifierKey::Alt),
+                            "Ctrl" => Ok(ModifierKey::Ctrl),
+                            "Meta" => Ok(ModifierKey::Meta),
+                            "Shift" => Ok(ModifierKey::Shift),
+                            _ => Err(format!("Unknown key modifier: {}", modifier_str)),
+                        })
+                        .collect();
+
+                    match modifiers {
+                        Ok(modifiers) => Ok(Command::PressKey(PressKeyArgs {
+                            key: key.clone(),
+                            key_modifiers: Some(modifiers),
+                            tab_id: tab_id.clone(),
+                        })),
+                        Err(e) => Err(e),
+                    }
                 },
                 _ => {
                     Err("Missing one or several arguments `tab_id`, `key`".to_string())
