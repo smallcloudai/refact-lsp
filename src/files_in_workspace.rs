@@ -428,29 +428,24 @@ async fn enqueue_some_docs(
         let cpaths: Vec<String> = docs.iter().map(|doc| doc.doc_path.to_string_lossy().to_string()).collect();
         ast_indexer_enqueue_files(ast.clone(), cpaths, force).await;
     }
-    let (cache_correction_arc, _) = crate::files_correction::files_cache_rebuild_as_needed(gcx.clone()).await;
-    let mut moar_files: Vec<PathBuf> = Vec::new();
     for doc in docs {
-        // Keeping in the correction cache even deleted files
-        let doc_path_str = doc.doc_path.to_string_lossy().to_string();
-        if !cache_correction_arc.contains_key(&doc_path_str) {
-            moar_files.push(doc.doc_path.clone());
-        }
         if !doc.doc_path.exists() {
-            {
-                let workspace_files_arc = gcx.read().await.documents_state.workspace_files.clone();
-                let mut workspace_files = workspace_files_arc.lock().unwrap();
-                if let Some(idx) = workspace_files.iter().position(|file| file == &doc.doc_path) {
-                    workspace_files.remove(idx);
-                }
+            let workspace_files_arc = gcx.read().await.documents_state.workspace_files.clone();
+            let mut workspace_files = workspace_files_arc.lock().unwrap();
+            if let Some(idx) = workspace_files.iter().position(|file| file == &doc.doc_path) {
+                workspace_files.remove(idx);
             }
+        } else {
+            let workspace_files_arc = gcx.read().await.documents_state.workspace_files.clone();
+            let mut workspace_files = workspace_files_arc.lock().unwrap();
+            workspace_files.push(doc.doc_path.clone());
         }
     }
-    if moar_files.len() > 0 {
+    crate::files_correction::files_cache_rebuild_as_needed(gcx.clone()).await;
+    if !docs.is_empty() {
         info!("this made file cache dirty");
         let dirty_arc = {
             let gcx_locked = gcx.write().await;
-            gcx_locked.documents_state.workspace_files.lock().unwrap().extend(moar_files);
             gcx_locked.documents_state.cache_dirty.clone()
         };
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
