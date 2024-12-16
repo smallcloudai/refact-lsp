@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tokio::sync::RwLock as ARwLock;
 use regex::Regex;
 use axum::extract::Path;
+use axum::extract::Query;
 
 
 use crate::custom_error::ScratchError;
@@ -159,12 +160,9 @@ pub struct HTTPIntegrationDeleteQueryParams {
 }
 
 pub async fn handle_v1_integration_delete(
-    Extension(_gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
+    Query(params): Query<HTTPIntegrationDeleteQueryParams>,
 ) -> axum::response::Result<Response<Body>, ScratchError> {
-    let data = serde_json::from_slice::<HTTPIntegrationDeleteQueryParams>(&body_bytes)
-        .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
-    let integration_path = data.integration_path;
+    let integration_path = params.integration_path;
     log::info!("Deleting integration path: {:?}", integration_path);
 
     split_path_into_project_and_integration(&integration_path).map_err(

@@ -73,19 +73,3 @@ macro_rules! telemetry_get {
         })
     };
 }
-
-#[macro_export]
-macro_rules! telemetry_delete {
-    (
-        $name:ident
-    ) => {
-        delete(|path, method, ex, body_bytes| async {
-            let tmp = |ex: Extension<SharedGlobalContext>, body_bytes: hyper::body::Bytes|
-            -> Pin<Box<dyn Future<Output=Result<Response<Body>, ScratchError>> + Send>> {
-                Box::pin($name(ex, body_bytes))
-            };
-            telemetry_wrapper(tmp, path, method, ex, body_bytes).await
-        })
-    };
-}
-

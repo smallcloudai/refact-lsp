@@ -9,7 +9,7 @@ use hyper::Body;
 use hyper::Response;
 use tower_http::cors::CorsLayer;
 
-use crate::{telemetry_delete, telemetry_get, telemetry_post};
+use crate::{telemetry_get, telemetry_post};
 use crate::custom_error::ScratchError;
 use crate::global_context::SharedGlobalContext;
 use crate::http::routers::v1::code_completion::{handle_v1_code_completion_web, handle_v1_code_completion_prompt};
@@ -129,7 +129,7 @@ pub fn make_v1_router() -> Router {
         .route("/integrations-filtered/:integr_name", get(handle_v1_integrations_filtered))
         .route("/integration-get", telemetry_post!(handle_v1_integration_get))
         .route("/integration-save", telemetry_post!(handle_v1_integration_save))
-        .route("/integration-delete", telemetry_delete!(handle_v1_integration_delete))
+        .route("/integration-delete", delete(handle_v1_integration_delete))
         .route("/integration-icon/:icon_name", get(handle_v1_integration_icon))
 
         .route("/docker-container-list", telemetry_post!(handle_v1_docker_container_list))
