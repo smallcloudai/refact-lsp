@@ -167,8 +167,11 @@ pub async fn get_embedding_openai_style(
     if endpoint_template.is_empty() {
         return Err(format!("no embedding_endpoint configured"));
     }
+
+    // if we don't use vecdb, we don't need to fetch embeddings
     if api_key.is_empty() {
-        return Err(format!("cannot access embedding model, because api_key is empty"));
+        log::warn!("embedding model api_key is empty");
+    //    return Err(format!("cannot access embedding model, because api_key is empty"));
     }
     #[allow(non_snake_case)]
     let B = text.len();

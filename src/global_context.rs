@@ -38,6 +38,11 @@ pub struct CommandLine {
     pub address_url: String,
     #[structopt(long, short="k", default_value="", help="The API key to authenticate your requests, will appear in HTTP requests this binary makes.")]
     pub api_key: String,
+    
+    // some model developers require accept license in HF, that requires accessing HF with the token.
+    #[structopt(long, short="h", default_value="", help="The API key to authenticate your requests to huggingface API (for example to get tokenizers).")]
+    pub hf_api_key: String,
+    
     #[structopt(long, help="Trust self-signed SSL certificates, when connecting to an inference server.")]
     pub insecure: bool,
 

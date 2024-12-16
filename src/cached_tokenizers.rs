@@ -130,7 +130,7 @@ pub async fn cached_tokenizer(
 
     let (client2, cache_dir, tokenizer_arc, api_key) = {
         let cx_locked = global_context.read().await;
-        (cx_locked.http_client.clone(), cx_locked.cache_dir.clone(), cx_locked.tokenizer_map.clone().get(&model_name).cloned(), cx_locked.cmdline.api_key.clone())
+        (cx_locked.http_client.clone(), cx_locked.cache_dir.clone(), cx_locked.tokenizer_map.clone().get(&model_name).cloned(), cx_locked.cmdline.hf_api_key.clone())
     };
 
     if tokenizer_arc.is_some() {
