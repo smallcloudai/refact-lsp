@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use regex::Regex;
 use serde::Serialize;
-use serde_json::{json, Value, Map};
+use serde_json::{json, Value};
 use tokio::sync::RwLock as ARwLock;
 use tokio::fs as async_fs;
 use tokio::io::AsyncWriteExt;
