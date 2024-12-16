@@ -318,6 +318,20 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             }
         },
+        "gemini-2.0-flash-exp": {
+            "n_ctx": 128000,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_agent": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-pro"
+            ]
+        },
         "llama3/8b/instruct": {
             "n_ctx": 4096,
             "supports_scratchpads": {
@@ -512,7 +526,17 @@ pub const KNOWN_MODELS: &str = r####"
         "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20241022": "Xenova/claude-tokenizer",
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
-        "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer"
+        "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer",
+      
+        "gemini-2.0-flash-exp": "google/gemma-7b",
+        "gemini-1.5-flash": "google/gemma-7b",
+        "gemini-1.5-flash-8b": "google/gemma-7b",
+        "gemini-1.5-pro": "google/gemma-7b"
     }
 }
 "####;
+
+// gemini and gemma bear the same tokenizer 
+// according to https://medium.com/google-cloud/a-gemini-and-gemma-tokenizer-in-java-e18831ac9677
+// downloadable tokenizer.json does not exist for gemini, the only precise way is to use web-requests
+
