@@ -15,7 +15,7 @@ use tracing::info;
 use crate::git::git_ls_files;
 use crate::global_context::GlobalContext;
 use crate::telemetry;
-use crate::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS, SOURCE_FILE_EXTENSIONS};
+use crate::file_filter::{has_the_same_parent_as_one_of_the_others, is_in_one_of_the_workspaces_root, is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS, SOURCE_FILE_EXTENSIONS};
 use crate::ast::ast_indexer_thread::ast_indexer_enqueue_files;
 use crate::privacy::{check_file_privacy, load_privacy_if_needed, PrivacySettings, FilePrivacyLevel};
 
@@ -431,9 +431,19 @@ async fn enqueue_some_docs(
     let (cache_correction_arc, _) = crate::files_correction::files_cache_rebuild_as_needed(gcx.clone()).await;
     let mut moar_files: Vec<PathBuf> = Vec::new();
     for doc in docs {
+        // Keeping in the correction cache even deleted files
         let doc_path_str = doc.doc_path.to_string_lossy().to_string();
         if !cache_correction_arc.contains_key(&doc_path_str) {
             moar_files.push(doc.doc_path.clone());
+        }
+        if !doc.doc_path.exists() {
+            {
+                let workspace_files_arc = gcx.read().await.documents_state.workspace_files.clone();
+                let mut workspace_files = workspace_files_arc.lock().unwrap();
+                if let Some(idx) = workspace_files.iter().position(|file| file == &doc.doc_path) {
+                    workspace_files.remove(idx);
+                }
+            }
         }
     }
     if moar_files.len() > 0 {
@@ -630,10 +640,32 @@ pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
 
 pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalContext>>)
 {
+    fn is_valid_path(
+        path: &PathBuf,
+        workspace_folders: Arc<StdMutex<Vec<PathBuf>>>,
+        workspace_files: Arc<StdMutex<Vec<PathBuf>>>
+    ) -> bool {
+        if !is_in_one_of_the_workspaces_root(&path, workspace_folders)
+            && !has_the_same_parent_as_one_of_the_others(&path, workspace_files) {
+            if is_this_inside_blacklisted_dir(&path) {
+                return false;
+            }
+        }
+        true
+    }
+    
     async fn on_create_modify(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut docs = vec![];
+        let (workspace_folders, workspace_files) = if let Some(gcx) = gcx_weak.clone().upgrade() {
+            let gcx_locked = gcx.read().await;
+            (gcx_locked.documents_state.workspace_folders.clone(),gcx_locked.documents_state.workspace_files.clone())
+        } else {
+            tracing::warn!("gcx is not available, cannot process file watcher signal");
+            return;
+        };
+        
         for p in &event.paths {
-            if is_this_inside_blacklisted_dir(&p) {  // important to filter BEFORE canonical_path
+            if !is_valid_path(&p, workspace_folders.clone(), workspace_files.clone()) {  // important to filter BEFORE canonical_path
                 continue;
             }
 
@@ -661,19 +693,20 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
     }
 
     async fn on_remove(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
-        let mut never_mind = true;
-        for p in &event.paths {
-            never_mind &= is_this_inside_blacklisted_dir(&p);
-        }
+        let (workspace_folders, workspace_files) = if let Some(gcx) = gcx_weak.clone().upgrade() {
+            let gcx_locked = gcx.read().await;
+            (gcx_locked.documents_state.workspace_folders.clone(),gcx_locked.documents_state.workspace_files.clone())
+        } else {
+            tracing::warn!("gcx is not available, cannot process file watcher signal");
+            return;
+        };
         let mut docs = vec![];
-        if !never_mind {
-            for p in &event.paths {
-                if is_this_inside_blacklisted_dir(&p) {
-                    continue;
-                }
-                let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
-                docs.push(Document { doc_path: cpath, doc_text: None });
+        for p in &event.paths {
+            if !is_valid_path(&p, workspace_folders.clone(), workspace_files.clone()) {
+                continue;
             }
+            let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
+            docs.push(Document { doc_path: cpath, doc_text: None });
         }
         if docs.is_empty() {
             return;
