@@ -528,10 +528,10 @@ pub const KNOWN_MODELS: &str = r####"
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
         "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer",
       
-        "gemini-2.0-flash-exp": "google/gemma-7b",
-        "gemini-1.5-flash": "google/gemma-7b",
-        "gemini-1.5-flash-8b": "google/gemma-7b",
-        "gemini-1.5-pro": "google/gemma-7b"
+        "gemini-2.0-flash-exp": "Xenova/gemma2-tokenizer",
+        "gemini-1.5-flash": "Xenova/gemma2-tokenizer",
+        "gemini-1.5-flash-8b": "Xenova/gemma2-tokenizer",
+        "gemini-1.5-pro": "Xenova/gemma2-tokenizer"
     }
 }
 "####;
