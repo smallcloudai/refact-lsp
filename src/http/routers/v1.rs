@@ -43,6 +43,7 @@ use crate::http::routers::v1::system_prompt::handle_v1_system_prompt;
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list};
+use crate::http::routers::v1::update_env::handle_v1_update_env;
 use crate::http::routers::v1::v1_integrations::{handle_v1_integration_get, handle_v1_integration_icon, handle_v1_integration_save, handle_v1_integration_delete, handle_v1_integrations, handle_v1_integrations_filtered};
 use crate::http::utils::telemetry_wrapper;
 
@@ -76,7 +77,7 @@ pub mod handlers_memdb;
 #[cfg(feature="vecdb")]
 pub mod vecdb;
 mod v1_integrations;
-
+mod update_env;
 
 pub fn make_v1_router() -> Router {
     let builder = Router::new()
@@ -131,7 +132,8 @@ pub fn make_v1_router() -> Router {
         .route("/integration-save", telemetry_post!(handle_v1_integration_save))
         .route("/integration-delete", delete(handle_v1_integration_delete))
         .route("/integration-icon/:icon_name", get(handle_v1_integration_icon))
-
+        .route("/update-env", telemetry_post!(handle_v1_update_env))
+        
         .route("/docker-container-list", telemetry_post!(handle_v1_docker_container_list))
         .route("/docker-container-action", telemetry_post!(handle_v1_docker_container_action))
 
