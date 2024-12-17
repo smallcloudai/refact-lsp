@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use glob::Pattern;
+use indexmap::IndexMap;
 use tokio::sync::Mutex as AMutex;
 use serde_json::{json, Value};
 use tokenizers::Tokenizer;
@@ -9,13 +10,15 @@ use tracing::{info, warn};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::at_commands::execute_at::MIN_RAG_CONTEXT_LIMIT;
 use crate::call_validation::{ChatMessage, ChatContent, ContextEnum, ContextFile, SubchatParameters};
+use crate::http::http_post_json;
+use crate::integrations::docker::docker_container_manager::docker_container_get_host_lsp_port_to_connect;
 use crate::postprocessing::pp_context_files::postprocess_context_files;
 use crate::postprocessing::pp_plain_text::postprocess_plain_text;
 use crate::scratchpads::scratchpad_utils::{HasRagResults, max_tokens_for_rag_chat};
-use crate::tools::tools_description::commands_require_confirmation_rules_from_integrations_yaml;
+use crate::tools::tools_description::{MatchConfirmDenyResult, Tool};
 use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
-
+use crate::http::routers::v1::at_tools::{ToolExecuteResponse, ToolsExecutePost};
 
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
     let (gcx, params_mb) = {
@@ -24,7 +27,7 @@ pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_nam
         let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
         (gcx, params)
     };
-    let params = match params_mb {
+    let mut params = match params_mb {
         Some(params) => params,
         None => {
             let tconfig = load_customization(gcx.clone(), true).await?;
@@ -32,20 +35,95 @@ pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_nam
                 .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
         }
     };
-    let _ = get_model_record(gcx, &params.subchat_model).await?; // check if the model exists
+
+    // check if the models exist otherwise use the external chat model
+    match get_model_record(gcx, &params.subchat_model).await {
+        Ok(_) => {}
+        Err(err) => {
+            let current_model = ccx.lock().await.current_model.clone();
+            warn!("subchat_model {} is not available: {}. Using {} model as a fallback", params.subchat_model, err, current_model);
+            params.subchat_model = current_model;
+        }
+    }
     Ok(params)
 }
 
-pub async fn run_tools(
+pub async fn run_tools_remotely(
     ccx: Arc<AMutex<AtCommandsContext>>,
+    model_name: &str,
+    maxgen: usize,
+    original_messages: &Vec<ChatMessage>,
+    stream_back_to_user: &mut HasRagResults,
+    style: &Option<String>,
+) -> Result<(Vec<ChatMessage>, bool), String> {
+    let (n_ctx, subchat_tool_parameters, postprocess_parameters, gcx, chat_id) = {
+        let ccx_locked = ccx.lock().await;
+        (
+            ccx_locked.n_ctx,
+            ccx_locked.subchat_tool_parameters.clone(),
+            ccx_locked.postprocess_parameters.clone(),
+            ccx_locked.global_context.clone(),
+            ccx_locked.chat_id.clone(),
+        )
+    };
+
+    let tools_execute_post = ToolsExecutePost {
+        messages: original_messages.clone(),
+        n_ctx,
+        maxgen,
+        subchat_tool_parameters,
+        postprocess_parameters,
+        model_name: model_name.to_string(),
+        chat_id: chat_id.clone(),
+        style: style.clone(),
+    };
+
+    let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
+    info!("run_tools_remotely: connecting to port {}", port);
+
+    let url = format!("http://localhost:{port}/v1/tools-execute");
+    let response: ToolExecuteResponse = http_post_json(&url, &tools_execute_post).await?;
+    info!("run_tools_remotely: got response: {:?}", response);
+
+    let mut all_messages = original_messages.to_vec();
+    for msg in response.messages {
+        all_messages.push(msg.clone());
+        stream_back_to_user.push_in_json(json!(msg));
+    }
+
+    Ok((all_messages, response.tools_runned))
+}
+
+pub async fn run_tools_locally(
+    ccx: Arc<AMutex<AtCommandsContext>>,
+    tools: IndexMap<String, Arc<AMutex<Box<dyn Tool+Send>>>>,
     tokenizer: Arc<RwLock<Tokenizer>>,
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
     style: &Option<String>,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
-    let gcx = ccx.lock().await.global_context.clone();
-    let at_tools = crate::tools::tools_description::tools_merged_and_filtered(gcx.clone()).await?;
+    let (new_messages, tools_runned) = run_tools( // todo: fix typo "runned"
+        ccx, tools, tokenizer, maxgen, original_messages, style
+    ).await?;
+
+    let mut all_messages = original_messages.to_vec();
+    for msg in new_messages {
+        all_messages.push(msg.clone());
+        stream_back_to_user.push_in_json(json!(msg));
+    }
+
+    Ok((all_messages, tools_runned))
+}
+
+pub async fn run_tools(
+    ccx: Arc<AMutex<AtCommandsContext>>,
+    tools: IndexMap<String, Arc<AMutex<Box<dyn Tool+Send>>>>,
+    tokenizer: Arc<RwLock<Tokenizer>>,
+    maxgen: usize,
+    original_messages: &Vec<ChatMessage>,
+    style: &Option<String>,
+) -> Result<(Vec<ChatMessage>, bool), String> {
     let n_ctx = ccx.lock().await.n_ctx;
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
     let tokens_for_rag = reserve_for_context;
@@ -54,25 +132,24 @@ pub async fn run_tools(
 
     if tokens_for_rag < MIN_RAG_CONTEXT_LIMIT {
         warn!("There are tool results, but tokens_for_rag={tokens_for_rag} is very small, bad things will happen.");
-        return Ok((original_messages.clone(), false));
+        return Ok((vec![], false));
     }
 
     let last_msg_tool_calls = match original_messages.last().filter(|m|m.role=="assistant") {
         Some(m) => m.tool_calls.clone().unwrap_or(vec![]),
-        None => return Ok((original_messages.clone(), false)),
+        None => return Ok((vec![], false)),
     };
     if last_msg_tool_calls.is_empty() {
-        return Ok((original_messages.clone(), false));
+        return Ok((vec![], false));
     }
 
     let mut context_files_for_pp = vec![];
     let mut generated_tool = vec![];  // tool results must go first
     let mut generated_other = vec![];
     let mut any_corrections = false;
-    let mut confirmation_rules = None;
 
     for t_call in last_msg_tool_calls {
-        let cmd = match at_tools.get(&t_call.function.name) {
+        let cmd = match tools.get(&t_call.function.name) {
             Some(cmd) => cmd.clone(),
             None => {
                 let tool_failed_message = tool_answer(
@@ -95,45 +172,29 @@ pub async fn run_tools(
             }
         };
         info!("tool use {}({:?})", &t_call.function.name, args);
-
-        let command_to_match = match {
+        
+        {
             let cmd_lock = cmd.lock().await;
-            cmd_lock.command_to_match_against_confirm_deny(&args)
-        } {
-            Ok(command_to_match) => command_to_match,
-            Err(e) => {
-                let tool_failed_message = tool_answer(
-                    format!("tool use: {}", e), t_call.id.to_string()
-                );
-                generated_tool.push(tool_failed_message);
-                continue;
-            }
-        };
-
-        if !command_to_match.is_empty() {
-            if confirmation_rules.is_none() {
-                confirmation_rules = match commands_require_confirmation_rules_from_integrations_yaml(gcx.clone()).await {
-                    Ok(g) => Some(g),
-                    Err(e) => {
-                        let tool_failed_message = tool_answer(format!("tool use: {}", e), t_call.id.to_string());
-                        generated_tool.push(tool_failed_message);
-                        continue;
+            match cmd_lock.match_against_confirm_deny(&args) {
+                Ok(res) => {
+                    match res.result {
+                        MatchConfirmDenyResult::DENY => {
+                            let command_to_match = cmd_lock
+                                .command_to_match_against_confirm_deny(&args)
+                                .unwrap_or("<error_command>".to_string());
+                            generated_tool.push(tool_answer(format!("tool use: command '{command_to_match}' is denied"), t_call.id.to_string()));
+                            continue;
+                        }
+                        _ => {}
                     }
-                };
-            }
-
-            if let Some(rules) = &confirmation_rules {
-                let (is_denied, reason) = command_should_be_denied(&command_to_match, &rules.commands_deny, false);
-                if is_denied {
-                    let tool_failed_message = tool_answer(
-                        format!("tool use: {}", reason), t_call.id.to_string()
-                    );
-                    generated_tool.push(tool_failed_message);
+                }
+                Err(err) => {
+                    generated_tool.push(tool_answer(format!("tool use: {}", err), t_call.id.to_string()));
                     continue;
                 }
             }
-        }
-
+        };
+        
         let (corrections, tool_execute_results) = {
             let mut cmd_lock = cmd.lock().await;
             match cmd_lock.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
@@ -185,15 +246,12 @@ pub async fn run_tools(
         style,
     ).await;
 
-    let mut all_messages = original_messages.to_vec();
-    for msg in generated_tool.iter().chain(generated_other.iter()) {
-        all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
-    }
+    let new_messages = generated_tool.into_iter().chain(generated_other.into_iter())
+        .collect::<Vec<_>>();
 
     ccx.lock().await.pp_skeleton = false;
 
-    Ok((all_messages, true))
+    Ok((new_messages, true))
 }
 
 async fn pp_run_tools(
@@ -330,7 +388,7 @@ pub fn command_should_be_confirmed_by_user(
         let pattern = Pattern::new(glob).unwrap();
         pattern.matches(&command)
     }) {
-        return (true, format!("Command {} needs confirmation due to rule {}", command, rule));
+        return (true, rule.clone());
     }
     (false, "".to_string())
 }
@@ -338,18 +396,12 @@ pub fn command_should_be_confirmed_by_user(
 pub fn command_should_be_denied(
     command: &String,
     commands_deny_rules: &Vec<String>,
-    detailed: bool,
 ) -> (bool, String) {
     if let Some(rule) = commands_deny_rules.iter().find(|glob| {
         let pattern = Pattern::new(glob).unwrap();
         pattern.matches(&command)
     }) {
-        let message = if detailed {
-            format!("Command {} is denied due to rule {}", command, rule)
-        } else {
-            format!("Command {} is denied", command)
-        };
-        return (true, message);
+        return (true, rule.clone());
     }
 
     (false, "".to_string())

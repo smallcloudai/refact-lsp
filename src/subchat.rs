@@ -21,6 +21,7 @@ const MAX_NEW_TOKENS: usize = 4096;
 
 pub async fn create_chat_post_and_scratchpad(
     global_context: Arc<ARwLock<GlobalContext>>,
+    ccx: Arc<AMutex<AtCommandsContext>>,
     model_name: &str,
     messages: Vec<&ChatMessage>,
     temperature: Option<f32>,
@@ -29,6 +30,7 @@ pub async fn create_chat_post_and_scratchpad(
     tools: Option<Vec<Value>>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
+    _should_execute_remotely: bool,
 ) -> Result<(ChatPost, Box<dyn ScratchpadAbstract>), String> {
     let caps = try_load_caps_quickly_if_not_present(
         global_context.clone(), 0,
@@ -58,11 +60,10 @@ pub async fn create_chat_post_and_scratchpad(
         only_deterministic_messages,
         subchat_tool_parameters: tconfig.subchat_tool_parameters.clone(),
         postprocess_parameters: PostprocessSettings::new(),
-        chat_id: "".to_string(),
-        style: None,
+        ..Default::default()
     };
 
-    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality) = lookup_chat_scratchpad(
+    let (model_name, scratchpad_name, scratchpad_patch, n_ctx, supports_tools, _supports_multimodality, supports_clicks) = lookup_chat_scratchpad(
         caps.clone(),
         &chat_post,
     ).await?;
@@ -74,16 +75,22 @@ pub async fn create_chat_post_and_scratchpad(
     chat_post.max_tokens = n_ctx;
     chat_post.scratchpad = scratchpad_name.clone();
 
+    {
+        let mut ccx_locked = ccx.lock().await;
+        ccx_locked.current_model = model_name.to_string();
+    }
+
     let scratchpad = crate::scratchpads::create_chat_scratchpad(
         global_context.clone(),
         caps,
         model_name.to_string(),
-        &chat_post,
+        &mut chat_post,
         &messages.into_iter().cloned().collect::<Vec<_>>(),
         &scratchpad_name,
         &scratchpad_patch,
         false,
         supports_tools,
+        supports_clicks,
     ).await?;
 
     Ok((chat_post, scratchpad))
@@ -208,16 +215,15 @@ pub async fn chat_interaction(
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
     let prompt = spad.prompt(ccx.clone(), &mut chat_post.parameters).await?;
     let stream = chat_post.stream.unwrap_or(false);
-    return if stream {
-        todo!();
-    } else {
-        Ok(chat_interaction_non_stream(
-            ccx.clone(),
-            spad,
-            &prompt,
-            chat_post,
-        ).await?)
+    if stream {
+        warn!("subchats doesn't support streaming, fallback to non-stream communications");
     }
+    Ok(chat_interaction_non_stream(
+        ccx.clone(),
+        spad,
+        &prompt,
+        chat_post,
+    ).await?)
 }
 
 fn update_usage_from_messages(usage: &mut ChatUsage, messages: &Vec<Vec<ChatMessage>>) {
@@ -247,9 +253,11 @@ pub async fn subchat_single(
     tx_toolid_mb: Option<String>,
     tx_chatid_mb: Option<String>,
 ) -> Result<Vec<Vec<ChatMessage>>, String> {
-    let gcx = ccx.lock().await.global_context.clone();
-
-    let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone()).await?;
+    let (gcx, should_execute_remotely) = {
+        let ccx_locked = ccx.lock().await;
+        (ccx_locked.global_context.clone(), ccx_locked.should_execute_remotely)
+    };
+    let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone(), false).await?;
     let tools_turn_on_set: HashSet<String> = tools_subset.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.keys().cloned().collect();
     let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
@@ -267,6 +275,7 @@ pub async fn subchat_single(
     let max_new_tokens = max_new_tokens.unwrap_or(MAX_NEW_TOKENS);
     let (mut chat_post, spad) = create_chat_post_and_scratchpad(
         gcx.clone(),
+        ccx.clone(),
         model_name,
         messages.iter().collect::<Vec<_>>(),
         temperature,
@@ -275,6 +284,7 @@ pub async fn subchat_single(
         Some(tools),
         tool_choice.clone(),
         only_deterministic_messages,
+        should_execute_remotely,
     ).await?;
 
     let chat_response_msgs = chat_interaction(ccx.clone(), spad, &mut chat_post).await?;

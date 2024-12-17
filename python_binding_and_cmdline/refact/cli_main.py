@@ -39,7 +39,9 @@ app: Optional[Application] = None
 
 async def answer_question_in_arguments(settings, arg_question):
     cli_streaming.add_streaming_message(chat_client.Message(role="user", content=arg_question))
+    cli_streaming.start_streaming()
     await the_chatting_loop(settings.model, max_auto_resubmit=4)
+    cli_streaming.flush_response()
 
 
 tips_of_the_day = '''
@@ -200,10 +202,8 @@ def on_submit(buffer):
 
     start_streaming()
 
-    # print_response("\nwait\n")
-
     async def asyncfunc():
-        await the_chatting_loop(cli_settings.args.model, max_auto_resubmit=(1 if cli_settings.args.always_pause else 6))
+        await the_chatting_loop(cli_settings.args.model, cli_settings.args.chat_id, cli_settings.args.chat_remote, max_auto_resubmit=(1 if cli_settings.args.always_pause else 6))
         if len(cli_streaming.streaming_messages) == 0:
             return
         # cli_streaming.print_response("\n")  # flush_response inside
@@ -224,8 +224,6 @@ def on_submit(buffer):
 
 
 async def chat_main():
-    global lsp_runner, app
-
     args = sys.argv[1:]
     if '--' in args:
         split_index = args.index('--')
@@ -244,13 +242,78 @@ async def chat_main():
     parser.add_argument('--always-pause', action='store_true', help="Pause even if the model tries to run tools, normally that's submitted automatically")
     parser.add_argument('--start-with', type=str, default=False, help="Start with messages in a .json file, the format is [msg, msg, ...]")
     parser.add_argument('--compressor', action='store_true', help="Compress trajectory that comes from reading --start-with and exit")
+    parser.add_argument('--chat-id', type=str, default=None, help="Optional unique id of the chat")
+    parser.add_argument('--chat-remote', type=bool, default=False, help="Run the chat on isolation in docker")
     parser.add_argument('question', nargs=argparse.REMAINDER, help="You can continue your question in the command line after --")
     args_parsed = parser.parse_args(before_minus_minus)
     arg_question = " ".join(after_minus_minus)
 
+    cli_settings.cli_yaml = cli_settings.load_cli_or_auto_configure()
+
+    refact_args = [
+        os.path.join(os.path.dirname(__file__), "bin", "refact-lsp"),
+    ]
+    if cli_settings.cli_yaml.address_url:
+        refact_args.extend(["--address-url", cli_settings.cli_yaml.address_url])
+    if cli_settings.cli_yaml.api_key:
+        refact_args.extend(["--api-key", cli_settings.cli_yaml.api_key])
+    if cli_settings.cli_yaml.insecure_ssl:
+        refact_args.append("--insecure-ssl")
+    if cli_settings.cli_yaml.basic_telemetry:
+        refact_args.append("--basic-telemetry")
+    if cli_settings.cli_yaml.experimental:
+        refact_args.append("--experimental")
+    if cli_settings.cli_yaml.ast:
+        refact_args.extend(["--ast", "--ast-max-files", str(cli_settings.cli_yaml.ast_max_files)])
+    if cli_settings.cli_yaml.vecdb:
+        refact_args.extend(["--vecdb", "--vecdb-max-files", str(cli_settings.cli_yaml.vecdb_max_files)])
+    if args_parsed.path_to_project:
+        refact_args.extend(["--workspace-folder", args_parsed.path_to_project])
+    lsp_runner = LSPServerRunner(
+        refact_args,
+        wait_for_ast_vecdb=False,
+        refact_lsp_log=None,
+        verbose=False
+    )
+
+    lsp_runner.set_xdebug(args_parsed.xdebug)
+    chat_id = args_parsed.chat_id or ("cli-" + ''.join(random.choices('0123456789abcdef', k=10)))
+
+    async with lsp_runner:
+        caps = await cli_settings.fetch_caps(lsp_runner.base_url())
+        cli_settings.args = cli_settings.CmdlineArgs(
+            caps,
+            model=args_parsed.model,
+            path_to_project=args_parsed.path_to_project,
+            always_pause=args_parsed.always_pause,
+            chat_id=chat_id,
+            chat_remote=args_parsed.chat_remote,
+        )
+        await actual_chat(lsp_runner, start_with=args_parsed.start_with, caps=caps, arg_question=arg_question, run_compressor=args_parsed.compressor)
+
+
+async def actual_chat(
+    lsp_runner_,
+    *,
+    caps: cli_settings.Caps,
+    arg_question: str = "",
+    run_compressor: bool = False,
+    start_with: str,
+):
+    if start_with:
+        with open(start_with, "r") as f:
+            startwith = json.loads(f.read())
+        for msg_j in startwith:
+            cli_streaming.process_streaming_data(msg_j, None)
+        cli_streaming.flush_response()
+        cli_printing.print_formatted_text(FormattedText([
+            (f"fg:#808080", "\n\n -- started with %d messages --\n" % len(cli_streaming.streaming_messages)),
+        ]))
+
+    global lsp_runner
+    lsp_runner = lsp_runner_
     history_fn = os.path.expanduser("~/.cache/refact/cli_history")
     session: PromptSession = PromptSession(history=FileHistory(history_fn))
-
     tool_completer = ToolsCompleter()
     text_area = TextArea(
         height=10,
@@ -276,76 +339,32 @@ async def chat_main():
         Window(),
         cli_statusbar.StatusBar(),
     ])
-    layout = Layout(hsplit)
-    app = Application(key_bindings=kb, layout=layout)
 
-    cli_settings.cli_yaml = cli_settings.load_cli_or_auto_configure()
+    layout = Layout(hsplit)
+    global app
+    app = Application(key_bindings=kb, layout=layout)
     app.editing_mode = cli_settings.cli_yaml.get_editing_mode()
 
-    refact_args = [
-        os.path.join(os.path.dirname(__file__), "bin", "refact-lsp"),
-        "--address-url", cli_settings.cli_yaml.address_url,
-        "--api-key", cli_settings.cli_yaml.api_key,
-    ]
-    if cli_settings.cli_yaml.insecure_ssl:
-        refact_args.append("--insecure-ssl")
-    if cli_settings.cli_yaml.basic_telemetry:
-        refact_args.append("--basic-telemetry")
-    if cli_settings.cli_yaml.experimental:
-        refact_args.append("--experimental")
-    if cli_settings.cli_yaml.ast:
-        refact_args.append("--ast")
-        refact_args.append("--ast-max-files")
-        refact_args.append(str(cli_settings.cli_yaml.ast_max_files))
-    if cli_settings.cli_yaml.vecdb:
-        refact_args.append("--vecdb")
-        refact_args.append("--vecdb-max-files")
-        refact_args.append(str(cli_settings.cli_yaml.vecdb_max_files))
-    if args_parsed.path_to_project:
-        refact_args.append("--workspace-folder")
-        refact_args.append(args_parsed.path_to_project)
-    lsp_runner = LSPServerRunner(
-        refact_args,
-        wait_for_ast_vecdb=False,
-        refact_lsp_log=None,
-        verbose=False
-    )
+    if cli_settings.args.model not in caps.code_chat_models:
+        known_models = list(caps.code_chat_models.keys())
+        print(f"model {cli_settings.args.model} is unknown, pick one of {known_models}")
+        return
 
-    if args_parsed.start_with:
-        with open(args_parsed.start_with, "r") as f:
-            startwith = json.loads(f.read())
-        for msg_j in startwith:
-            cli_streaming.process_streaming_data(msg_j)
-        cli_streaming.flush_response()
-        cli_printing.print_formatted_text(FormattedText([
-            (f"fg:#808080", "\n\n -- started with %d messages --\n" % len(cli_streaming.streaming_messages)),
-        ]))
+    cli_statusbar.model_section = f"model {cli_settings.args.model} context {cli_settings.args.n_ctx()}"
 
-    lsp_runner.set_xdebug(args_parsed.xdebug)
-    async with lsp_runner:
-        caps = await cli_settings.fetch_caps(lsp_runner.base_url())
-        cli_settings.args = cli_settings.CmdlineArgs(caps, args_parsed)
+    if run_compressor:
+        await traj_compressor.trajectory_compressor(cli_streaming.streaming_messages)
+        return
 
-        if cli_settings.args.model not in caps.code_chat_models:
-            known_models = list(caps.code_chat_models.keys())
-            print(f"model {cli_settings.args.model} is unknown, pick one of {known_models}")
-            return
+    await welcome_message(cli_settings.args, random.choice(tips_of_the_day))
 
-        cli_statusbar.model_section = f"model {cli_settings.args.model} context {cli_settings.args.n_ctx()}"
+    if arg_question:
+        print(arg_question)
+        await answer_question_in_arguments(cli_settings.args, arg_question)
+        return
 
-        if args_parsed.compressor:
-            await traj_compressor.trajectory_compressor(cli_streaming.streaming_messages)
-            return
-
-        await welcome_message(cli_settings.args, random.choice(tips_of_the_day))
-
-        if arg_question:
-            print(arg_question)
-            await answer_question_in_arguments(cli_settings.args, arg_question)
-            return
-
-        asyncio.create_task(cli_statusbar.statusbar_background_task())
-        await start_app(app)
+    asyncio.create_task(cli_statusbar.statusbar_background_task())
+    await start_app(app)
 
 
 def entrypoint():

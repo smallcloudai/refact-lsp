@@ -7,8 +7,7 @@ pub const KNOWN_MODELS: &str = r####"
                 "FIM-PSM": {
                     "context_format": "starcoder",
                     "rag_ratio": 0.5
-                },
-                "FIM-SPM": {}
+                }
             },
             "default_scratchpad": "FIM-PSM",
             "similar_models": [
@@ -42,11 +41,7 @@ pub const KNOWN_MODELS: &str = r####"
         "smallcloudai/Refact-1_6B-fim": {
             "n_ctx": 4096,
             "supports_scratchpads": {
-                "FIM-PSM": {},
-                "FIM-SPM": {
-                    "context_format": "default",
-                    "rag_ratio": 0
-                }
+                "FIM-SPM": { }
             },
             "default_scratchpad": "FIM-SPM",
             "similar_models": [
@@ -90,8 +85,7 @@ pub const KNOWN_MODELS: &str = r####"
         "stable/3b/code": {
             "n_ctx": 4096,
             "supports_scratchpads": {
-                "FIM-PSM": {},
-                "FIM-SPM": {}
+                "FIM-PSM": {}
             },
             "default_scratchpad": "FIM-PSM",
             "similar_models": []
@@ -105,11 +99,14 @@ pub const KNOWN_MODELS: &str = r####"
                     "keyword_system": "<|start_header_id|>system<|end_header_id|>\n\n",
                     "keyword_user": "<|start_header_id|>user<|end_header_id|>\n\n",
                     "keyword_assistant": "<|start_header_id|>assistant<|end_header_id|>\n\n",
-                    "eot": "<|eot_id|>"
+                    "eot": "<|eot_id|>",
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
                 }
             },
             "default_scratchpad": "REPLACE",
             "similar_models": [
+                "llama3/8b/instruct/neuron",
                 "llama3/8b/instruct/vllm",
                 "llama3.1/8b/instruct",
                 "llama3.1/8b/instruct/vllm",
@@ -117,6 +114,120 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3.2/3b/instruct/vllm",
                 "llama3.2/1b/instruct",
                 "llama3.2/1b/instruct/vllm"
+            ]
+        },
+        "gpt-4o": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { 
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "gpt-4o-2024-05-13",
+                "gpt-4o-2024-08-06",
+                "openai/gpt-4o"
+            ]
+        },
+        "gpt-4o-mini": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { 
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "gpt-4o-mini-2024-07-18"
+            ]
+        },
+        "groq-llama-3.1-8b": {
+            "n_ctx": 128000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { 
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "groq-llama-3.1-70b",
+                "groq-llama-3.2-1b",
+                "groq-llama-3.2-3b",
+                "groq-llama-3.2-11b-vision",
+                "groq-llama-3.2-90b-vision"
+            ]
+        },        
+        "cerebras-llama3.1-8b": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": { 
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "cerebras-llama3.1-70b"
+            ]
+        },
+        "qwen2.5/coder/0.5b/instruct": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "REPLACE": {
+                    "token_bos": "",
+                    "token_esc": "",
+                    "keyword_system": "<|im_start|>system\n",
+                    "keyword_user": "<|im_start|>user\n",
+                    "keyword_assistant": "<|im_start|>assistant\n",
+                    "eot": "<|im_end|>",
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "default_scratchpad": "REPLACE",
+            "similar_models": [
+                "qwen2.5/coder/0.5b/instruct/vllm",
+                "qwen2.5/coder/1.5b/instruct",
+                "qwen2.5/coder/1.5b/instruct/vllm",
+                "qwen2.5/coder/3b/instruct",
+                "qwen2.5/coder/3b/instruct/vllm",
+                "qwen2.5/coder/7b/instruct/gptq8bit",
+                "qwen2.5/coder/7b/instruct",
+                "qwen2.5/coder/7b/instruct/vllm",
+                "qwen2.5/coder/14b/instruct/gptq8bit",
+                "qwen2.5/coder/14b/instruct",
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/gptq8bit",
+                "qwen2.5/coder/32b/instruct",
+                "qwen2.5/coder/32b/instruct/vllm"
+            ]
+        },
+        "qwen2.5/coder/0.5b/base": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "FIM-PSM": {
+                    "fim_prefix": "<|fim_prefix|>",
+                    "fim_suffix": "<|fim_suffix|>",
+                    "fim_middle": "<|fim_middle|>",
+                    "eot": "<|endoftext|>",
+                    "extra_stop_tokens": ["<|repo_name|>", "<|file_sep|>", "<|fim_pad|>"],
+                    "context_format": "qwen2.5",
+                    "rag_ratio": 0.5
+                }
+            },
+            "default_scratchpad": "FIM-PSM",
+            "similar_models": [
+                "qwen2.5/coder/1.5b/base",
+                "qwen2.5/coder/3b/base",
+                "qwen2.5/coder/7b/base",
+                "qwen2.5/coder/14b/base",
+                "qwen2.5/coder/32b/base",
+                "qwen2.5/coder/0.5b/base/vllm",
+                "qwen2.5/coder/1.5b/base/vllm",
+                "qwen2.5/coder/3b/base/vllm",
+                "qwen2.5/coder/7b/base/vllm",
+                "qwen2.5/coder/14b/base/vllm",
+                "qwen2.5/coder/32b/base/vllm"
             ]
         }
     },
@@ -142,6 +253,7 @@ pub const KNOWN_MODELS: &str = r####"
             "n_ctx": 128000,
             "supports_tools": true,
             "supports_multimodality": true,
+            "supports_agent": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {
                 }
@@ -164,6 +276,14 @@ pub const KNOWN_MODELS: &str = r####"
                 "gpt-4o-mini-2024-07-18"
             ]
         },
+        "o1-mini": {
+            "n_ctx": 128000,
+            "supports_tools": true,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {
+                }
+            }
+        },
         "claude-instant-1.2": {
             "n_ctx": 8096,
             "supports_scratchpads": {
@@ -179,12 +299,24 @@ pub const KNOWN_MODELS: &str = r####"
         "claude-3-5-sonnet": {
             "n_ctx": 16384,
             "supports_tools": true,
+            "supports_multimodality": true,
+            "supports_agent": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
             },
             "similar_models": [
                 "claude-3-5-sonnet-20240620"
             ]
+        },
+        "claude-3-5-sonnet-20241022": {
+            "n_ctx": 16384,
+            "supports_tools": true,
+            "supports_multimodality": true,
+            "supports_clicks": true,
+            "supports_agent": true,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
         },
         "llama3/8b/instruct": {
             "n_ctx": 4096,
@@ -211,17 +343,6 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3.2/3b/instruct/vllm",
                 "llama3.2/1b/instruct",
                 "llama3.2/1b/instruct/vllm"
-            ]
-        },
-        "groq-llama-3.1-8b": {
-            "n_ctx": 128000,
-            "supports_tools": true,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {
-                }
-            },
-            "similar_models": [
-                "groq-llama-3.1-70b"
             ]
         },
         "wizardlm/7b": {
@@ -305,6 +426,65 @@ pub const KNOWN_MODELS: &str = r####"
                 "deepseek-coder/6.7b/instruct-finetune",
                 "deepseek-coder/6.7b/instruct-finetune/vllm"
             ]
+        },
+        "groq-llama-3.1-8b": {
+            "n_ctx": 128000,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "groq-llama-3.1-70b",
+                "groq-llama-3.2-1b",
+                "groq-llama-3.2-3b",
+                "groq-llama-3.2-11b-vision",
+                "groq-llama-3.2-90b-vision"
+            ]
+        },
+        "cerebras-llama3.1-8b": {
+            "n_ctx": 8192,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "cerebras-llama3.1-70b"
+            ]
+        },
+        "qwen2.5/coder/0.5b/instruct": {
+            "n_ctx": 8192,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "CHAT-GENERIC": {
+                    "token_bos": "",
+                    "token_esc": "",
+                    "keyword_system": "<|im_start|>system\n",
+                    "keyword_user": "<|im_start|>user\n",
+                    "keyword_assistant": "<|im_start|>assistant\n",
+                    "eot": "<|im_end|>",
+                    "stop_list": [
+                        "<|im_end|>"
+                    ]
+                }
+            },
+            "similar_models": [
+                "qwen2.5/coder/1.5b/instruct",
+                "qwen2.5/coder/1.5b/instruct/vllm",
+                "qwen2.5/coder/3b/instruct",
+                "qwen2.5/coder/3b/instruct/vllm",
+                "qwen2.5/coder/7b/instruct/gptq8bit",
+                "qwen2.5/coder/7b/instruct",
+                "qwen2.5/coder/7b/instruct/vllm",
+                "qwen2.5/coder/14b/instruct/gptq8bit",
+                "qwen2.5/coder/14b/instruct",
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/gptq8bit",
+                "qwen2.5/coder/32b/instruct",
+                "qwen2.5/coder/32b/instruct/vllm"
+            ]
         }
     },
     "tokenizer_rewrite_path": {
@@ -323,14 +503,16 @@ pub const KNOWN_MODELS: &str = r####"
         "gpt-4o-2024-08-06":      "Xenova/gpt-4o",
         "gpt-4o-mini":            "Xenova/gpt-4o",
         "gpt-4o-mini-2024-07-18": "Xenova/gpt-4o",
+        "o1-mini":                "Xenova/gpt-4o",
         "openai/gpt-4":           "Xenova/gpt-4",
         "openai/gpt-4-turbo":     "Xenova/gpt-4",
         "openai/gpt-4o":          "Xenova/gpt-4o",
         "openai/gpt-4o-mini":     "Xenova/gpt-4o",
         "claude-3-5-sonnet":          "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer",
+        "claude-3-5-sonnet-20241022": "Xenova/claude-tokenizer",
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
-        "groq-llama-3.1-70b":     "Xenova/Meta-Llama-3.1-Tokenizer"
+        "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer"
     }
 }
 "####;

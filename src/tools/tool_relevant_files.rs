@@ -61,6 +61,8 @@ pub struct ToolRelevantFiles;
 
 #[async_trait]
 impl Tool for ToolRelevantFiles {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    
     async fn tool_execute(
         &mut self,
         ccx: Arc<AMutex<AtCommandsContext>>,
@@ -89,6 +91,7 @@ impl Tool for ToolRelevantFiles {
                 false,
                 ccx_lock.messages.clone(),
                 ccx_lock.chat_id.clone(),
+                ccx_lock.should_execute_remotely,
             ).await;
             t.subchat_tx = ccx_lock.subchat_tx.clone();
             t.subchat_rx = ccx_lock.subchat_rx.clone();

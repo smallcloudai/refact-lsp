@@ -39,15 +39,34 @@ class Usage(BaseModel):
     completion_tokens: int
 
 
+class MultimodalElement(BaseModel):
+    m_type: str
+    m_content: str
+
+
 class Message(BaseModel):
     role: Literal["system", "assistant", "user", "tool", "context_file", "diff", "plain_text", "cd_instruction"]
-    content: Optional[Union[str, List]] = None
+    content: Optional[Union[str, List[MultimodalElement]]] = None
     tool_calls: Optional[List[ToolCallDict]] = None
     finish_reason: str = ""
     tool_call_id: str = ""
     usage: Optional[Usage] = None
     subchats: Optional[DefaultDict[str, List[Message]]] = None
     model_config = ConfigDict()
+
+
+def format_multimodal(content: List[MultimodalElement]) -> str:
+    assert isinstance(content, list)
+    result = []
+    for i, element in enumerate(content):
+        result.append("multimodal[%d] m_type=%r" % (i, element.m_type))
+        if element.m_type == "text":
+            result.append("%s" % element.m_content.strip())
+        elif element.m_type.startswith("image"):
+            result.append("%s..." % element.m_content[:50])
+        else:
+            assert 0, element.m_type
+    return "\n".join(result)
 
 
 def messages_to_dicts(
@@ -61,6 +80,7 @@ def messages_to_dicts(
     listofdict = []
     log = ""
     tools_namesonly = [x["function"]["name"] for x in tools] if tools else []
+    # tools_namesonly = [x.get("name", x.get("function", {}).get("name")) for x in tools] if tools else []
     log += termcolor.colored("------ call chat %s T=%0.2f tools=%s ------\n" % (model_name, temperature, tools_namesonly), "red")
     for x in messages:
         if x.role in ["system", "user", "assistant", "tool", "context_file", "diff", "plain_text", "cd_instruction"]:
@@ -72,7 +92,7 @@ def messages_to_dicts(
             continue
         if x.role == "tool" and x.content is not None:
             log += termcolor.colored(x.role, "yellow") + " " + \
-                "\n%s" % termcolor.colored(x.content.strip(), "magenta") + "\n"
+                "\n%s" % termcolor.colored(x.content, "magenta") + "\n"
             continue
         tool_calls = ""
         if x.tool_calls is not None:
@@ -93,8 +113,10 @@ def join_messages_and_choices(
     verbose: bool
 ) -> List[List[Message]]:
     messages = list(orig_messages)
-    while len(messages) > 0 and messages[-1].role == "user":
-        messages.pop()
+    # If at commands replaced user messages, remove original ones to avoid duplication
+    if len(deterministic_messages) > 0 and deterministic_messages[-1].role == "user":
+        while len(messages) > 0 and messages[-1].role == "user":
+            messages.pop()
     messages.extend(deterministic_messages)
     msg: Optional[Message]
     if verbose:
@@ -110,6 +132,11 @@ def join_messages_and_choices(
         if verbose and isinstance(msg.content, str):
             print("result[%d]" % i,
                   termcolor.colored(msg.content, "yellow"),
+                  termcolor.colored(msg.finish_reason, "red"))
+        elif verbose and isinstance(msg.content, list):
+            formatted_content = format_multimodal(msg.content)
+            print("result[%d]" % i,
+                  termcolor.colored(formatted_content, "yellow"),
                   termcolor.colored(msg.finish_reason, "red"))
         if verbose and isinstance(msg.tool_calls, list):
             for tcall in msg.tool_calls:
@@ -195,6 +222,8 @@ async def ask_using_http(
     only_deterministic_messages: bool = False,
     postprocess_parameters: Optional[Dict[str, Any]] = None,
     callback: Optional[Callable] = None,
+    chat_id: Optional[str] = None,
+    chat_remote: bool = False,
 ) -> List[List[Message]]:
     deterministic: List[Message] = []
     subchats: DefaultDict[str, List[Message]] = collections.defaultdict(list)
@@ -213,6 +242,13 @@ async def ask_using_http(
     }
     if postprocess_parameters is not None:
         post_me["postprocess_parameters"] = postprocess_parameters
+    meta = {}
+    if chat_id is not None:
+        meta["chat_id"] = chat_id
+        meta["chat_mode"] = "AGENT"
+        meta["chat_remote"] = chat_remote
+        # meta["current_config_file"] = "/Users/user/.config/refact/integrations.d/postgres.yaml"
+    post_me["meta"] = meta
     choices: List[Optional[Message]] = [None] * n_answers
     async with aiohttp.ClientSession() as session:
         async with session.post(base_url + "/chat", json=post_me) as response:
@@ -234,49 +270,53 @@ async def ask_using_http(
                         usage=j.get("usage") if i == 0 else None,
                     )
                     choices[index] = msg
+                if callback is not None:
+                    callback(choices[0], None)
             else:
-                choice_collector = ChoiceDeltaCollector(n_answers)
+                deltas_collector = ChoiceDeltaCollector(n_answers)
                 buffer = b""
+                have_usage = None
                 async for data, end_of_http_chunk in response.content.iter_chunks():
                     buffer += data
                     if not end_of_http_chunk:
                         continue
                     line_str = buffer.decode('utf-8').strip()
-                    buffer = b""
                     if not line_str:
+                        buffer = b""
                         continue
                     if not line_str.startswith("data: "):
                         print("unrecognized streaming data (1):", line_str)
                         continue
+                    buffer = b""
                     line_str = line_str[6:]
                     if line_str == "[DONE]":
                         break
                     j = json.loads(line_str)
                     # print(">>>", line_str)
-                    if callback is not None:
-                        callback(j)
-                    if "choices" in j:
-                        if j["choices"]:
-                            choice_collector.add_deltas(j["choices"])
+                    if "choices" in j and len(j["choices"]) > 0:
+                        deltas_collector.add_deltas(j["choices"])
                     elif "role" in j:
                         deterministic.append(Message(**j))
                     elif "subchat_id" in j:
                         map_key = j["tool_call_id"] + "__" + j["subchat_id"]
                         subchats[map_key].append(Message(**j["add_message"]))
-                    elif not j.get("choices") and j.get("usage"):
-                        pass
+                    elif j.get("usage") is not None:
+                        have_usage = Usage(**j["usage"])
                     else:
                         print("unrecognized streaming data (2):", j)
+                    if callback is not None:
+                        callback(j, deltas_collector)
                 end_str = buffer.decode('utf-8').strip()
                 if end_str.startswith("{"):  # server whats to tell us something!
                     something_from_server = json.loads(end_str)
                     if "detail" in something_from_server:
                         raise RuntimeError(something_from_server["detail"])
                     print("SERVER SAYS:", end_str)
-                for x in choice_collector.choices:
+                for x in deltas_collector.choices:
                     if x.content is not None and len(x.content) == 0:
                         x.content = None
-                choices = [(x if x.content is not None or x.tool_calls is not None else None) for x in choice_collector.choices]
+                    x.usage = have_usage
+                choices = [(x if x.content is not None or x.tool_calls is not None else None) for x in deltas_collector.choices]
                 # when streaming, subchats are streamed too
                 has_home = set()
                 for d in deterministic:
@@ -290,6 +330,9 @@ async def ask_using_http(
                                 d.subchats[subchat_id] = msglist
                                 has_home.add(k)
                 assert set(has_home) == set(subchats.keys()), f"Whoops, not all subchats {subchats.keys()} are attached to a tool result."
+                if callback is not None:
+                    if choices[0] is not None:
+                        callback(choices[0], None)
     return join_messages_and_choices(messages, deterministic, choices, verbose)
 
 
@@ -354,20 +397,21 @@ async def diff_apply(
         async with session.post(base_url + "/diff-apply", json=post_me) as response:
             if response.status != 200:
                 raise Exception(f"unexpected response status {response.status}, response: {await response.text()}")
-            return await response.json(content_type=None)
+            return await _better_response_json(response)
 
 
-async def mem_add(base_url: str, mem_type: str, goal: str, project: str, payload: str) -> Dict[str, Any]:
+async def mem_add(base_url: str, mem_type: str, goal: str, project: str, payload: str, origin: str = "local-committed") -> Dict[str, Any]:
     url = f"{base_url}/mem-add"
     data = {
         "mem_type": mem_type,
         "goal": goal,
         "project": project,
-        "payload": payload
+        "payload": payload,
+        "origin": origin,
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
-            return await response.json()
+            return await _better_response_json(response)
 
 
 async def mem_block_until_vectorized(base_url: str) -> Tuple[Dict[str, Any], float]:
@@ -375,7 +419,7 @@ async def mem_block_until_vectorized(base_url: str) -> Tuple[Dict[str, Any], flo
     t0 = time.time()
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            return (await response.json(), time.time() - t0)
+            return (await _better_response_json(response), time.time() - t0)
 
 
 async def mem_update_used(base_url: str, memid: str, correct: float, relevant: float) -> Dict[str, Any]:
@@ -387,7 +431,7 @@ async def mem_update_used(base_url: str, memid: str, correct: float, relevant: f
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
-            return await response.json()
+            return await _better_response_json(response)
 
 
 async def mem_erase(base_url: str, memid: str) -> Dict[str, Any]:
@@ -397,7 +441,7 @@ async def mem_erase(base_url: str, memid: str) -> Dict[str, Any]:
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
-            return await response.json()
+            return await _better_response_json(response)
 
 
 async def mem_query(base_url: str, goal: str, project: str, top_n: Optional[int] = 5) -> Tuple[int, Dict[str, Any]]:
@@ -409,20 +453,19 @@ async def mem_query(base_url: str, goal: str, project: str, top_n: Optional[int]
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
-            return response.status, await response.json()
+            return response.status, await _better_response_json(response)
 
 
-async def ongoing_update(base_url: str, goal: str, progress: Dict[str, Any], actseq: Dict[str, Any], output: Dict[str, Any]):
-    url = f"{base_url}/ongoing-update"
-    data = {
-        "goal": goal,
-        "ongoing_progress": progress,
-        "ongoing_action_new_sequence": actseq,
-        "ongoing_output": output,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=data) as response:
-            return await response.json()
+async def _better_response_json(response):
+    if response.status == 200:
+        return await response.json()
+    txt = await response.text()
+    if txt.startswith("{"):
+        j = json.loads(txt)
+        if "detail" in j:
+            raise ValueError(j['detail'])
+        return j
+    raise ValueError("Unexpected response: %r" % txt)
 
 
 def gen_function_call_id():
@@ -520,7 +563,7 @@ def print_messages(
                     message_str.append(message)
                     con(_wrap_color(message, "red"))
 
-        elif m.role in ["tool", "user", "assistant", "system"]:
+        elif m.role in ["tool", "user", "assistant", "system", "cd_instruction"]:
             if m.subchats is not None:  # actually subchats can only appear in role="tool", but code is the same anyway
                 for subchat_id, subchat_msgs in m.subchats.items():
                     subchats_strs = print_messages(subchat_msgs, also_print_to_console=also_print_to_console)
@@ -528,11 +571,16 @@ def print_messages(
                     subchats_str = "\n".join([f" - {subchat_id} -   {line}" for line in subchats_str.splitlines()])
                     message_str.append(subchats_str)
             if m.content is not None:
-                message_str.append(m.content)
-                if m.content.startswith("[") or m.content.startswith("{"):
-                    con(m.content)
-                else:
-                    con(Markdown(m.content))
+                if isinstance(m.content, list):
+                    mm = format_multimodal(m.content)
+                    message_str.append(mm)
+                    con(mm)
+                elif isinstance(m.content, str):
+                    message_str.append(m.content)
+                    if m.content.startswith("[") or m.content.startswith("{"):
+                        con(m.content)
+                    else:
+                        con(Markdown(m.content))
 
         else:
             t = "unknown message role=\"%s\"" % m.role
