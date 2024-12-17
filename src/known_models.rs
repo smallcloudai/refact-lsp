@@ -320,8 +320,8 @@ pub const KNOWN_MODELS: &str = r####"
         },
         "gemini-2.0-flash-exp": {
             "n_ctx": 128000,
-            "supports_tools": false,
-            "supports_multimodality": false,
+            "supports_tools": true,
+            "supports_multimodality": true,
             "supports_agent": false,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
