@@ -10,6 +10,8 @@ pub struct DockerService {
     pub environment: IndexMap<String, String>,
     #[serde(default)]
     pub ports: Vec<String>,
+    #[serde(default)]
+    pub arguments: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]

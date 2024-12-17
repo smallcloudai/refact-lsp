@@ -226,10 +226,12 @@ docker:
     image: "mysql:8.4"
     environment:
       MYSQL_DATABASE: "$MYSQL_DB"
-      MYSQL_USER: "$MYSQL_USER"
+      MYSQL_USER: "root"
       MYSQL_PASSWORD: "$MYSQL_PASSWORD"
     ports:
       - "3306:3306"
+    arguments:
+      - "--log-bin-trust-function-creators=1"
   smartlinks:
     - sl_label: "Add Database Container"
       sl_chat:
@@ -242,6 +244,23 @@ docker:
         - role: "user"
           content: |
             🔧 Your job is to modify mysql connection config in the current file to match the variables from the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
+    - sl_label: "Load DB from dump"
+      sl_chat:
+        - role: "user"
+          content: |
+            🔧 Your job is to load database from dump file, ask for the dump file path, inspect docker container and warn in env variables do not coincide with what is configured currently. Current config file: %CURRENT_CONFIG%.
+            Follow steps like in the following trajectory:
+            [
+                ["goal", "Load database from dump file, remove foreign key constraints, drop all tables, execute the dump, and add foreign key constraints again."],
+                ["thinking", "I need to execute a series of Docker and MySQL commands to achieve this."],
+                ["prompt", "Asked the user for the path to the MySQL dump file."],
+                ["response", "User provided the path: /home/user/project/dump.sql"],
+                ["docker(command=\"cp /home/user/project/dump.sql mysql_container:/dump.sql\")", "Copied the dump file to the MySQL container."],
+                ["docker(command=\"exec mysql_container sh -c 'mysql -uuser -ppwd database -e \\\"SET foreign_key_checks = 0; SOURCE ./dump.sql; SET foreign_key_checks = 1;\\\"'\")", "Executed the dump file to load the database with foreign key checks disabled and then re-enabled."],
+                ["mysql(query=\"SHOW TABLES;\")", "Listed all tables in the database: new_table1, new_table2, new_table3 ..."],
+                ["outcome", "SUCCESS"]
+            ]
+
 available:
   on_your_laptop_possible: true
   when_isolated_possible: true
