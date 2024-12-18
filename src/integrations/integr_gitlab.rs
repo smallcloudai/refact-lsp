@@ -88,11 +88,12 @@ impl Tool for ToolGitlab {
 
         let mut glab_binary_path = self.settings_gitlab.glab_binary_path.clone();
         if glab_binary_path.is_empty() {
-            glab_binary_path = "glab".to_string();
+            glab_binary_path = "gh".to_string();
         }
+        tracing::info!("Executing command: {:?} {:?}", glab_binary_path, command_args);
         let output = Command::new(glab_binary_path)
             .args(&command_args)
-            // .current_dir(&to_pathbuf_normalize(&project_dir))
+            .current_dir(&to_pathbuf_normalize(&project_dir))
             .env("GITLAB_TOKEN", &self.settings_gitlab.glab_token)
             .output()
             .await
