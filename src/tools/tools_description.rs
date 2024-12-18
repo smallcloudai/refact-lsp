@@ -407,7 +407,6 @@ tools:
         type: "string"
         description: "Examples: docker images"
     parameters_required:
-      - "project_dir"
       - "command"
 
   - name: "knowledge"
