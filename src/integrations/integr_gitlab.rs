@@ -90,10 +90,9 @@ impl Tool for ToolGitlab {
         if glab_binary_path.is_empty() {
             glab_binary_path = "glab".to_string();
         }
-        tracing::info!("current dir for glab: {:?}", &to_pathbuf_normalize(&project_dir));
         let output = Command::new(glab_binary_path)
             .args(&command_args)
-            .current_dir(&to_pathbuf_normalize(&project_dir).to_string_lossy().to_string())
+            // .current_dir(&to_pathbuf_normalize(&project_dir))
             .env("GITLAB_TOKEN", &self.settings_gitlab.glab_token)
             .output()
             .await
