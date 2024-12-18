@@ -271,7 +271,7 @@ pub async fn scratchpad_interaction_not_stream(
         parameters,
         only_deterministic_messages,
     ).await?;
-    scratchpad_response_json["created"] = json!(t2.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
+    scratchpad_response_json["created"] = json!(t2.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
 
     try_insert_usage(&mut scratchpad_response_json);
 
@@ -447,7 +447,7 @@ pub async fn scratchpad_interaction_stream(
                             Ok((mut value, finish_reason)) => {
                                 last_finish_reason = finish_reason;
                                 try_insert_usage(&mut value);
-                                value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
+                                value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
                                 let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
                                 // let last_60_chars: String = crate::nicer_logs::first_n_chars(&value_str, 60);
                                 // info!("yield: {:?}", last_60_chars);
@@ -486,7 +486,7 @@ pub async fn scratchpad_interaction_stream(
             }
 
             let mut value = my_scratchpad.streaming_finished(last_finish_reason)?;
-            value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64 / 1000.0);
+            value["created"] = json!(t1.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             value["model"] = json!(model_name.clone());
             let value_str = format!("data: {}\n\n", serde_json::to_string(&value).unwrap());
             info!("yield final: {:?}", value_str);
