@@ -90,6 +90,7 @@ impl Tool for ToolGitlab {
         if glab_binary_path.is_empty() {
             glab_binary_path = "glab".to_string();
         }
+        tracing::info!("current dir for glab: {:?}", &to_pathbuf_normalize(&project_dir));
         let output = Command::new(glab_binary_path)
             .args(&command_args)
             .current_dir(&to_pathbuf_normalize(&project_dir))
