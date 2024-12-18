@@ -74,7 +74,7 @@ impl Tool for ToolGitlab {
 
     async fn tool_execute(
         &mut self,
-        ccx: Arc<AMutex<AtCommandsContext>>,
+        _ccx: Arc<AMutex<AtCommandsContext>>,
         tool_call_id: &String,
         args: &HashMap<String, Value>,
     ) -> Result<(bool, Vec<ContextEnum>), String> {
@@ -93,7 +93,7 @@ impl Tool for ToolGitlab {
         tracing::info!("current dir for glab: {:?}", &to_pathbuf_normalize(&project_dir));
         let output = Command::new(glab_binary_path)
             .args(&command_args)
-            .current_dir(&to_pathbuf_normalize(&project_dir))
+            .current_dir(&to_pathbuf_normalize(&project_dir).to_string_lossy().to_string())
             .env("GITLAB_TOKEN", &self.settings_gitlab.glab_token)
             .output()
             .await
