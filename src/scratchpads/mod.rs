@@ -30,6 +30,13 @@ use crate::cached_tokenizers;
 
 fn verify_has_send<T: Send>(_x: &T) {}
 
+pub fn resolve_endpoint_style(endpoint_style: &str) -> &str {
+    match endpoint_style {
+        "hf" => "hf",
+        "anthropic" => "anthropic",
+        _ => "openai"
+    }
+}
 
 pub async fn create_code_completion_scratchpad(
     global_context: Arc<ARwLock<GlobalContext>>,
@@ -92,11 +99,7 @@ pub async fn create_chat_scratchpad(
         ));
     } else if scratchpad_name == "PASSTHROUGH" {
         let style = caps.read().unwrap().endpoint_style.clone();
-        let style = match style.as_str() {
-            "hf" => "hf",
-            "anthropic" => "anthropic",
-            _ => "openai"
-        };
+        let style = resolve_endpoint_style(&style);
         post.stream = Some(true);  // this should be passed from the request
         result = Box::new(chat_passthrough::ChatPassthrough::new(
             tokenizer_arc.clone(), post, messages, allow_at, supports_tools, supports_clicks, style
