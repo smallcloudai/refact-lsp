@@ -89,7 +89,7 @@ impl Tool for ToolGithub {
 
         let mut gh_binary_path = self.settings_github.gh_binary_path.clone();
         if gh_binary_path.is_empty() {
-            gh_binary_path = "gh".to_string();
+            gh_binary_path = "glab".to_string();
         }
         let output = Command::new(gh_binary_path)
             .args(&command_args)
