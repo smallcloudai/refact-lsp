@@ -293,6 +293,7 @@ impl Tool for ToolChrome {
                 name: "commands".to_string(),
                 param_type: "string".to_string(),
                 description,
+                ..Default::default()
             }],
             parameters_required: vec!["commands".to_string()],
         }

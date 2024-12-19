@@ -99,6 +99,15 @@ pub fn calculate_image_tokens_openai(image_string: &String, detail: &str) -> Res
     }
 }
 
+pub fn calculate_image_tokens_anthropic(image_string: &String) -> Result<i32, String> {
+    let reader = image_reader_from_b64string(&image_string).map_err(|_| "Failed to read image".to_string())?;
+    let (width, height) = reader.into_dimensions().map_err(|_| "Failed to get dimensions".to_string())?;
+    width.checked_mul(height)
+        .and_then(|area| area.checked_div(750))
+        .ok_or_else(|| "Overflow or division by zero occurred".to_string())
+        .map(|x|x as i32)
+}
+
 // cargo test scratchpads::scratchpad_utils
 #[cfg(test)]
 mod tests {

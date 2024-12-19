@@ -102,7 +102,7 @@ impl ScratchpadAbstract for GenericChatScratchpad {
         } else {
             (self.messages.clone(), self.messages.len(), false)
         };
-        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, self.post.parameters.max_new_tokens, n_ctx)?;
+        let limited_msgs: Vec<ChatMessage> = limit_messages_history(&self.t, &messages, undroppable_msg_n, self.post.parameters.max_new_tokens, n_ctx, "openai")?;
         // if self.supports_tools {
         // };
         sampling_parameters_to_patch.stop = self.dd.stop_list.clone();
