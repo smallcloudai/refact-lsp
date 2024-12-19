@@ -91,6 +91,30 @@ pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &str
     results
 }
 
+// for anthropic:
+// tool answers must be located in the same message.content (if tools executed in parallel)
+pub fn format_messages_anthropic(messages: Vec<Value>) -> Vec<Value> {
+    let mut res: Vec<Value> = vec![];
+    for m in messages {
+        match m.get("content") {
+            Some(Value::Array(cont)) => {
+                if let Some(prev_el) = res.last_mut() {
+                    if let Some(Value::Array(prev_cont)) = prev_el.get_mut("content") {
+                        if cont.iter().any(|c| c.get("type") == Some(&Value::String("tool_result".to_string())))
+                            && prev_cont.iter().any(|p| p.get("type") == Some(&Value::String("tool_result".to_string())))
+                        {
+                            prev_cont.extend(cont.iter().cloned());
+                            continue;
+                        }
+                    }
+                }
+                res.push(m);
+            }
+            _ => res.push(m),
+        }
+    }
+    res
+}
 
 #[cfg(test)]
 mod tests {

@@ -13,7 +13,7 @@ use crate::scratchpad_abstract::{FinishReason, HasTokenizerAndEot, ScratchpadAbs
 use crate::scratchpads::chat_utils_limit_history::limit_messages_history;
 use crate::scratchpads::scratchpad_utils::HasRagResults;
 use crate::scratchpads::chat_utils_prompts::prepend_the_right_system_prompt_and_maybe_more_initial_messages;
-use crate::scratchpads::passthrough_convert_messages::convert_messages_to_openai_format;
+use crate::scratchpads::passthrough_convert_messages::{convert_messages_to_openai_format, format_messages_anthropic};
 use crate::tools::tools_description::{tool_description_list_from_yaml, tools_merged_and_filtered};
 use crate::tools::tools_execute::{run_tools_locally, run_tools_remotely};
 
@@ -123,7 +123,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                 run_tools_locally(ccx.clone(), at_tools.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results, &style).await?
             }
         };
-        let limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx).unwrap_or_else(|e| {
+        let limited_msgs = limit_messages_history(&self.t, &messages, undroppable_msg_n, sampling_parameters_to_patch.max_new_tokens, n_ctx, &style).unwrap_or_else(|e| {
             error!("error limiting messages: {}", e);
             vec![]
         });
@@ -234,29 +234,4 @@ impl ScratchpadAbstract for ChatPassthrough {
             "object": "chat.completion.chunk",
         }))
     }
-}
-
-// for anthropic:
-// tool answers must be located in the same message.content (if tools executed in parallel)
-fn format_messages_anthropic(messages: Vec<Value>) -> Vec<Value> {
-    let mut res: Vec<Value> = vec![];
-    for m in messages {
-        match m.get("content") {
-            Some(Value::Array(cont)) => {
-                if let Some(prev_el) = res.last_mut() {
-                    if let Some(Value::Array(prev_cont)) = prev_el.get_mut("content") {
-                        if cont.iter().any(|c| c.get("type") == Some(&Value::String("tool_result".to_string())))
-                            && prev_cont.iter().any(|p| p.get("type") == Some(&Value::String("tool_result".to_string())))
-                        {
-                            prev_cont.extend(cont.iter().cloned());
-                            continue;
-                        }
-                    }
-                }
-                res.push(m);
-            }
-            _ => res.push(m),
-        }
-    }
-    res
 }
