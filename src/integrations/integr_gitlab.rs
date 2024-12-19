@@ -186,7 +186,7 @@ const GITLAB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   glab_binary_path:
     f_type: string_long
-    f_desc: "Path to the GitLab CLI binary. Leave empty to use the default 'glab' command."
+    f_desc: "Path to the GitLab CLI binary. Leave empty to use the default 'glab' command. On Windows, `glab` installed via Chocolatey may have issues, consider installing it from the official website or Winget instead."
     f_placeholder: "/usr/local/bin/glab"
     f_label: "GLAB Binary Path"
   glab_token:
