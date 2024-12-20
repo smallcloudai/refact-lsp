@@ -564,7 +564,7 @@ pub const KNOWN_MODELS: &str = r####"
         "grok-beta": "Xenova/grok-1-tokenizer",
         "grok-vision-beta": "Xenova/grok-1-tokenizer",
         "grok-2-vision-1212": "Xenova/grok-1-tokenizer",
-        "grok-2-1212": "Xenova/grok-1-tokenizer"
+        "grok-2-1212": "Xenova/grok-1-tokenizer",
 
         "gemini-2.0-flash-exp": "Xenova/gemma2-tokenizer",
         "gemini-1.5-flash": "Xenova/gemma2-tokenizer",
