@@ -351,7 +351,7 @@ pub async fn create_global_context(
         http_client,
         http_client_slowdown: Arc::new(Semaphore::new(2)),
         cache_dir,
-        config_dir,
+        config_dir: config_dir.clone(),
         caps: None,
         caps_reading_lock: Arc::new(AMutex::<bool>::new(false)),
         caps_last_error: String::new(),
@@ -373,7 +373,7 @@ pub async fn create_global_context(
         integration_sessions: HashMap::new(),
         codelens_cache: Arc::new(AMutex::new(crate::http::routers::v1::code_lens::CodeLensCache::default())),
         docker_ssh_tunnel: Arc::new(AMutex::new(None)),
-        chore_db: crate::agent_db::db_init::chore_db_init("/tmp/chore.db".to_string(), cmdline.reset_memory).await,
+        chore_db: crate::agent_db::db_init::chore_db_init(&config_dir, cmdline.reset_memory).await,
     };
     let gcx = Arc::new(ARwLock::new(cx));
     {

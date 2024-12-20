@@ -59,6 +59,8 @@ async def various_updates_generator(session, n, cthread_id):
         "cthread_created_ts": time.time(),
         "cthread_model": "gpt-4o-mini",
         "cthread_temperature": 0.8,
+        "cthread_max_new_tokens": 2048,
+        "cthread_n": 1,
         "cthread_error": ("pause" if n != 2 else ""),
     })
     assert r.status == 200, f"oops:\n{r}"

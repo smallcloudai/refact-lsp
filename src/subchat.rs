@@ -243,7 +243,7 @@ pub async fn subchat_single(
     ccx: Arc<AMutex<AtCommandsContext>>,
     model_name: &str,
     messages: Vec<ChatMessage>,
-    tools_subset: Vec<String>,
+    tools_subset: Option<Vec<String>>,
     tool_choice: Option<String>,
     only_deterministic_messages: bool,
     temperature: Option<f32>,
@@ -258,9 +258,13 @@ pub async fn subchat_single(
         (ccx_locked.global_context.clone(), ccx_locked.should_execute_remotely)
     };
     let tools_turned_on_by_cmdline = tools_merged_and_filtered(gcx.clone(), false).await?;
-    let tools_turn_on_set: HashSet<String> = tools_subset.iter().cloned().collect();
     let tools_turned_on_by_cmdline_set: HashSet<String> = tools_turned_on_by_cmdline.keys().cloned().collect();
-    let tools_on_intersection: Vec<String> = tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect();
+    let tools_on_intersection: Vec<String> = if let Some(tools_s) = &tools_subset {
+        let tools_turn_on_set: HashSet<String> = tools_s.iter().cloned().collect();
+        tools_turn_on_set.intersection(&tools_turned_on_by_cmdline_set).cloned().collect()
+    } else {
+        tools_turned_on_by_cmdline_set.iter().cloned().collect()
+    };
     let allow_experimental = gcx.read().await.cmdline.experimental;
     let tools_desclist = tool_description_list_from_yaml(tools_turned_on_by_cmdline, Some(&tools_on_intersection), allow_experimental).await.unwrap_or_else(|e|{
         error!("Error loading compiled_in_tools: {:?}", e);
@@ -363,7 +367,7 @@ pub async fn subchat(
                 ccx.clone(),
                 model_name,
                 messages.clone(),
-                tools_subset.clone(),
+                Some(tools_subset.clone()),
                 Some("auto".to_string()),
                 false,
                 temperature,
@@ -384,7 +388,7 @@ pub async fn subchat(
                 ccx.clone(),
                 model_name,
                 messages,
-                vec![],
+                Some(vec![]),
                 Some("none".to_string()),
                 true,   // <-- only runs tool calls
                 temperature,
@@ -401,7 +405,7 @@ pub async fn subchat(
         ccx.clone(),
         model_name,
         messages,
-        vec![],
+        Some(vec![]),
         Some("none".to_string()),
         false,
         temperature,

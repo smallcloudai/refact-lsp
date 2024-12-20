@@ -40,6 +40,8 @@ pub fn cthreads_from_rows(
             cthread_toolset: row.get("cthread_toolset").unwrap(),
             cthread_model: row.get("cthread_model").unwrap(),
             cthread_temperature: row.get("cthread_temperature").unwrap(),
+            cthread_max_new_tokens: row.get("cthread_max_new_tokens").unwrap(),
+            cthread_n: row.get("cthread_n").unwrap(),
             cthread_error: row.get("cthread_error").unwrap(),
             cthread_anything_new: row.get("cthread_anything_new").unwrap(),
             cthread_created_ts: row.get("cthread_created_ts").unwrap(),
@@ -47,6 +49,7 @@ pub fn cthreads_from_rows(
             cthread_archived_ts: row.get("cthread_archived_ts").unwrap(),
             cthread_locked_by: row.get("cthread_locked_by").unwrap(),
             cthread_locked_ts: row.get("cthread_locked_ts").unwrap(),
+            ..Default::default()
         });
     }
     cthreads
@@ -63,13 +66,15 @@ pub fn cthread_set_lowlevel(
             cthread_toolset = ?4,
             cthread_model = ?5,
             cthread_temperature = ?6,
-            cthread_error = ?7,
-            cthread_anything_new = ?8,
-            cthread_created_ts = ?9,
-            cthread_updated_ts = ?10,
-            cthread_archived_ts = ?11,
-            cthread_locked_by = ?12,
-            cthread_locked_ts = ?13
+            cthread_max_new_tokens = ?7,
+            cthread_n = ?8,
+            cthread_error = ?9,
+            cthread_anything_new = ?10,
+            cthread_created_ts = ?11,
+            cthread_updated_ts = ?12,
+            cthread_archived_ts = ?13,
+            cthread_locked_by = ?14,
+            cthread_locked_ts = ?15
         WHERE cthread_id = ?1",
         rusqlite::params![
             cthread.cthread_id,
@@ -78,6 +83,8 @@ pub fn cthread_set_lowlevel(
             cthread.cthread_toolset,
             cthread.cthread_model,
             cthread.cthread_temperature,
+            cthread.cthread_max_new_tokens,
+            cthread.cthread_n,
             cthread.cthread_error,
             cthread.cthread_anything_new,
             cthread.cthread_created_ts,
@@ -96,6 +103,8 @@ pub fn cthread_set_lowlevel(
                 cthread_toolset,
                 cthread_model,
                 cthread_temperature,
+                cthread_max_new_tokens,
+                cthread_n,
                 cthread_error,
                 cthread_anything_new,
                 cthread_created_ts,
@@ -103,7 +112,7 @@ pub fn cthread_set_lowlevel(
                 cthread_archived_ts,
                 cthread_locked_by,
                 cthread_locked_ts
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
                 cthread.cthread_id,
                 cthread.cthread_belongs_to_chore_event_id,
@@ -111,6 +120,8 @@ pub fn cthread_set_lowlevel(
                 cthread.cthread_toolset,
                 cthread.cthread_model,
                 cthread.cthread_temperature,
+                cthread.cthread_max_new_tokens,
+                cthread.cthread_n,
                 cthread.cthread_error,
                 cthread.cthread_anything_new,
                 cthread.cthread_created_ts,

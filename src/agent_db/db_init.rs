@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify as ANotify;
 use parking_lot::Mutex as ParkMutex;
@@ -7,10 +8,11 @@ use crate::agent_db::db_structs::ChoreDB;
 
 
 fn _make_connection(
-    _chore_db_fn: String,
+    config_dir: &PathBuf,
 ) -> Result<Arc<ParkMutex<ChoreDB>>, String> {
+    let db_path = config_dir.join("chore_db.sqlite");
     let db = Connection::open_with_flags(
-        "experimental_db.sqlite",
+        db_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
         | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
         | rusqlite::OpenFlags::SQLITE_OPEN_FULL_MUTEX
@@ -30,10 +32,10 @@ fn _make_connection(
 }
 
 pub async fn chore_db_init(
-    chore_db_fn: String,
+    config_dir: &PathBuf,
     reset_memory: bool,
 ) -> Arc<ParkMutex<ChoreDB>> {
-    let db = match _make_connection(chore_db_fn) {
+    let db = match _make_connection(config_dir) {
         Ok(db) => db,
         Err(err) => panic!("Failed to initialize chore database: {}", err),
     };

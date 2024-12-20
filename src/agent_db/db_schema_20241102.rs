@@ -59,6 +59,8 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
             cthread_toolset TEXT NOT NULL,
             cthread_model TEXT NOT NULL,
             cthread_temperature REAL NOT NULL,
+            cthread_max_new_tokens INT NOT NULL DEFAULT 2048,
+            cthread_n INT NOT NULL DEFAULT 1,
             cthread_error TEXT NOT NULL,
             cthread_anything_new BOOLEAN NOT NULL,
             cthread_created_ts REAL NOT NULL,

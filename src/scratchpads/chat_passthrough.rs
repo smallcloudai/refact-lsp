@@ -150,7 +150,7 @@ impl ScratchpadAbstract for ChatPassthrough {
                 }).collect::<Vec<String>>();
                 let allow_experimental = gcx.read().await.cmdline.experimental;
                 // and take descriptions of tools from the official source
-                let tool_descriptions = tool_description_list_from_yaml(at_tools, &turned_on, allow_experimental).await?;
+                let tool_descriptions = tool_description_list_from_yaml(at_tools, Some(&turned_on), allow_experimental).await?;
                 Some(tool_descriptions.into_iter().map(|x|x.into_openai_style()).collect::<Vec<_>>())
             } else {
                 None

@@ -23,7 +23,7 @@ pub struct ChoreEvent {
     pub chore_event_cthread_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct CThread {
     pub cthread_id: String,
     pub cthread_belongs_to_chore_event_id: Option<String>,
@@ -31,6 +31,9 @@ pub struct CThread {
     pub cthread_toolset: String,      // quick/explore/agent
     pub cthread_model: String,
     pub cthread_temperature: f64,
+    pub cthread_n_ctx: usize,
+    pub cthread_max_new_tokens: usize,
+    pub cthread_n: usize,
     pub cthread_error: String,        // assign to special value "pause" to avoid auto repost to the model
     pub cthread_anything_new: bool,   // the ⚪
     pub cthread_created_ts: f64,
@@ -38,6 +41,29 @@ pub struct CThread {
     pub cthread_archived_ts: f64,     // associated container died, cannot continue
     pub cthread_locked_by: String,
     pub cthread_locked_ts: f64,
+}
+
+impl Default for CThread {
+    fn default() -> Self {
+        CThread {
+            cthread_id: String::new(),
+            cthread_belongs_to_chore_event_id: None,
+            cthread_title: String::new(),
+            cthread_toolset: String::new(),
+            cthread_model: String::new(),
+            cthread_temperature: f64::default(),
+            cthread_n_ctx: 65536,
+            cthread_max_new_tokens: 2048,
+            cthread_n: 1,
+            cthread_error: String::new(),
+            cthread_anything_new: false,
+            cthread_created_ts: f64::default(),
+            cthread_updated_ts: f64::default(),
+            cthread_archived_ts: f64::default(),
+            cthread_locked_by: String::new(),
+            cthread_locked_ts: f64::default()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]

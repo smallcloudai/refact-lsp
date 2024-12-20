@@ -7,8 +7,9 @@ use crate::global_context::GlobalContext;
 use crate::agent_db::db_structs::{CThread, CMessage};
 use crate::agent_db::chore_pubsub_sleeping_procedure;
 use crate::agent_db::db_cthread::CThreadSubscription;
-use crate::call_validation::{ChatContent, ChatMessage};
+use crate::call_validation::{ChatContent, ChatMessage, ChatUsage};
 use crate::at_commands::at_commands::AtCommandsContext;
+use crate::subchat::subchat_single;
 
 const SLEEP_IF_NO_WORK_SEC: u64 = 10;
 const LOCK_TOO_OLD_SEC: f64 = 600.0;
@@ -184,61 +185,38 @@ async fn do_the_job(
     let message_info_str = message_info.join(", ");
     tracing::info!("{} started work on {}\n[{}]", worker_name, cthread_rec.cthread_id, message_info_str);
 
+    // TODO: make something similar to the `subchat` with chat `wrapping` logic
     // wrap_up_depth: usize,
     // wrap_up_tokens_cnt: usize,
     // wrap_up_prompt: &str,
     // wrap_up_n: usize,
-    let tools_turned_on_by_cmdline = crate::tools::tools_description::tools_merged_and_filtered(gcx.clone()).await?;
-    let allow_experimental = gcx.read().await.cmdline.experimental;
-    let tools_desclist = crate::tools::tools_description::tool_description_list_from_yaml(
-        tools_turned_on_by_cmdline,
-        None,
-        allow_experimental
-    ).await?;
-    let tools = tools_desclist.into_iter().filter_map(|tool_desc| {
-        let good =
-            (cthread_rec.cthread_toolset == "explore" && !tool_desc.agentic) ||
-            (cthread_rec.cthread_toolset == "agent");
-        if good {
-            Some(tool_desc.into_openai_style())
-        } else {
-            None
-        }
-    }).collect::<Vec<_>>();
-
-    let max_new_tokens = 2048;
-    let n = 1;
-    let only_deterministic_messages = false;
-    let (mut chat_post, spad) = crate::subchat::create_chat_post_and_scratchpad(
-        gcx.clone(),
-        &cthread_rec.cthread_model,
-        messages.iter().collect::<Vec<_>>(),
-        Some(cthread_rec.cthread_temperature as f32),
-        max_new_tokens,
-        n,
-        Some(tools),
-        None,
-        only_deterministic_messages,
-    ).await?;
-    let n_ctx = chat_post.max_tokens;  // create_chat_post_and_scratchpad saves n_ctx here :/
-
+    let mut usage = ChatUsage { ..Default::default() };
     let ccx: Arc<AMutex<AtCommandsContext>> = Arc::new(AMutex::new(AtCommandsContext::new(
         gcx.clone(),
-        n_ctx,
-        7,
+        cthread_rec.cthread_n_ctx,
+        10,
         false,
         messages.clone(),
         cthread_rec.cthread_id.clone(),
+        false,
     ).await));
-
-    // XXX at commands
-    tracing::info!("{} start chat_interaction()", worker_name);
-    let chat_response_msgs = crate::subchat::chat_interaction(ccx.clone(), spad, &mut chat_post).await?;
-    if chat_response_msgs.len() == 0 {
-        return Err("Oops strange, chat_interaction() returned no choices".to_string());
-    }
+    let log_prefix = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let chat_response_msgs = subchat_single(
+        ccx.clone(),
+        cthread_rec.cthread_model.as_str(),
+        messages,
+        None,
+        None,
+        false,
+        Some(cthread_rec.cthread_temperature as f32),
+        Some(cthread_rec.cthread_max_new_tokens),
+        cthread_rec.cthread_n,
+        Some(&mut usage),
+        Some(cthread_rec.cthread_id.clone()),
+        Some(format!("{log_prefix}-chore-job")),
+    ).await.map_err(|e| format!("Error: {}", e))?;
+    
     let choice0: Vec<ChatMessage> = chat_response_msgs[0].clone();
-
     {
         let mut lite_locked = lite.lock();
         let tx = lite_locked.transaction().map_err(|e| e.to_string())?;
@@ -266,94 +244,6 @@ async fn do_the_job(
         tx.commit().map_err(|e| e.to_string())?;
     }
     chore_sleeping_point.notify_waiters();
-
-
-    // let old_messages = messages.clone();
-    // let results = chat_response_msgs.iter().map(|new_msgs| {
-    //     let mut extended_msgs = old_messages.clone();
-    //     extended_msgs.extend(new_msgs.clone());
-    //     extended_msgs
-    // }).collect::<Vec<Vec<ChatMessage>>>();
-
-    // if let Some(usage_collector) = usage_collector_mb {
-    //     crate::subchat::update_usage_from_messages(usage_collector, &results);
-    // }
-
-    // {
-    //     // keep session
-    //     let mut step_n = 0;
-    //     loop {
-    //         let last_message = messages.last().unwrap();
-    //         // if last_message.role == "assistant" && last_message.tool_calls.is_none() {
-    //             // don't have tool calls, exit the loop unconditionally, model thinks it has finished the work
-    //             break;
-    //         }
-    //         if last_message.role == "assistant" && last_message.tool_calls.is_some() {
-    //             // have tool calls, let's see if we need to wrap up or not
-    //             if step_n >= wrap_up_depth {
-    //                 break;
-    //             }
-    //             if let Some(usage) = &last_message.usage {
-    //                 if usage.prompt_tokens + usage.completion_tokens > wrap_up_tokens_cnt {
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //         messages = subchat_single(
-    //             ccx.clone(),
-    //             model_name,
-    //             messages.clone(),
-    //             tools_subset.clone(),
-    //             Some("auto".to_string()),
-    //             false,
-    //             temperature,
-    //             None,
-    //             1,
-    //             Some(&mut usage_collector),
-    //             tx_toolid_mb.clone(),
-    //             tx_chatid_mb.clone(),
-    //         ).await?[0].clone();
-    //         step_n += 1;
-    //     }
-    //     // result => session
-    // }
-    // let last_message = messages.last().unwrap();
-    // if let Some(tool_calls) = &last_message.tool_calls {
-    //     if !tool_calls.is_empty() {
-    //         messages = subchat_single(
-    //             ccx.clone(),
-    //             model_name,
-    //             messages,
-    //             vec![],
-    //             Some("none".to_string()),
-    //             true,   // <-- only runs tool calls
-    //             temperature,
-    //             None,
-    //             1,
-    //             Some(&mut usage_collector),
-    //             tx_toolid_mb.clone(),
-    //             tx_chatid_mb.clone(),
-    //         ).await?[0].clone();
-    //     }
-    // }
-    // messages.push(ChatMessage::new("user".to_string(), wrap_up_prompt.to_string()));
-    // let choices = subchat_single(
-    //     ccx.clone(),
-    //     model_name,
-    //     messages,
-    //     vec![],
-    //     Some("none".to_string()),
-    //     false,
-    //     temperature,
-    //     None,
-    //     wrap_up_n,
-    //     Some(&mut usage_collector),
-    //     tx_toolid_mb.clone(),
-    //     tx_chatid_mb.clone(),
-    // ).await?;
-    // if let Some(last_message) = messages.last_mut() {
-    //     last_message.usage = Some(usage_collector);
-    // }
     Ok(serde_json::json!({}))
 }
 
