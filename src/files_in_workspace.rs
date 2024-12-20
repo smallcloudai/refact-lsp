@@ -213,7 +213,13 @@ async fn _run_command(cmd: &str, args: &[&str], path: &PathBuf, filter_out_statu
 
 async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> {
     if path.join(".git").exists() {
-        git_ls_files(path)
+        if let Some(files) = git_ls_files(path) {
+            return Some(files);
+        }
+        if which("git").is_ok() {
+            return _run_command("git", &["ls-files", "--cached", "--modified", "--others", "--exclude-standard"], path, false).await;
+        }
+        None
     } else if path.join(".hg").exists() && which("hg").is_ok() {
         // Mercurial repository
         _run_command("hg", &["status", "--added", "--modified", "--clean", "--unknown", "--no-status"], path, false).await
