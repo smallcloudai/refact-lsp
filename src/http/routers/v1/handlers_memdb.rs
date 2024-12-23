@@ -215,9 +215,11 @@ pub async fn handle_mem_sub(
             match crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), Some(last_pubevent_id)).await {
                 Ok(new_events) => {
                     for event in new_events.iter() {
-                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string_pretty(&event).unwrap()));
+                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&event).unwrap()));
                     }
-                    last_pubevent_id = _get_last_memid(&new_events);
+                    if !new_events.is_empty() {
+                        last_pubevent_id = _get_last_memid(&new_events);
+                    }
                 },
                 Err(e) => {
                     tracing::error!(e);
