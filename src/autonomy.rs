@@ -226,8 +226,6 @@ async fn do_the_job(
             if let Some(u) = &chat_message.usage {
                 cmessage_usage_prompt = u.prompt_tokens as i32;
                 cmessage_usage_completion = u.completion_tokens as i32;
-            } else {
-                tracing::warn!("running {} didn't produce usage so it's hard to calculate tokens :/", cthread_rec.cthread_model);
             }
             let cmessage = CMessage {
                 cmessage_belongs_to_cthread_id: cthread_rec.cthread_id.clone(),

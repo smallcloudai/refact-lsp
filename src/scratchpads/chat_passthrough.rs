@@ -106,11 +106,15 @@ impl ScratchpadAbstract for ChatPassthrough {
         let style = self.post.style.clone();
         let at_tools = tools_merged_and_filtered(gcx.clone(), self.supports_clicks).await?;
 
-        let messages = prepend_the_right_system_prompt_and_maybe_more_initial_messages(gcx.clone(), self.messages.clone(), &self.post, &mut self.has_rag_results).await;
+        let messages = if self.allow_at {
+            prepend_the_right_system_prompt_and_maybe_more_initial_messages(gcx.clone(), self.messages.clone(), &self.post, &mut self.has_rag_results).await
+        } else {
+            self.messages.clone()
+        };
         let (mut messages, undroppable_msg_n, _any_context_produced) = if self.allow_at && !should_execute_remotely {
             run_at_commands(ccx.clone(), self.t.tokenizer.clone(), sampling_parameters_to_patch.max_new_tokens, &messages, &mut self.has_rag_results).await
         } else {
-            (self.messages.clone(), self.messages.len(), false)
+            (messages.clone(), messages.len(), false)
         };
         if self.supports_tools {
             (messages, _) = if should_execute_remotely {
@@ -204,23 +208,6 @@ impl ScratchpadAbstract for ChatPassthrough {
     }
 
     fn response_spontaneous(&mut self) -> Result<Vec<Value>, String>  {
-        // let mut deterministic: Vec<Value> = vec![];
-        // let mut cursor = 0;
-        // while cursor < self.messages.len() {
-
-        // }
-
-
-
-        // let have_system_prompt_in_post = !self.post.messages.is_empty() && self.post.messages[0].get("role") == Some(&serde_json::Value::String("system".to_string()));
-        // let have_system_prompt_in_messages = !self.messages.is_empty() && self.messages[0].role == "system";
-        // if !have_system_prompt_in_post && have_system_prompt_in_messages && self.post.messages.len() == 1 {  // only the user message present in request
-
-        //     self.has_rag_results.in_json.insert(0, json!(self.messages[0]));
-
-        // }
-        // deterministic.extend(self.has_rag_results.response_streaming()?);
-        // Ok(deterministic)
         self.has_rag_results.response_streaming()
     }
 
