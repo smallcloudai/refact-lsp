@@ -10,7 +10,7 @@ use crate::caps::get_custom_embedding_api_key;
 use crate::fetch_embedding;
 use crate::files_in_workspace::Document;
 use crate::global_context::{CommandLine, GlobalContext};
-use crate::knowledge::{lance_search, MemoriesDatabase};
+use crate::knowledge::{lance_search, MemdbSubEvent, MemoriesDatabase};
 use crate::trajectories::try_to_download_trajectories;
 use crate::vecdb::vdb_cache::VecDBCache;
 use crate::vecdb::vdb_lance::VecDBHandler;
@@ -481,6 +481,19 @@ pub async fn memories_search(
         score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(MemoSearchResult { query_text: query.clone(), results })
+}
+
+pub async fn memdb_subscription_poll(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    from_memid: Option<i64>
+) -> Result<Vec<MemdbSubEvent>, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let x = memdb.lock().await.permdb_sub_select_all(from_memid).await; x
 }
 
 #[async_trait]

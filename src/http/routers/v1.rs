@@ -47,7 +47,7 @@ use crate::http::routers::v1::v1_integrations::{handle_v1_integration_get, handl
 use crate::agent_db::db_cthread::{handle_db_v1_cthread_update, handle_db_v1_cthreads_sub};
 use crate::agent_db::db_cmessage::{handle_db_v1_cmessages_update, handle_db_v1_cmessages_sub};
 use crate::agent_db::db_chore::{handle_db_v1_chore_update, handle_db_v1_chore_event_update, handle_db_v1_chores_sub};
-
+use crate::http::routers::v1::handlers_memdb::handle_mem_sub;
 use crate::http::utils::telemetry_wrapper;
 
 pub mod code_completion;
@@ -165,6 +165,7 @@ pub fn make_v1_router() -> Router {
         .route("/mem-update-used", telemetry_post!(handle_mem_update_used))
         .route("/mem-block-until-vectorized", telemetry_get!(handle_mem_block_until_vectorized))
         .route("/mem-list", telemetry_get!(handle_mem_list))
+        .route("/mem-sub", telemetry_get!(handle_mem_sub))
         ;
 
     builder.layer(CorsLayer::very_permissive())
