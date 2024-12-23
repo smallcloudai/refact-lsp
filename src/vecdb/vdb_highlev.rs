@@ -496,6 +496,25 @@ pub async fn memdb_subscription_poll(
     let x = memdb.lock().await.permdb_sub_select_all(from_memid).await; x
 }
 
+
+pub async fn memdb_pubsub_trigerred(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    sleep_seconds: u64
+) -> Result<(), String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+    let pubsub_notifier = memdb.lock().await.pubsub_notifier.clone();
+    match tokio::time::timeout(tokio::time::Duration::from_secs(sleep_seconds), pubsub_notifier.notified()).await {
+        Ok(_) => { },
+        Err(_) => { }
+    }
+    Ok(())
+}
+
+
 #[async_trait]
 impl VecdbSearch for VecDb {
     async fn vecdb_search(

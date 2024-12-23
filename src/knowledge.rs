@@ -1,3 +1,4 @@
+use std::os::raw::{c_int, c_void};
 use std::sync::Arc;
 use std::path::PathBuf;
 use tracing::info;
@@ -17,7 +18,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use vectordb::database::Database;
 use tempfile::TempDir;
-use tokio::sync::Mutex as AMutex;
+use tokio::sync::{Mutex as AMutex, Notify};
 use tokio::time::Instant;
 use vectordb::table::Table;
 
@@ -34,6 +35,7 @@ pub struct MemoriesDatabase {
     pub schema_arc: SchemaRef,
     pub dirty_memids: Vec<String>,
     pub dirty_everything: bool,
+    pub pubsub_notifier: Arc<Notify>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +64,29 @@ fn map_row_to_memo_record(row: &rusqlite::Row) -> rusqlite::Result<MemoRecord> {
 
 fn fields_ordered() -> String {
     "memid,m_type,m_goal,m_project,m_payload,m_origin,mstat_correct,mstat_relevant,mstat_times_used".to_string()
+}
+
+extern "C" fn pubsub_trigger_hook(
+    user_data: *mut c_void, 
+    action: c_int,
+    db_name: *const i8,
+    table_name: *const i8,
+    _: i64,
+) {
+    let notify = unsafe { &*(user_data as *const Notify) };
+    let db_name = unsafe { std::ffi::CStr::from_ptr(db_name).to_str().unwrap_or("unknown") };
+    let table_name = unsafe { std::ffi::CStr::from_ptr(table_name).to_str().unwrap_or("unknown") };
+    let operation = match action {
+        18 => "INSERT",
+        9 => "DELETE",
+        23 => "UPDATE",
+        _ => "UNKNOWN",
+    };
+    if db_name != "main" && table_name != "pubsub_events" {
+        return;
+    }
+    info!("memdb pubsub {} action triggered", operation);
+    notify.notify_one();
 }
 
 impl MemoriesDatabase {
@@ -104,7 +129,6 @@ impl MemoriesDatabase {
             Err(err) => return Err(format!("{:?}", err))
         };
 
-        // Return everything
         let db = MemoriesDatabase {
             conn: Arc::new(ParkMutex::new(cache_database)),
             vecdb_constants: constants.clone(),
@@ -112,9 +136,17 @@ impl MemoriesDatabase {
             schema_arc,
             dirty_memids: Vec::new(),
             dirty_everything: true,
+            pubsub_notifier: Arc::new(Notify::new())
         };
         db._permdb_create_table(reset_memory)?;
         db._migrate_add_m_origin()?;
+        unsafe {
+            libsqlite3_sys::sqlite3_update_hook(
+                db.conn.lock().handle(), 
+                Some(pubsub_trigger_hook),
+                Arc::into_raw(db.pubsub_notifier.clone()) as *mut c_void,
+            );
+        }
         Ok(db)
     }
 

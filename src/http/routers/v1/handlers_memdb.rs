@@ -9,7 +9,6 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::knowledge;
 use crate::knowledge::MemdbSubEvent;
 
 #[derive(Deserialize)]
@@ -207,6 +206,12 @@ pub async fn handle_mem_sub(
     );
     let sse = stream! {
         loop {
+            match crate::vecdb::vdb_highlev::memdb_pubsub_trigerred(vec_db.clone(), 10).await {
+                Ok(_) => {}
+                Err(_) => {
+                    break;
+                }
+            };
             match crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), Some(last_pubevent_id)).await {
                 Ok(new_events) => {
                     for event in new_events.iter() {
@@ -219,7 +224,6 @@ pub async fn handle_mem_sub(
                     break;
                 }
             };
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     };
 
