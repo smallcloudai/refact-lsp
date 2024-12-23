@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +64,16 @@ pub struct SnippetTracker {
     pub created_ts: i64,
     pub accepted_ts: i64,
     pub finished_ts: i64,
+}
+
+impl fmt::Display for SnippetTracker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Snippet telemetry id: {}, model: {}, inputs: {}, grey text: {}, corrected by user: {}, remaining: {}%",
+            self.snippet_telemetry_id, self.model, self.inputs, self.grey_text, self.corrected_by_user, self.remaining_percentage
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

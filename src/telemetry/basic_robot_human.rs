@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, info};
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub fn create_robot_human_record_if_not_exists(
     if record_mb.is_some() {
         return;
     }
-    debug!("create_robot_human_rec_if_not_exists: new uri {}", uri);
+    info!("create_robot_human_rec_if_not_exists: new uri {}", uri);
     let record = TeleRobotHumanAccum::new(
         uri.clone(),
         text.clone(),
@@ -91,7 +91,9 @@ pub fn increase_counters_from_accepted_snippet(
     snip: &SnippetTracker,
 ) {
     let now = chrono::Local::now().timestamp();
+    info!("increase_counters_from_accepted_snippet {}", snip);
     if let Some(rec) = storage_locked.tele_robot_human.iter_mut().find(|stat| stat.uri.eq(uri)) {
+        info!("increase_counters_from_accepted_snippet found in storage uri = {}", uri.to_string());
         if rec.used_snip_ids.contains(&snip.snippet_telemetry_id) {
             return;
         }

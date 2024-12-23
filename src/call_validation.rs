@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::Hash;
 use axum::http::StatusCode;
 use indexmap::IndexMap;
@@ -8,7 +9,7 @@ use ropey::Rope;
 
 use crate::custom_error::ScratchError;
 use crate::scratchpads::multimodality::MultimodalElement;
-
+use crate::telemetry::telemetry_structs::SnippetTracker;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct CursorPosition {
@@ -22,6 +23,12 @@ pub struct CodeCompletionInputs {
     pub sources: HashMap<String, String>,
     pub cursor: CursorPosition,
     pub multiline: bool,
+}
+
+impl fmt::Display for CodeCompletionInputs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "sources: {:?}, cursor: {:?}, multiline: {:?}", self.sources, self.cursor, self.multiline)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

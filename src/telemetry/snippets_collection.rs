@@ -3,7 +3,7 @@ use std::sync::RwLock as StdRwLock;
 use serde::{Serialize, Deserialize};
 
 use tokio::sync::RwLock as ARwLock;
-use tracing::debug;
+use tracing::{info, debug};
 
 use crate::global_context;
 use crate::completion_cache;
@@ -92,10 +92,13 @@ pub async fn snippet_accepted(
 ) -> bool {
     let tele_storage_arc = gcx.read().await.telemetry.clone();
     let mut storage_locked = tele_storage_arc.write().unwrap();
+    for snip in storage_locked.tele_snippets.clone() {
+        info!("snippet_accepted {}", &snip);
+    }
     let snip = storage_locked.tele_snippets.iter_mut().find(|s| s.snippet_telemetry_id == snippet_telemetry_id);
     if let Some(snip) = snip {
         snip.accepted_ts = chrono::Local::now().timestamp();
-        debug!("snippet_accepted: ID{}: snippet is accepted", snippet_telemetry_id);
+        info!("snippet_accepted: ID{}: snippet is accepted", snippet_telemetry_id);
         return true;
     }
     return false;
@@ -129,7 +132,7 @@ pub async fn sources_changed(
         // if snip.id is not in the list of finished snippets, add it
         if !accepted_snippets.iter().any(|s: &SnippetTracker| s.snippet_telemetry_id == snip.snippet_telemetry_id) {
             accepted_snippets.push(snip.clone());
-            debug!("sources_changed: ID{}: snippet is added to accepted", snip.snippet_telemetry_id);
+            info!("sources_changed: ID{}: snippet is added to accepted", snip.snippet_telemetry_id);
         }
 
         let (grey_valid, mut grey_corrected) = utils::if_head_tail_equal_return_added_text(
@@ -151,8 +154,8 @@ pub async fn sources_changed(
             }
         }
     }
-
     for snip in accepted_snippets {
+        info!("accepted_snippets {}", snip);
         basic_robot_human::increase_counters_from_accepted_snippet(&mut storage_locked, uri, text, &snip);
         basic_comp_counters::create_data_accumulator_for_accepted_snippet(&mut storage_locked.snippet_data_accumulators, uri, &snip);
     }
