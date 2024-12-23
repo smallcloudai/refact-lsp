@@ -1,23 +1,4 @@
-# :wave: Welcome Hacktoberfest Contributors!
-We're excited to have you join us for Hacktoberfest 2024! Check out issues labeled for ``Hacktoberfest``!
-
-At [Refact.ai](https://refact.ai), we're currently building an Autonomous AI Agent that will handle engineering tasks end-to-end. Exciting, isn't it?
-
-We already have an AI Coding Assistant, designed to empower developers. It helps you get work done faster with context-aware code completion and integrated in-IDE chat.
-
-We're building the future of programming, and you can join us today!
-
-To show our appreciation, if you submit just one Pull Request (PR) to any of our open issues, we'll reward you with 3 months of free access to the [Refact.ai](https://refact.ai) tool! :rocket:
-
-Get started by checking out our open issues and the [contributing.md](https://github.com/smallcloudai/refact-lsp/blob/main/CONTRIBUTING.md) for all the details you need to start making an impact.
-
-To maintain a positive and respectful community, we encourage all users to review our [Code of Conduct](https://github.com/smallcloudai/refact-lsp/blob/main/CODE_OF_CONDUCT.md).
-
-Join our community in our [Discord server](https://www.smallcloud.ai/discord) where you can get help, discuss ideas and be aware of our new releases and news.
-
-Happy coding! :computer::sparkles:
-
-# Refact Agent (Rust)
+# Refact Agent
 
 This is a small executable written in Rust, a part of the Refact Agent project. Its main job is to live
 inside your IDE quietly and keep AST and VecDB indexes up to date. It is well-written: it will not break if
@@ -27,6 +8,56 @@ and usages in many popular programming languages.
 
 Yes, it looks like an LSP server to IDE, hence the name. It can also work within a python program,
 check out the [Text UI](#cli) below, you can talk about your project in the command line!
+
+---
+
+
+# Table of Contents
+
+- [Installation](#installation)
+- [Things to Try](#things-to-try)
+- [Telemetry](#telemetry)
+- [Caps File](#caps-file)
+- [AST](#ast)
+- [CLI](#cli)
+- [Progress and Future Plans](#progress-and-future-plans)
+- [Archiecture](#archiecture)
+- [Contributing](#contributing)
+- [Follow Us and FAQ](#follow-us-and-faq)
+- [License](#license)
+
+
+# Key Features
+
+* Integrates with the IDE you are already using, like VSCode or JetBrains
+* Offers assistant functionality: code completion and chat
+* Keeps track of your source files, keeps AST and vector database up to date
+* Integrates browser, databases, debuggers for the model to use
+* Ask it anything! It will use the tools available to make changes to your project
+
+
+## Installation
+
+Installable by the end user:
+
+ * VS Code https://github.com/smallcloudai/refact-vscode/
+
+ * JetBrains IDEs https://github.com/smallcloudai/refact-intellij
+
+ * VS Classic https://github.com/smallcloudai/refact-vs-classic/
+
+ * Sublime Text https://github.com/smallcloudai/refact-sublime/
+
+ * Neovim https://github.com/smallcloudai/refact-neovim
+
+ * Refact Self-Hosting Server https://github.com/smallcloudai/refact/
+
+
+### Other Important Repos
+
+* [Documentation](https://github.com/smallcloudai/web_docs_refact_ai)
+* [Chat UI](https://github.com/smallcloudai/refact-chat-js)
+
 
 ## Progress
 
@@ -52,27 +83,7 @@ check out the [Text UI](#cli) below, you can talk about your project in the comm
 - [ ] Jira integration
 
 
-## Refact Agent
-
-Installable by the end user:
-
-* [VS Code](https://github.com/smallcloudai/refact-vscode/)
-* [JetBrains IDEs](https://github.com/smallcloudai/refact-intellij)
-* [VS Classic](https://github.com/smallcloudai/refact-vs-classic/)
-* [Sublime Text](https://github.com/smallcloudai/refact-sublime/)
-* [Neovim](https://github.com/smallcloudai/refact-neovim)
-
-Refact Self-Hosting Server:
-
-* [Refact](https://github.com/smallcloudai/refact/)
-
-Other important repos:
-
-* [Documentation](https://github.com/smallcloudai/web_docs_refact_ai)
-* [Chat UI](https://github.com/smallcloudai/refact-chat-js)
-
-
-## Compiling and Running
+### Compiling and Running
 
 It will automatically pick up OPENAI_API_KEY, or maybe you have Refact cloud key or Refact Self-Hosting Server:
 
@@ -84,6 +95,7 @@ target/debug/refact-lsp --address-url http://my-refact-self-hosting/ --api-key $
 ```
 
 Try `--help` for more options.
+
 
 
 ## Things to Try
@@ -134,6 +146,7 @@ curl http://127.0.0.1:8001/v1/chat -k \
 ```
 
 
+
 ## Telemetry
 
 The flag `--basic-telemetry` means send counters and error messages. It is "compressed"
@@ -149,10 +162,11 @@ you see it in `.cache/refact/telemetry`. The files are human-readable.
 When using Refact self-hosted server, telemetry goes to the self-hosted server, not to the cloud.
 
 
+
 ## Caps File
 
 The capabilities file stores the same things as [bring-your-own-key.yaml](bring_your_own_key), the file describes how to access AI models.
-The `--address-url` parameter controls where to get this file, it defaults to `~/.cache/refact/bring-your-own-key.yaml`.
+The `--address-url` parameter controls where to get this file, it defaults to `~/.config/refact/bring-your-own-key.yaml`.
 If it's a URL, the executable fetches `$URL/refact-caps` to know what to do. This is especially useful to connect to Refact Self-Hosting Server,
 because the configuration does not need to be copy-pasted among engineers who use the server.
 
@@ -171,6 +185,7 @@ Supported languages:
 You can still use Refact for other languages, just the AST capabilities will be missing.
 
 
+
 ## CLI
 
 You can compile and use Refact Agent from command line with this repo alone, and it's a not an afterthought, it works great!
@@ -180,4 +195,36 @@ cargo build --release
 cp target/release/refact-lsp python_binding_and_cmdline/refact/bin/
 pip install -e python_binding_and_cmdline/
 ```
+
+
+___
+
+## Contributing
+
+- Contributing [CONTRIBUTING.md](CONTRIBUTING.md)
+- [GitHub issues](https://github.com/smallcloudai/refact/issues) for bugs and errors
+- [Community forum](https://github.com/smallcloudai/refact/discussions) for community support and discussions
+If you wish to contribute to this project, feel free to explore our [current issues](https://github.com/smallcloudai/refact/issues) or open new issues related to (bugs/features) using our [CONTRIBUTING.md](CONTRIBUTING.md).
+
+
+## Follow Us and FAQ
+
+- [Contributing](CONTRIBUTING.md)
+- [Refact Docs](https://docs.refact.ai/)
+- [GitHub Issues](https://github.com/smallcloudai/refact/issues) for bugs and errors
+- [Community Forum](https://github.com/smallcloudai/refact/discussions) for community support and discussions
+- [Discord](https://www.smallcloud.ai/discord) for chatting with community members
+- [Twitter](https://twitter.com/refact_ai) for product news and updates
+
+
+## License
+
+Refact is free to use for individuals and small teams under the BSD-3-Clause license. If you wish to use Refact for Enterprise, please [contact us](https://refact.ai/contact/).
+
+
+
+
+
+
+
 

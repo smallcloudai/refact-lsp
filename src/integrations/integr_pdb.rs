@@ -231,7 +231,7 @@ async fn start_pdb_session(
     timeout_seconds: u64,
 ) -> Result<String, String> {
     if !(command_args.len() >= 3 && command_args[0] == "python" && command_args[1] == "-m" && command_args[2] == "pdb") {
-        return Err("Usage: python -m pdb ... To use a different Python environment, set `python_path` in `integrations.yaml`.".to_string());
+        return Err("Usage: python -m pdb ... To use a different Python environment, use a path to python binary.".to_string());
     }
     command_args.remove(0);
 
@@ -377,6 +377,12 @@ fields:
 description: |
   The PDB integration allows interaction with the Python debugger for inspecting variables and exploring program execution.
   It provides functionality for debugging Python scripts and applications.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: []
+  deny_default: []
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -384,10 +390,5 @@ smartlinks:
         content: |
           🔧 The pdb tool should be visible now. To test the tool, start a debugging session for a simple Python script, set a breakpoint, and inspect some variables.
           If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
-confirmation:
-  ask_user_default: []
-  deny_default: []
+    sl_enable_only_with_tool: true
 "#;

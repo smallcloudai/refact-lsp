@@ -71,15 +71,6 @@ pub async fn handle_v1_links(
     let (integrations_map, integration_yaml_errors) = crate::integrations::running_integrations::load_integrations(gcx.clone(), "".to_string(), experimental).await;
 
     if post.meta.chat_mode == ChatMode::CONFIGURE {
-        // links.push(Link {
-        //     link_action: LinkAction::Goto,
-        //     link_text: "Return".to_string(),
-        //     link_goto: Some("SETTINGS:DEFAULT".to_string()),
-        //     link_summary_path: None,
-        //     link_tooltip: format!(""),
-        //     link_payload: None,
-        // });
-
         if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
             links.push(Link {
                 link_action: LinkAction::PatchAll,
@@ -92,17 +83,30 @@ pub async fn handle_v1_links(
         }
     }
 
+    if post.meta.chat_mode == ChatMode::PROJECT_SUMMARY {
+        if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
+            links.push(Link {
+                link_action: LinkAction::PatchAll,
+                link_text: "Save and return".to_string(),
+                link_goto: Some("NEWCHAT".to_string()),
+                link_summary_path: None,
+                link_tooltip: format!(""),
+                link_payload: None,
+            });
+        }
+    }
+
     // GIT uncommitted
     if post.meta.chat_mode == ChatMode::AGENT {
         let commits = get_commit_information_from_current_changes(gcx.clone()).await;
-        
+
         let mut project_changes = Vec::new();
         for commit in &commits {
             project_changes.push(format!(
-                "In project {}: {}{}",
+                "In project {}:\n{}{}",
                 commit.get_project_name(),
-                commit.file_changes.iter().take(3).map(|f| format!("{} {}", f.status.initial(), f.path)).collect::<Vec<_>>().join(", "),
-                if commit.file_changes.len() > 3 { ", ..." } else { "" },
+                commit.file_changes.iter().take(3).map(|f| format!("{} {}", f.status.initial(), f.path)).collect::<Vec<_>>().join("\n"),
+                if commit.file_changes.len() > 3 { "\n...\n" } else { "\n" },
             ));
         }
         if !project_changes.is_empty() && post.messages.is_empty() {
@@ -110,7 +114,7 @@ pub async fn handle_v1_links(
                 project_changes.truncate(4);
                 project_changes.push("...".to_string());
             }
-            uncommited_changes_warning = format!("You have uncommitted changes:\n```\n{}\n```\n⚠️ You might have a problem rolling back agent's changes.", project_changes.join("\n"));
+            uncommited_changes_warning = format!("You have uncommitted changes:\n```\n{}\n```\nIt's fine, but you might have a problem rolling back agent's changes.", project_changes.join("\n"));
         }
 
         if false {
@@ -133,7 +137,7 @@ pub async fn handle_v1_links(
         }
     }
 
-    // Failures above
+    // Failures in integrations
     if post.meta.chat_mode == ChatMode::AGENT {
         for failed_integr_name in failed_integration_names_after_last_user_message(&post.messages) {
             links.push(Link {

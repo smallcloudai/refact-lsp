@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 
+use crate::files_correction::to_pathbuf_normalize;
+use crate::integrations::go_to_configuration_message;
 use crate::tools::tools_description::Tool;
 use serde_json::Value;
 use crate::integrations::integr_abstract::{IntegrationCommon, IntegrationConfirmation, IntegrationTrait};
@@ -33,7 +35,6 @@ impl IntegrationTrait for ToolGithub {
     fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
         match serde_json::from_value::<SettingsGitHub>(value.clone()) {
             Ok(settings_github) => {
-                info!("Github settings applied: {:?}", settings_github);
                 self.settings_github = settings_github;
             },
             Err(e) => {
@@ -90,23 +91,20 @@ impl Tool for ToolGithub {
         if gh_binary_path.is_empty() {
             gh_binary_path = "gh".to_string();
         }
-        let output = Command::new(gh_binary_path)
+        let output = Command::new(&gh_binary_path)
             .args(&command_args)
-            .current_dir(&project_dir)
+            .current_dir(&to_pathbuf_normalize(&project_dir))
             .env("GH_TOKEN", &self.settings_github.gh_token)
             .env("GITHUB_TOKEN", &self.settings_github.gh_token)
             .output()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("!{}, {} failed:\n{}", 
+                go_to_configuration_message("github"), gh_binary_path, e.to_string()))?;
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-        if !stderr.is_empty() {
-            error!("Error: {:?}", stderr);
-            return Err(stderr);
-        }
-
-        let content = if stdout.starts_with("[") {
+        let stdout_content = if stdout.starts_with("[") {
             match serde_json::from_str::<Value>(&stdout) {
                 Ok(Value::Array(arr)) => {
                     let row_count = arr.len();
@@ -120,6 +118,15 @@ impl Tool for ToolGithub {
         } else {
             stdout
         };
+
+        let mut content = String::new();
+        if !stdout_content.is_empty() {
+            content.push_str(format!("stdout:\n{}\n", stdout_content).as_str());
+        }
+        if !stderr.is_empty() {
+            content.push_str(format!("stderr:\n{}\n", stderr).as_str());
+        }
+        
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
@@ -179,18 +186,29 @@ fn parse_command_args(args: &HashMap<String, Value>) -> Result<Vec<String>, Stri
 
 const GITHUB_INTEGRATION_SCHEMA: &str = r#"
 fields:
-  gh_binary_path:
-    f_type: string_long
-    f_desc: "Path to the GitHub CLI binary. Leave empty to use the default 'gh' command."
-    f_placeholder: "/usr/local/bin/gh"
-    f_label: "GH Binary Path"
   gh_token:
     f_type: string_long
-    f_desc: "GitHub Personal Access Token for authentication."
+    f_desc: "GitHub Personal Access Token, you can create one at https://github.com/settings/tokens. If you don't want to send your key to the AI model that helps you to configure the agent, put it into secrets.yaml and write $MY_SECRET_VARIABLE in this field."
     f_placeholder: "ghp_xxxxxxxxxxxxxxxx"
+    f_label: "Token"
+    smartlinks:
+      - sl_label: "Open secrets.yaml"
+        sl_goto: "EDITOR:secrets.yaml"
+  gh_binary_path:
+    f_type: string_long
+    f_desc: "Path to the GitHub CLI binary. Leave empty if you have it in PATH."
+    f_placeholder: "/usr/local/bin/gh"
+    f_label: "GH Binary Path"
+    f_extra: true
 description: |
   The GitHub integration allows interaction with GitHub repositories using the GitHub CLI.
   It provides functionality for various GitHub operations such as creating issues, pull requests, and more.
+available:
+  on_your_laptop_possible: true
+  when_isolated_possible: true
+confirmation:
+  ask_user_default: ["gh * delete *", "gh * close *"]
+  deny_default: ["gh auth token *"]
 smartlinks:
   - sl_label: "Test"
     sl_chat:
@@ -198,10 +216,5 @@ smartlinks:
         content: |
           🔧 The `github` (`gh`) tool should be visible now. To test the tool, list opened pull requests for `smallcloudai/refact-lsp`, and briefly describe them and express
           happiness, and change nothing. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
-available:
-  on_your_laptop_possible: true
-  when_isolated_possible: true
-confirmation:
-  ask_user_default: ["gh * delete *", "gh * close *"]
-  deny_default: ["gh auth token *"]
+    sl_enable_only_with_tool: true
 "#;
