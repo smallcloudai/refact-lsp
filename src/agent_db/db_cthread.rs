@@ -267,6 +267,7 @@ pub async fn handle_db_v1_cthreads_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_id in updated_cthread_ids {
+                // XXX idea: remember cthread_ids sent to client to filter, instead of quicksearch again here
                 match cthread_quicksearch(cdb.clone(), &updated_id, &post) {
                     Ok(updated_cthreads) => {
                         for updated_cthread in updated_cthreads {
@@ -279,7 +280,7 @@ pub async fn handle_db_v1_cthreads_sub(
                     },
                     Err(e) => {
                         tracing::error!("handle_db_v1_cthreads_sub(2): {}", e);
-                        break;
+                        continue;
                     }
                 }
             }
