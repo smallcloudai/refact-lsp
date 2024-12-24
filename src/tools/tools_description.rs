@@ -12,7 +12,6 @@ use crate::call_validation::{ChatUsage, ContextEnum};
 use crate::global_context::GlobalContext;
 use crate::integrations::integr_abstract::IntegrationConfirmation;
 use crate::tools::tools_execute::{command_should_be_confirmed_by_user, command_should_be_denied};
-// use crate::integrations::docker::integr_docker::ToolDocker;
 
 
 #[derive(Clone, Debug)]
@@ -386,60 +385,71 @@ pub struct ToolDesc {
     pub parameters_required: Vec<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct ToolParam {
     pub name: String,
     #[serde(rename = "type", default = "default_param_type")]
     pub param_type: String,
     pub description: String,
+    #[serde(rename = "enum", default)]
+    pub param_enum: Vec<String>, // anthropic; learn more https://docs.anthropic.com/en/docs/build-with-claude/tool-use#example-simple-tool-definition
 }
 
 fn default_param_type() -> String {
     "string".to_string()
 }
 
-pub fn make_openai_tool_value(
-    name: String,
-    agentic: bool,
-    description: String,
-    parameters_required: Vec<String>,
-    parameters: Vec<ToolParam>,
-) -> Value {
-    let params_properties = parameters.iter().map(|param| {
+
+fn map_parameters_to_properties(parameters: Vec<ToolParam>, style: &str) -> serde_json::Map<String, Value> {
+    parameters.iter().map(|param| {
+        let mut param_json = json!({
+            "type": param.param_type,
+            "description": param.description
+        });
+
+        if style == "anthropic" && !param.param_enum.is_empty() {
+            param_json["enum"] = json!(param.param_enum);
+        }
+
         (
             param.name.clone(),
-            json!({
-                "type": param.param_type,
-                "description": param.description
-            })
+            param_json
         )
-    }).collect::<serde_json::Map<_, _>>();
-
-    let function_json = json!({
-            "type": "function",
-            "function": {
-                "name": name,
-                "agentic": agentic, // this field is not OpenAI's
-                "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": params_properties,
-                    "required": parameters_required
-                }
-            }
-        });
-    function_json
+    }).collect::<serde_json::Map<_, _>>()
 }
 
 impl ToolDesc {
-    pub fn into_openai_style(self) -> Value {
-        make_openai_tool_value(
-            self.name,
-            self.agentic,
-            self.description,
-            self.parameters_required,
-            self.parameters,
-        )
+    pub fn into_openai_style(self, internal_style: bool) -> Value {
+        let mut function_json = json!({
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": map_parameters_to_properties(self.parameters, "openai"),
+                    "required": self.parameters_required
+                }
+            }
+        });
+
+        if internal_style {
+            function_json["function"]["agentic"] = json!(self.agentic);
+        }
+
+        function_json
+    }
+
+    pub fn into_anthropic_style(self) -> Value {
+        json!({
+            "name": self.name,
+            "description": self.description,
+            "input_schema": {
+                "type": "object",
+                "properties": map_parameters_to_properties(self.parameters, "anthropic"),
+                "required": self.parameters_required
+            }
+        })
     }
 }
 

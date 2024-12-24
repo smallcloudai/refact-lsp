@@ -3,7 +3,7 @@ use tracing::{error, warn};
 use crate::call_validation::{ChatContent, ChatMessage, ContextFile};
 
 
-pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &Option<String>) -> Vec<Value> {
+pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &str) -> Vec<Value> {
     let mut results = vec![];
     let mut delay_images = vec![];
 
@@ -91,6 +91,30 @@ pub fn convert_messages_to_openai_format(messages: Vec<ChatMessage>, style: &Opt
     results
 }
 
+// for anthropic:
+// tool answers must be located in the same message.content (if tools executed in parallel)
+pub fn format_messages_anthropic(messages: Vec<Value>) -> Vec<Value> {
+    let mut res: Vec<Value> = vec![];
+    for m in messages {
+        match m.get("content") {
+            Some(Value::Array(cont)) => {
+                if let Some(prev_el) = res.last_mut() {
+                    if let Some(Value::Array(prev_cont)) = prev_el.get_mut("content") {
+                        if cont.iter().any(|c| c.get("type") == Some(&Value::String("tool_result".to_string())))
+                            && prev_cont.iter().any(|p| p.get("type") == Some(&Value::String("tool_result".to_string())))
+                        {
+                            prev_cont.extend(cont.iter().cloned());
+                            continue;
+                        }
+                    }
+                }
+                res.push(m);
+            }
+            _ => res.push(m),
+        }
+    }
+    res
+}
 
 #[cfg(test)]
 mod tests {
@@ -179,7 +203,7 @@ mod tests {
 
         let roles_out_expected = expected_output.iter().map(|x| x.get("role").unwrap().as_str().unwrap().to_string()).collect::<Vec<_>>();
 
-        let style = Some("openai".to_string());
+        let style = "openai";
         let output = convert_messages_to_openai_format(messages, &style);
 
         // println!("OUTPUT: {:#?}", output);

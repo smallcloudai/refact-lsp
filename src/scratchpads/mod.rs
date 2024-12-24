@@ -30,6 +30,13 @@ use crate::cached_tokenizers;
 
 fn verify_has_send<T: Send>(_x: &T) {}
 
+pub fn resolve_endpoint_style(endpoint_style: &str) -> &str {
+    match endpoint_style {
+        "hf" => "hf",
+        "anthropic" => "anthropic",
+        _ => "openai"
+    }
+}
 
 pub async fn create_code_completion_scratchpad(
     global_context: Arc<ARwLock<GlobalContext>>,
@@ -81,7 +88,7 @@ pub async fn create_chat_scratchpad(
     supports_clicks: bool,
 ) -> Result<Box<dyn ScratchpadAbstract>, String> {
     let mut result: Box<dyn ScratchpadAbstract>;
-    let tokenizer_arc = cached_tokenizers::cached_tokenizer(caps, global_context.clone(), model_name_for_tokenizer).await?;
+    let tokenizer_arc = cached_tokenizers::cached_tokenizer(caps.clone(), global_context.clone(), model_name_for_tokenizer).await?;
     if scratchpad_name == "CHAT-GENERIC" {
         result = Box::new(chat_generic::GenericChatScratchpad::new(
             tokenizer_arc.clone(), post, messages, allow_at
@@ -91,9 +98,11 @@ pub async fn create_chat_scratchpad(
             tokenizer_arc.clone(), post, messages, allow_at
         ));
     } else if scratchpad_name == "PASSTHROUGH" {
+        let style = caps.read().unwrap().endpoint_style.clone();
+        let style = resolve_endpoint_style(&style);
         post.stream = Some(true);  // this should be passed from the request
         result = Box::new(chat_passthrough::ChatPassthrough::new(
-            tokenizer_arc.clone(), post, messages, allow_at, supports_tools, supports_clicks
+            tokenizer_arc.clone(), post, messages, allow_at, supports_tools, supports_clicks, style
         ));
     } else {
         return Err(format!("This rust binary doesn't have chat scratchpad \"{}\" compiled in", scratchpad_name));
