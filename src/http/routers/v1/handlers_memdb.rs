@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use async_stream::stream;
 use tokio::sync::RwLock as ARwLock;
 use serde_json::json;
 
@@ -8,7 +9,7 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-
+use crate::knowledge::MemdbSubEvent;
 
 #[derive(Deserialize)]
 struct MemAddRequest {
@@ -184,3 +185,55 @@ pub async fn handle_mem_list(
     Ok(response)
 }
 
+pub async fn handle_mem_sub(
+    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
+    _body_bytes: hyper::body::Bytes,
+) -> Result<Response<Body>, ScratchError> {
+    fn _get_last_memid(events: &Vec<MemdbSubEvent>) -> i64 {
+        events
+            .iter()
+            .max_by_key(|x| x.pubevent_id)
+            .map(|x| x.pubevent_id)
+            .unwrap_or(0)
+    }
+
+    let vec_db = gcx.read().await.vec_db.clone();
+    let mut last_pubevent_id = _get_last_memid(
+        &crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), None).await
+            .map_err(|e| {
+                ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+            })?
+    );
+    let sse = stream! {
+        loop {
+            match crate::vecdb::vdb_highlev::memdb_pubsub_trigerred(vec_db.clone(), 10).await {
+                Ok(_) => {}
+                Err(_) => {
+                    break;
+                }
+            };
+            match crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), Some(last_pubevent_id)).await {
+                Ok(new_events) => {
+                    for event in new_events.iter() {
+                        yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&event).unwrap()));
+                    }
+                    if !new_events.is_empty() {
+                        last_pubevent_id = _get_last_memid(&new_events);
+                    }
+                },
+                Err(e) => {
+                    tracing::error!(e);
+                    break;
+                }
+            };
+        }
+    };
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .body(Body::wrap_stream(sse))
+        .unwrap();
+    Ok(response)
+}

@@ -171,14 +171,12 @@ pub fn cthread_apply_json(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "cthread_id is required".to_string())?
         .to_string();
-    // All default values if not found:
+    // all default values if not found, as a way to create new cthreads
     let mut cthread_rec = cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default();
     let mut chat_thread_json = serde_json::to_value(&cthread_rec).unwrap();
     crate::agent_db::merge_json(&mut chat_thread_json, &incoming_json);
-
-    cthread_rec = serde_json::from_value(chat_thread_json).map_err(|e| format!("Deserialization error: {}", e))?;
+    cthread_rec = serde_json::from_value(chat_thread_json).unwrap();
     cthread_set(cdb, &cthread_rec);
-
     Ok(cthread_rec)
 }
 
@@ -269,6 +267,7 @@ pub async fn handle_db_v1_cthreads_sub(
                 yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
             }
             for updated_id in updated_cthread_ids {
+                // XXX idea: remember cthread_ids sent to client to filter, instead of quicksearch again here
                 match cthread_quicksearch(cdb.clone(), &updated_id, &post) {
                     Ok(updated_cthreads) => {
                         for updated_cthread in updated_cthreads {
@@ -281,7 +280,7 @@ pub async fn handle_db_v1_cthreads_sub(
                     },
                     Err(e) => {
                         tracing::error!("handle_db_v1_cthreads_sub(2): {}", e);
-                        break;
+                        continue;
                     }
                 }
             }

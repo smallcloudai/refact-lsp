@@ -23,21 +23,22 @@ pub async fn look_for_a_job(
     let worker_name = format!("aworker-{}-{}", worker_pid, worker_n);
     let cdb = gcx.read().await.chore_db.clone();
     let lite_arc = cdb.lock().lite.clone();
-    let mut might_work_on_cthread_id: IndexSet<String> = IndexSet::new();
-    let post = CThreadSubscription {
-        quicksearch: "".to_string(),
-        limit: 100,
-    };
 
-    // intentional unwrap(), it's better to crash than continue with a non-functioning threads
-    let mut last_pubsub_id = {
+    let (mut might_work_on_cthread_id, mut last_pubsub_id) = {
         let lite = cdb.lock().lite.clone();
+        // intentional unwrap(), it's better to crash quickly than continue with a non-functioning thread
         let max_pubsub_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0)).unwrap();
+        let post = CThreadSubscription {
+            quicksearch: "".to_string(),
+            limit: 100,
+        };
+        // intentional unwrap()
         let cthreads = crate::agent_db::db_cthread::cthread_quicksearch(cdb.clone(), &String::new(), &post).unwrap();
+        let mut might_work_on_cthread_id = IndexSet::new();
         for ct in cthreads.iter() {
             might_work_on_cthread_id.insert(ct.cthread_id.clone());
         }
-        max_pubsub_id
+        (might_work_on_cthread_id, max_pubsub_id)
     };
 
     loop {
@@ -215,7 +216,7 @@ async fn do_the_job(
         Some(cthread_rec.cthread_id.clone()),
         Some(format!("{log_prefix}-chore-job")),
     ).await.map_err(|e| format!("Error: {}", e))?;
-    
+
     let choice0: Vec<ChatMessage> = chat_response_msgs[0].clone();
     {
         let mut lite_locked = lite.lock();
