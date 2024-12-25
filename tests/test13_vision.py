@@ -24,7 +24,7 @@ def get_base64_image(image_path):
 def chat_request(msgs, max_tokens: int = 200):
     url = "http://localhost:8001/v1/chat"
     payload = {
-        "model": "gpt-4o",
+        "model": "claude-3-5-sonnet-20241022",
         "messages": msgs,
         "stream": False,
         "max_tokens": max_tokens,
@@ -108,6 +108,6 @@ def test_multiple_images_sending():
 
 
 if __name__ == "__main__":
-    test_format()
+#     test_format()
     test_image_sending()
     test_multiple_images_sending()

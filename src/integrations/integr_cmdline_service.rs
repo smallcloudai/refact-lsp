@@ -319,6 +319,7 @@ impl Tool for ToolService {
             name: "action".to_string(),
             param_type: "string".to_string(),
             description: "Action to perform: start, restart, stop, status".to_string(),
+            ..Default::default()
         });
 
         let parameters_required = self.cfg.parameters_required.clone().unwrap_or_else(|| {

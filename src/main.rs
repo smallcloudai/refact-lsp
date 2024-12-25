@@ -52,6 +52,7 @@ mod scratchpads;
 
 #[cfg(feature="vecdb")]
 mod fetch_embedding;
+mod forward_to_anthropic_endpoint;
 mod forward_to_hf_endpoint;
 mod forward_to_openai_endpoint;
 mod restream;
@@ -66,6 +67,7 @@ mod privacy;
 mod git;
 mod agentic;
 mod trajectories;
+
 
 #[tokio::main]
 async fn main() {
