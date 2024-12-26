@@ -21,6 +21,23 @@ use image::{ImageFormat, ImageReader};
 pub struct ToolCat;
 
 
+pub fn parse_skeleton_from_args(args: &HashMap<String, Value>) -> Result<bool, String> {
+    Ok(match args.get("skeleton") {
+        Some(Value::Bool(s)) => *s,
+        Some(Value::String(s)) => {
+            if s == "true" {
+                true
+            } else if s == "false" {
+                false
+            } else {
+                return Err(format!("argument `skeleton` is not a bool: {:?}", s));
+            }
+        }
+        Some(v) => return Err(format!("argument `skeleton` is not a bool: {:?}", v)),
+        None => false
+    })
+}
+
 #[async_trait]
 impl Tool for ToolCat {
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -54,20 +71,7 @@ impl Tool for ToolCat {
             Some(v) => return Err(format!("argument `symbols` is not a string: {:?}", v)),
             None => vec![],
         };
-        let skeleton = match args.get("skeleton") {
-            Some(Value::Bool(s)) => *s,
-            Some(Value::String(s)) => {
-                if s == "true" {
-                    true
-                } else if s == "false" {
-                    false
-                } else {
-                    return Err(format!("argument `skeleton` is not a bool: {:?}", s));
-                }
-            }
-            Some(v) => return Err(format!("argument `skeleton` is not a bool: {:?}", v)),
-            None => false,  // the default
-        };
+        let skeleton = parse_skeleton_from_args(args)?;
         ccx.lock().await.pp_skeleton = skeleton;
 
         let (filenames_present, symbols_not_found, not_found_messages, context_enums, multimodal) = paths_and_symbols_to_cat(ccx.clone(), paths, symbols).await;
