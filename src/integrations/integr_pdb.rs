@@ -129,7 +129,11 @@ impl Tool for ToolPdb {
         let session_hashmap_key = get_session_hashmap_key("pdb", &chat_id);
         let mut python_command = self.settings_pdb.python_path.clone();
         if python_command.is_empty() {
-            python_command = "python3".to_string();
+            if cfg!(target_os = "windows") {
+                python_command = "python".to_string();
+            } else {
+                python_command = "python3".to_string();
+            }
         }
         if command_args.windows(2).any(|w| w == ["-m", "pdb"]) {
             let output = start_pdb_session(&python_command, &mut command_args, &session_hashmap_key, gcx.clone(), 10).await?;
@@ -371,8 +375,8 @@ const PDB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   python_path:
     f_type: string_long
-    f_desc: "Path to the Python interpreter. Leave empty to use the default 'python3' command."
-    f_placeholder: "/opt/homebrew/bin/python3"
+    f_desc: "Path to the Python interpreter. Leave empty to use the default python command."
+    f_placeholder: "/home/user/project/.venv/bin/python3"
     f_label: "Python Interpreter Path"
 description: |
   The PDB integration allows interaction with the Python debugger for inspecting variables and exploring program execution.
