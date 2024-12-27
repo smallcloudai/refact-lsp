@@ -508,7 +508,7 @@ pub async fn vectorizer_enqueue_files(
     documents: &Vec<Document>,
     process_immediately: bool,
 ) {
-    info!("adding {} files", documents.len());
+    info!("adding or removing {} files", documents.len());
     let documents = filter_docs_to_enqueue(documents);
     let (vecdb_todo, vstatus, vstatus_notify, vecdb_max_files) = {
         let service = vservice.lock().await;

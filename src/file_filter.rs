@@ -2,6 +2,7 @@ use std::fs;
 #[cfg(not(windows))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex as StdMutex};
 
 const LARGE_FILE_SIZE_THRESHOLD: u64 = 180*1024; // 180k files (180k is ~0.2% of all files on our dataset)
 const SMALL_FILE_SIZE_THRESHOLD: u64 = 5;        // 5 Bytes
@@ -76,3 +77,30 @@ pub fn is_this_inside_blacklisted_dir(path: &PathBuf) -> bool {
     false
 }
 
+pub fn is_in_one_of_the_workspaces_root(path: &PathBuf, workspace_folders: Arc<StdMutex<Vec<PathBuf>>>) -> bool {
+    if let Some(path_parent) = path.parent() {
+        if let Ok(workspace_folders) = workspace_folders.lock() {
+            for folder in workspace_folders.iter() {
+                if path_parent == folder {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn has_the_same_parent_as_one_of_the_others(path: &PathBuf, workspace_files: Arc<StdMutex<Vec<PathBuf>>>) -> bool {
+    if let Some(path_parent) = path.parent() {
+        if let Ok(workspace_files) = workspace_files.lock() {
+            for file in workspace_files.iter() {
+                if let Some(file_parent) = file.parent() {
+                    if path_parent == file_parent {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
