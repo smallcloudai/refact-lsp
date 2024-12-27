@@ -120,6 +120,8 @@ PROMPT_AGENTIC_TOOLS: |
   * Question unrelated to the project => just answer immediately.
 
   * Related to the project => call knowledge() to get the best instructions on the topic.
+  
+  * having tree() in a context is obligatory before making any changes to the project.
 
   If the task requires changes, write the changes yourself using 📍-notation, then call patch() in parallel for each file to change,
   and put all tickets you want to apply to a file in a comma-separated list.
