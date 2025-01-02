@@ -10,7 +10,6 @@ use url::Url;
 use walkdir::WalkDir;
 
 use crate::files_correction::get_project_dirs;
-use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 use crate::global_context::GlobalContext;
 use crate::http::http_post;
 use crate::http::routers::v1::lsp_like_handlers::LspLikeInit;
@@ -335,6 +334,7 @@ async fn docker_container_sync_workspace(
     container_id: &str,
     lsp_port_to_connect: &str,
 ) -> Result<(), String> {
+    // XXX should be many dirs
     let workspace_folder = get_project_dirs(gcx.clone())
         .await
         .into_iter()
@@ -352,9 +352,13 @@ async fn docker_container_sync_workspace(
     tar_builder.follow_symlinks(true);
     tar_builder.mode(async_tar::HeaderMode::Complete);
 
-    let files = retrieve_files_in_workspace_folders(
-        vec![workspace_folder.clone()], true, true).await;
-    for file in &files {
+    let (all_files, _vcs_folders) = crate::files_in_workspace::retrieve_files_in_workspace_folders(
+        vec![workspace_folder.clone()],
+        false,
+        false,
+    ).await;
+
+    for file in &all_files {
         let relative_path = file.strip_prefix(&workspace_folder)
            .map_err(|e| format!("Error stripping prefix: {}", e))?;
 
