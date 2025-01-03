@@ -107,13 +107,28 @@ pub const KNOWN_MODELS: &str = r####"
             "default_scratchpad": "REPLACE",
             "similar_models": [
                 "llama3/8b/instruct/neuron",
-                "llama3/8b/instruct/vllm",
                 "llama3.1/8b/instruct",
-                "llama3.1/8b/instruct/vllm",
                 "llama3.2/3b/instruct",
-                "llama3.2/3b/instruct/vllm",
-                "llama3.2/1b/instruct",
-                "llama3.2/1b/instruct/vllm"
+                "llama3.2/1b/instruct"
+            ]
+        },
+        "llama3.2/3b/instruct/vllm": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "llama3/8b/instruct/vllm",
+                "llama3.1/8b/instruct/vllm",
+                "llama3.2/1b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/vllm",
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/1.5b/instruct/vllm",
+                "qwen2.5/coder/3b/instruct/vllm",
+                "qwen2.5/coder/7b/instruct/vllm"
             ]
         },
         "gpt-4o": {
@@ -265,18 +280,13 @@ pub const KNOWN_MODELS: &str = r####"
             "similar_models": [
                 "qwen2.5/coder/0.5b/instruct/vllm",
                 "qwen2.5/coder/1.5b/instruct",
-                "qwen2.5/coder/1.5b/instruct/vllm",
                 "qwen2.5/coder/3b/instruct",
-                "qwen2.5/coder/3b/instruct/vllm",
                 "qwen2.5/coder/7b/instruct/gptq8bit",
                 "qwen2.5/coder/7b/instruct",
-                "qwen2.5/coder/7b/instruct/vllm",
                 "qwen2.5/coder/14b/instruct/gptq8bit",
                 "qwen2.5/coder/14b/instruct",
-                "qwen2.5/coder/14b/instruct/vllm",
                 "qwen2.5/coder/32b/instruct/gptq8bit",
-                "qwen2.5/coder/32b/instruct",
-                "qwen2.5/coder/32b/instruct/vllm"
+                "qwen2.5/coder/32b/instruct"
             ]
         },
         "qwen2.5/coder/0.5b/base": {
@@ -449,15 +459,28 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
-                "llama3/8b/instruct/vllm",
                 "llama3/8b/instruct/neuron",
                 "meta-llama/llama-3.1-8b-instruct",
                 "llama3.1/8b/instruct",
-                "llama3.1/8b/instruct/vllm",
                 "llama3.2/3b/instruct",
-                "llama3.2/3b/instruct/vllm",
-                "llama3.2/1b/instruct",
-                "llama3.2/1b/instruct/vllm"
+                "llama3.2/1b/instruct"
+            ]
+        },
+        "llama3.2/3b/instruct/vllm": {
+            "n_ctx": 4096,
+            "supports_tools": true,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "llama3/8b/instruct/vllm",
+                "llama3.1/8b/instruct/vllm",
+                "llama3.2/1b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/vllm",
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/1.5b/instruct/vllm",
+                "qwen2.5/coder/3b/instruct/vllm",
+                "qwen2.5/coder/7b/instruct/vllm"
             ]
         },
         "wizardlm/7b": {
@@ -644,18 +667,13 @@ pub const KNOWN_MODELS: &str = r####"
             },
             "similar_models": [
                 "qwen2.5/coder/1.5b/instruct",
-                "qwen2.5/coder/1.5b/instruct/vllm",
                 "qwen2.5/coder/3b/instruct",
-                "qwen2.5/coder/3b/instruct/vllm",
                 "qwen2.5/coder/7b/instruct/gptq8bit",
                 "qwen2.5/coder/7b/instruct",
-                "qwen2.5/coder/7b/instruct/vllm",
                 "qwen2.5/coder/14b/instruct/gptq8bit",
                 "qwen2.5/coder/14b/instruct",
-                "qwen2.5/coder/14b/instruct/vllm",
                 "qwen2.5/coder/32b/instruct/gptq8bit",
-                "qwen2.5/coder/32b/instruct",
-                "qwen2.5/coder/32b/instruct/vllm"
+                "qwen2.5/coder/32b/instruct"
             ]
         }
     },
