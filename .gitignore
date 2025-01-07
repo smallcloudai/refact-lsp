@@ -165,4 +165,5 @@ dmypy.json
 .DS_Store
 
 # rust
-Cargo.lock
+# The Cargo.lock is not supposed to be ignored, see https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control
+# Cargo.lock
