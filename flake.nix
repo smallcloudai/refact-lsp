@@ -7,9 +7,19 @@
     in
     {
       packages."x86_64-linux".refact-lsp =
+        let
+          src = builtins.path {
+            name = "refact-lsp";
+            path = ./.;
+            filter = file: type: !builtins.elem (baseNameOf file) [
+              "flake.nix"
+              "flake.lock"
+            ];
+          };
+        in
         pkgs.rust.packages.stable.rustPlatform.buildRustPackage {
           name = "refact-lsp";
-          src = ./.;
+          src = src;
 
           cargoLock = {
             lockFile = ./Cargo.lock;
