@@ -164,6 +164,9 @@ dmypy.json
 # macos dir cache
 .DS_Store
 
+# nix derivation result
+result
+
 # rust
 # The Cargo.lock is not supposed to be ignored, see https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control
 # Cargo.lock
