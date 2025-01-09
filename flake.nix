@@ -50,6 +50,18 @@
           mkdir -p ./refact/bin
           cp ${self.packages."x86_64-linux".refact-lsp}/bin/refact-lsp ./refact/bin/refact-lsp
         '';
+
+        propagatedBuildInputs = with pkgs.python3Packages; [
+          aiohttp
+          termcolor
+          pydantic
+          prompt-toolkit
+          requests
+          pyyaml
+          tabulate
+          pyperclip
+          rich
+        ];
       };
 
       packages."x86_64-linux".default = self.packages."x86_64-linux".refact-lsp;
