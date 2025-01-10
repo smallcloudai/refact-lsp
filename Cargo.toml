@@ -27,6 +27,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread", "signal", "process"] }
 reqwest-eventsource = "0.6.0"
 url = "2.4.1"
+percent-encoding = "2.3"
 serde = { version = "1", features = ["rc", "derive"] }
 serde_json = {version = "1", features = ["preserve_order"]}
 serde_yaml = "0.9.31"

@@ -264,9 +264,14 @@ async fn docker_container_sync_config_folder(
     container_id: &str,
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> Result<(), String> {
-    let (config_dir, integrations_yaml, variables_yaml) = {
+    let (config_dir, integrations_yaml, variables_yaml, secrets_yaml) = {
         let gcx_locked = gcx.read().await;
-        (gcx_locked.config_dir.clone(), gcx_locked.cmdline.integrations_yaml.clone(), gcx_locked.cmdline.variables_yaml.clone())
+        (
+            gcx_locked.config_dir.clone(), 
+            gcx_locked.cmdline.integrations_yaml.clone(), 
+            gcx_locked.cmdline.variables_yaml.clone(),
+            gcx_locked.cmdline.secrets_yaml.clone(),
+        )
     };
     let config_dir_string = config_dir.to_string_lossy().to_string();
     let container_home_dir = docker_container_get_home_dir(&docker, &container_id, gcx.clone()).await?;
@@ -275,18 +280,37 @@ async fn docker_container_sync_config_folder(
     let temp_dir = tempfile::Builder::new().tempdir()
         .map_err(|e| format!("Error creating temporary directory: {}", e))?;
     let temp_dir_path = temp_dir.path().to_string_lossy().to_string();
-    docker.command_execute(&format!("container cp {temp_dir_path} {container_id}:{container_home_dir}/.config/"), gcx.clone(), true, true).await?;
-    docker.command_execute(&format!("container cp {config_dir_string} {container_id}:{container_home_dir}/.config/refact"), gcx.clone(), true, true).await?;
 
+    docker_container_copy(docker, gcx.clone(), container_id, &temp_dir_path, 
+        &format!("{container_home_dir}/.config/")).await?;
+    docker_container_copy(docker, gcx.clone(), container_id, &config_dir_string, 
+        &format!("{container_home_dir}/.config/refact/")).await?;
+    
     if !integrations_yaml.is_empty() {
-        let cp_integrations_command = format!("container cp {integrations_yaml} {container_id}:{container_home_dir}/.config/refact/integrations.yaml");
-        docker.command_execute(&cp_integrations_command, gcx.clone(), true, true).await?;
+        docker_container_copy(docker, gcx.clone(), container_id, &integrations_yaml, 
+            &format!("{container_home_dir}/.config/refact/integrations.yaml")).await?;
     }
     if !variables_yaml.is_empty() {
-        let cp_variables_command = format!("container cp {variables_yaml} {container_id}:{container_home_dir}/.config/refact/variables.yaml");
-        docker.command_execute(&cp_variables_command, gcx.clone(), true, true).await?;
+        docker_container_copy(docker, gcx.clone(), container_id, &variables_yaml, 
+            &format!("{container_home_dir}/.config/refact/variables.yaml")).await?;
+    }
+    if !secrets_yaml.is_empty() {
+        docker_container_copy(docker, gcx.clone(), container_id, &secrets_yaml, 
+            &format!("{container_home_dir}/.config/refact/secrets.yaml")).await?;
     }
 
+    Ok(())
+}
+
+async fn docker_container_copy(
+    docker: &ToolDocker, 
+    gcx: Arc<ARwLock<GlobalContext>>, 
+    container_id_or_name: &str, 
+    local_path: &str, 
+    remote_path: &str
+) -> Result<(), String> {
+    let cp_command = format!("container cp {} {}:{}", shell_words::quote(&local_path), container_id_or_name, shell_words::quote(&remote_path));
+    docker.command_execute(&cp_command, gcx.clone(), true, true).await?;
     Ok(())
 }
 
@@ -342,7 +366,7 @@ async fn docker_container_sync_workspace(
         .into_iter()
         .next()
         .ok_or_else(|| "No workspace folders found".to_string())?;
-    let container_workspace_folder = PathBuf::from(&isolation.container_workspace_folder);
+    let container_workspace_folder = isolation.container_workspace_folder.clone();
 
     let temp_tar_file = tempfile::Builder::new().suffix(".tar").tempfile()
         .map_err(|e| format!("Error creating temporary tar file: {}", e))?.into_temp_path();
@@ -374,12 +398,12 @@ async fn docker_container_sync_workspace(
 
     tar_builder.finish().await.map_err(|e| format!("Error finishing tar archive: {}", e))?;
 
-    let cp_command = format!("container cp {} {}:{}", temp_tar_file.to_string_lossy(), container_id, container_workspace_folder.to_string_lossy());
-    docker.command_execute(&cp_command, gcx.clone(), true, true).await?;
+    docker_container_copy(docker, gcx.clone(), container_id, 
+        &temp_tar_file.to_string_lossy().to_string(), &container_workspace_folder).await?;
 
     let sync_files_post = SyncFilesExtractTarPost {
-        tar_path: container_workspace_folder.join(&tar_file_name).to_string_lossy().to_string(),
-        extract_to: container_workspace_folder.to_string_lossy().to_string(),
+        tar_path: format!("{}/{}", container_workspace_folder.trim_end_matches('/'), tar_file_name),
+        extract_to: container_workspace_folder.clone(),
     };
     http_post(&format!("http://localhost:{lsp_port_to_connect}/v1/sync-files-extract-tar"), &sync_files_post).await?;
 
@@ -388,8 +412,13 @@ async fn docker_container_sync_workspace(
 
     info!("Workspace synced successfully.");
 
+    const ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC.remove(b'/');
+
+    let container_workspace_folder_url = Url::parse(&format!("file://{}", 
+        percent_encoding::utf8_percent_encode(&container_workspace_folder, ENCODE_SET)))
+        .map_err(|e| format!("Error parsing URL for container workspace folder: {}", e))?;
     let initialize_post = LspLikeInit {
-        project_roots: vec![Url::parse(&format!("file://{}", container_workspace_folder.to_string_lossy())).unwrap()],
+        project_roots: vec![container_workspace_folder_url],
     };
     http_post(&format!("http://localhost:{lsp_port_to_connect}/v1/lsp-initialize"), &initialize_post).await?;
     info!("LSP initialized for workspace.");
