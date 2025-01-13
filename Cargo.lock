@@ -5061,7 +5061,7 @@ dependencies = [
 
 [[package]]
 name = "refact-lsp"
-version = "0.10.7"
+version = "0.10.8"
 dependencies = [
  "arrow",
  "arrow-array",
