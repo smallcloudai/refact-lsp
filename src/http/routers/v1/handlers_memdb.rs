@@ -185,9 +185,15 @@ pub async fn handle_mem_list(
     Ok(response)
 }
 
+#[derive(Deserialize, Default)]
+pub struct MemSubscriptionPost {
+    #[serde(default)]
+    pub memid: Option<String>,
+}
+
 pub async fn handle_mem_sub(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    _body_bytes: hyper::body::Bytes,
+    body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
     fn _get_last_memid(events: &Vec<MemdbSubEvent>) -> i64 {
         events
@@ -196,6 +202,7 @@ pub async fn handle_mem_sub(
             .map(|x| x.pubevent_id)
             .unwrap_or(0)
     }
+    let post: MemSubscriptionPost = serde_json::from_slice(&body_bytes).unwrap_or(MemSubscriptionPost::default());
 
     let vec_db = gcx.read().await.vec_db.clone();
     let mut last_pubevent_id = _get_last_memid(
@@ -204,7 +211,28 @@ pub async fn handle_mem_sub(
                 ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
             })?
     );
+
+    let preexisting_memories = crate::vecdb::vdb_highlev::memories_select_all(vec_db.clone()).await.
+        map_err(|e| {
+            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+        })?;
+
     let sse = stream! {
+        for memory in preexisting_memories.iter() {
+            if post.memid.is_some() {
+                if post.memid != Some(memory.memid.clone()) {
+                    continue;
+                }
+            }
+            let e = json!({
+                "pubevent_id": -1,
+                "pubevent_action": "INSERT",
+                "pubevent_memid": memory.memid,
+                "pubevent_json": memory,
+            });
+            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
+        }
+        
         loop {
             match crate::vecdb::vdb_highlev::memdb_pubsub_trigerred(vec_db.clone(), 10).await {
                 Ok(_) => {}
@@ -215,6 +243,12 @@ pub async fn handle_mem_sub(
             match crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), Some(last_pubevent_id)).await {
                 Ok(new_events) => {
                     for event in new_events.iter() {
+                        if post.memid.is_some() {
+                            if post.memid != Some(event.pubevent_memid.clone()) {
+                                continue;
+                            }
+                        }
+                        
                         yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&event).unwrap()));
                     }
                     if !new_events.is_empty() {

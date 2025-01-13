@@ -42,6 +42,7 @@ pub struct MemoriesDatabase {
 pub struct MemdbSubEvent {
     pub pubevent_id: i64,
     pub pubevent_action: String,
+    pub pubevent_memid: String,
     pub pubevent_json: String,
 }
 
@@ -191,6 +192,7 @@ impl MemoriesDatabase {
             "CREATE TABLE IF NOT EXISTS pubsub_events (
             pubevent_id INTEGER PRIMARY KEY AUTOINCREMENT,
             pubevent_action TEXT NOT NULL,
+            pubevent_memid TEXT NOT NULL,
             pubevent_json TEXT NOT NULL,
             pubevent_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )",
@@ -202,8 +204,8 @@ impl MemoriesDatabase {
             "CREATE TRIGGER IF NOT EXISTS pubsub_events_on_insert
             AFTER INSERT ON memories
             BEGIN
-                INSERT INTO pubsub_events (pubevent_action, pubevent_json)
-                VALUES ('INSERT', json_object(
+                INSERT INTO pubsub_events (pubevent_action, pubevent_memid, pubevent_json)
+                VALUES ('INSERT', NEW.memid, json_object(
                     'memid', NEW.memid,
                     'm_type', NEW.m_type,
                     'm_goal', NEW.m_goal,
@@ -223,8 +225,8 @@ impl MemoriesDatabase {
             "CREATE TRIGGER IF NOT EXISTS pubsub_events_on_update
             AFTER UPDATE ON memories
             BEGIN
-                INSERT INTO pubsub_events (pubevent_action, pubevent_json)
-                VALUES ('UPDATE', json_object(
+                INSERT INTO pubsub_events (pubevent_action, pubevent_memid, pubevent_json)
+                VALUES ('UPDATE', NEW.memid, json_object(
                     'memid', NEW.memid,
                     'm_type', NEW.m_type,
                     'm_goal', NEW.m_goal,
@@ -244,9 +246,17 @@ impl MemoriesDatabase {
             "CREATE TRIGGER IF NOT EXISTS pubsub_events_on_delete
             AFTER DELETE ON memories
             BEGIN
-                INSERT INTO pubsub_events (pubevent_action, pubevent_json)
-                VALUES ('DELETE', json_object(
-                    'memid', OLD.memid
+                INSERT INTO pubsub_events (pubevent_action, pubevent_memid, pubevent_json)
+                VALUES ('DELETE', OLD.memid, json_object(
+                    'memid', OLD.memid,
+                    'm_type', OLD.m_type,
+                    'm_goal', OLD.m_goal,
+                    'm_project', OLD.m_project,
+                    'm_payload', OLD.m_payload,
+                    'm_origin', OLD.m_origin,
+                    'mstat_correct', OLD.mstat_correct,
+                    'mstat_relevant', OLD.mstat_relevant,
+                    'mstat_times_used', OLD.mstat_times_used
                 ));
             END;",
             [],
@@ -397,7 +407,7 @@ impl MemoriesDatabase {
     pub async fn permdb_sub_select_all(&self, from_memid: Option<i64>) -> Result<Vec<MemdbSubEvent>, String> {
         let conn = self.conn.lock();
         let query = "
-            SELECT pubevent_id, pubevent_action, pubevent_json
+            SELECT pubevent_id, pubevent_action, pubevent_memid, pubevent_json
             FROM pubsub_events
             WHERE pubevent_id > ?1
             ORDER BY pubevent_id ASC
@@ -413,8 +423,9 @@ impl MemoriesDatabase {
         while let Some(row) = rows.next().map_err(|e| format!("Failed to fetch row: {}", e))? {
             let pubevent_id: i64 = row.get(0).map_err(|e| format!("Failed to read pubevent_id: {}", e))?;
             let pubevent_action: String = row.get(1).map_err(|e| format!("Failed to read pubevent_action: {}", e))?;
-            let pubevent_json: String = row.get(2).map_err(|e| format!("Failed to read pubevent_json: {}", e))?;
-            results.push(MemdbSubEvent { pubevent_id, pubevent_action, pubevent_json });
+            let pubevent_memid: String = row.get(2).map_err(|e| format!("Failed to read pubevent_action: {}", e))?;
+            let pubevent_json: String = row.get(3).map_err(|e| format!("Failed to read pubevent_json: {}", e))?;
+            results.push(MemdbSubEvent { pubevent_id, pubevent_action, pubevent_memid, pubevent_json });
         }
         Ok(results)
     }
