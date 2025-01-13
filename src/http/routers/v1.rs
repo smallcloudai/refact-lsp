@@ -15,7 +15,7 @@ use crate::global_context::SharedGlobalContext;
 use crate::http::routers::v1::code_completion::{handle_v1_code_completion_web, handle_v1_code_completion_prompt};
 use crate::http::routers::v1::code_lens::handle_v1_code_lens;
 use crate::http::routers::v1::ast::{handle_v1_ast_file_dump, handle_v1_ast_file_symbols, handle_v1_ast_status};
-use crate::http::routers::v1::at_commands::{handle_v1_command_completion, handle_v1_command_preview};
+use crate::http::routers::v1::at_commands::{handle_v1_command_completion, handle_v1_command_preview, handle_v1_at_command_execute};
 use crate::http::routers::v1::at_tools::{handle_v1_tools, handle_v1_tools_check_if_confirmation_needed, handle_v1_tools_execute};
 use crate::http::routers::v1::caps::handle_v1_caps;
 use crate::http::routers::v1::caps::handle_v1_ping;
@@ -37,7 +37,7 @@ use crate::http::routers::v1::gui_help_handlers::handle_v1_fullpath;
 use crate::http::routers::v1::patch::{handle_v1_patch_apply_all, handle_v1_patch_single_file_from_ticket};
 use crate::http::routers::v1::subchat::{handle_v1_subchat, handle_v1_subchat_single};
 use crate::http::routers::v1::sync_files::handle_v1_sync_files_extract_tar;
-use crate::http::routers::v1::system_prompt::handle_v1_system_prompt;
+use crate::http::routers::v1::system_prompt::handle_v1_prepend_system_prompt_and_maybe_more_initial_messages;
 
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
@@ -64,7 +64,7 @@ mod dashboard;
 pub mod links;
 pub mod lsp_like_handlers;
 pub mod customization;
-mod at_commands;
+pub mod at_commands;
 mod ast;
 pub mod at_tools;
 mod status;
@@ -101,7 +101,7 @@ pub fn make_v1_router() -> Router {
 
         .route("/tools", telemetry_get!(handle_v1_tools))
         .route("/tools-check-if-confirmation-needed", telemetry_post!(handle_v1_tools_check_if_confirmation_needed))
-        .route("/tools-execute", telemetry_post!(handle_v1_tools_execute))
+        .route("/tools-execute", telemetry_post!(handle_v1_tools_execute)) // because it works remotely
 
         .route("/lsp-initialize", telemetry_post!(handle_v1_lsp_initialize))
         .route("/lsp-did-changed", telemetry_post!(handle_v1_lsp_did_change))
@@ -122,10 +122,12 @@ pub fn make_v1_router() -> Router {
 
         .route("/git-commit", telemetry_post!(handle_v1_git_commit))
 
-        .route("/system-prompt", telemetry_post!(handle_v1_system_prompt))  // because it works remotely
+        .route("/prepend-system-prompt-and-maybe-more-initial-messages", 
+            telemetry_post!(handle_v1_prepend_system_prompt_and_maybe_more_initial_messages)) // because it works remotely
 
         .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))
+        .route("/at-command-execute", telemetry_post!(handle_v1_at_command_execute)) // because it works remotely
 
         .route("/fullpath", telemetry_post!(handle_v1_fullpath))
 

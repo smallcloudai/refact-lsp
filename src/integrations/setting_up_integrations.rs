@@ -265,37 +265,66 @@ pub fn read_integrations_d(
     result
 }
 
-
-pub async fn get_integrations_yaml_path(gcx: Arc<ARwLock<GlobalContext>>) -> String {
-    let gcx_locked = gcx.read().await;
-    let r = gcx_locked.cmdline.integrations_yaml.clone();
-    r
-}
-
-pub async fn get_vars_for_replacements(gcx: Arc<ARwLock<GlobalContext>>) -> HashMap<String, String>
-{
-    let gcx_locked = gcx.read().await;
-    let secrets_yaml_path = gcx_locked.config_dir.join("secrets.yaml");
-    let variables_yaml_path = gcx_locked.config_dir.join("variables.yaml");
+pub async fn get_vars_for_replacements(
+    gcx: Arc<ARwLock<GlobalContext>>,
+    error_log: &mut Vec<YamlError>,
+) -> HashMap<String, String> {
+    let (config_dir, variables_yaml) = {
+        let gcx_locked = gcx.read().await;
+        (gcx_locked.config_dir.clone(), gcx_locked.cmdline.variables_yaml.clone())
+    };
+    let secrets_yaml_path = config_dir.join("secrets.yaml");
+    let variables_yaml_path = if variables_yaml.is_empty() {
+        config_dir.join("variables.yaml")
+    } else {
+        crate::files_correction::to_pathbuf_normalize(&variables_yaml)
+    };
     let mut variables = HashMap::new();
-    if let Ok(secrets_content) = fs::read_to_string(&secrets_yaml_path) {
-        if let Ok(secrets_yaml) = serde_yaml::from_str::<HashMap<String, String>>(&secrets_content) {
-            variables.extend(secrets_yaml);
-        } else {
-            tracing::warn!("cannot parse secrets.yaml");
+
+    // Helper function to read and parse a YAML file
+    async fn read_and_parse_yaml(
+        path: &PathBuf,
+        error_log: &mut Vec<YamlError>,
+    ) -> Result<HashMap<String, String>, ()> {
+        if !path.exists() {
+            return Ok(HashMap::new());
         }
-    } else {
-        tracing::info!("cannot read secrets.yaml");
-    }
-    if let Ok(variables_content) = fs::read_to_string(&variables_yaml_path) {
-        if let Ok(variables_yaml) = serde_yaml::from_str::<HashMap<String, String>>(&variables_content) {
-            variables.extend(variables_yaml);
-        } else {
-            tracing::warn!("cannot parse variables.yaml");
+
+        match fs::read_to_string(path) {
+            Ok(content) => match serde_yaml::from_str::<HashMap<String, String>>(&content) {
+                Ok(parsed_yaml) => Ok(parsed_yaml),
+                Err(e) => {
+                    tracing::warn!("Failed to parse {}: {}", path.display(), e);
+                    error_log.push(YamlError {
+                        integr_config_path: path.to_string_lossy().to_string(),
+                        error_line: e.location().map(|loc| loc.line()).unwrap_or(0),
+                        error_msg: format!("Failed to parse {}: {}", path.display(), e),
+                    });
+                    Err(())
+                }
+            },
+            Err(e) => {
+                tracing::info!("Failed to read {}: {}", path.display(), e);
+                error_log.push(YamlError {
+                    integr_config_path: path.to_string_lossy().to_string(),
+                    error_line: 0,
+                    error_msg: format!("Failed to read {}: {}", path.display(), e),
+                });
+                Err(())
+            }
         }
-    } else {
-        tracing::info!("cannot read variables.yaml");
     }
+
+    // Read and parse secrets.yaml
+    if let Ok(secrets_yaml) = read_and_parse_yaml(&secrets_yaml_path, error_log).await {
+        variables.extend(secrets_yaml);
+    }
+
+    // Read and parse variables.yaml
+    if let Ok(variables_yaml) = read_and_parse_yaml(&variables_yaml_path, error_log).await {
+        variables.extend(variables_yaml);
+    }
+
     variables
 }
 
@@ -306,13 +335,47 @@ pub fn join_config_path(config_dir: &PathBuf, integr_name: &str) -> String
 
 pub async fn get_config_dirs(
     gcx: Arc<ARwLock<GlobalContext>>,
+    current_project_path: &Option<PathBuf>
 ) -> (Vec<PathBuf>, PathBuf) {
-    let (global_config_dir, workspace_folders_arc, _integrations_yaml) = {
+    let (global_config_dir, workspace_folders_arc, workspace_vcs_roots_arc, _integrations_yaml) = {
         let gcx_locked = gcx.read().await;
-        (gcx_locked.config_dir.clone(), gcx_locked.documents_state.workspace_folders.clone(), gcx_locked.cmdline.integrations_yaml.clone())
+        (
+            gcx_locked.config_dir.clone(),
+            gcx_locked.documents_state.workspace_folders.clone(),
+            gcx_locked.documents_state.workspace_vcs_roots.clone(),
+            gcx_locked.cmdline.integrations_yaml.clone(),
+        )
     };
-    let mut config_dirs = workspace_folders_arc.lock().unwrap().clone();
-    config_dirs = config_dirs.iter().map(|dir| dir.join(".refact")).collect();
+
+    let mut workspace_folders = workspace_folders_arc.lock().unwrap().clone();
+    if let Some(current_project_path) = current_project_path {
+        workspace_folders = workspace_folders.into_iter()
+            .filter(|folder| current_project_path.starts_with(&folder)).collect::<Vec<_>>();
+    }
+    let workspace_vcs_roots = workspace_vcs_roots_arc.lock().unwrap().clone();
+
+    let mut config_dirs = Vec::new();
+
+    for folder in workspace_folders {
+        let vcs_roots: Vec<PathBuf> = workspace_vcs_roots
+            .iter()
+            .filter(|root| root.starts_with(&folder))
+            .cloned()
+            .collect();
+
+        if !vcs_roots.is_empty() {
+            // it has any workspace_vcs_roots => take them as projects
+            for root in vcs_roots {
+                config_dirs.push(root.join(".refact"));
+            }
+        } else {
+            // it doesn't => use workspace_folder itself
+            // probably we see this because it's a new project that doesn't have version control yet, but added to the workspace already
+            config_dirs.push(folder.join(".refact"));
+        }
+    }
+
+    config_dirs.sort();
     (config_dirs, global_config_dir)
 }
 
@@ -336,17 +399,16 @@ pub fn split_path_into_project_and_integration(cfg_path: &PathBuf) -> Result<(St
 pub async fn integrations_all(
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> IntegrationResult {
-    let (config_dirs, global_config_dir) = get_config_dirs(gcx.clone()).await;
-    let allow_experimental = gcx.read().await.cmdline.experimental;
+    let (config_dirs, global_config_dir) = get_config_dirs(gcx.clone(), &None).await;
+    let (allow_experimental, integrations_yaml_path) = {
+        let gcx_locked = gcx.read().await;
+        (gcx_locked.cmdline.experimental, gcx_locked.cmdline.integrations_yaml.clone())
+    };
     let lst: Vec<&str> = crate::integrations::integrations_list(allow_experimental);
     let mut error_log: Vec<YamlError> = Vec::new();
-    let integrations_yaml_path = get_integrations_yaml_path(gcx.clone()).await;
-    let vars_for_replacements = get_vars_for_replacements(gcx.clone()).await;
+    let vars_for_replacements = get_vars_for_replacements(gcx.clone(), &mut error_log).await;
     let integrations = read_integrations_d(&config_dirs, &global_config_dir, &integrations_yaml_path, &vars_for_replacements, &lst, &mut error_log);
-    IntegrationResult {
-        integrations,
-        error_log,
-    }
+    IntegrationResult { integrations, error_log }
 }
 
 #[derive(Serialize, Default)]
@@ -365,16 +427,13 @@ pub async fn integration_config_get(
 ) -> Result<IntegrationGetResult, String> {
     let sanitized_path = crate::files_correction::canonical_path(&integr_config_path);
     let exists = sanitized_path.exists();
-    let integr_name = sanitized_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-    if integr_name.is_empty() {
-        return Err(format!("can't derive integration name from file name"));
-    }
 
     let (integr_name, project_path) = split_path_into_project_and_integration(&sanitized_path)?;
+    let better_integr_config_path = sanitized_path.to_string_lossy().to_string();
     let mut result = IntegrationGetResult {
         project_path: project_path.clone(),
         integr_name: integr_name.clone(),
-        integr_config_path: integr_config_path.clone(),
+        integr_config_path: better_integr_config_path.clone(),
         integr_config_exists: exists,
         integr_schema: serde_json::Value::Null,
         integr_values: serde_json::Value::Null,
@@ -394,27 +453,33 @@ pub async fn integration_config_get(
                 match serde_yaml::from_str::<serde_yaml::Value>(&content) {
                     Ok(y) => {
                         let j = serde_json::to_value(y).unwrap();
-                        match integration_box.integr_settings_apply(&j) {
+                        match integration_box.integr_settings_apply(&j, better_integr_config_path.clone()) {
                             Ok(_) => {
-                                let common_settings = integration_box.integr_common();
-                                result.integr_values = integration_box.integr_settings_as_json();
-                                result.integr_values["available"]["on_your_laptop"] = common_settings.available.on_your_laptop.into();
-                                result.integr_values["available"]["when_isolated"] = common_settings.available.when_isolated.into();
-                                result.integr_values["confirmation"]["ask_user"] = common_settings.confirmation.ask_user.into();
-                                result.integr_values["confirmation"]["deny"] = common_settings.confirmation.deny.into();
                             }
                             Err(err) => {
-                                tracing::error!("cannot deserialize some fields in the integration cfg correctly: `{err}`. Use default empty values instead");
-                                result.integr_values = integration_box.integr_settings_as_json();
-                                result.integr_values["available"]["on_your_laptop"] = false.into();
-                                result.integr_values["available"]["when_isolated"] = false.into();
-                                result.integr_values["confirmation"]["ask_user"] = Vec::<String>::new().into();
-                                result.integr_values["confirmation"]["deny"] = Vec::<String>::new().into();
+                                result.error_log.push(YamlError {
+                                    integr_config_path: better_integr_config_path.clone(),
+                                    error_line: 0,
+                                    error_msg: err.to_string(),
+                                });
+                                tracing::warn!("cannot deserialize some fields in the integration cfg {better_integr_config_path}: {err}");
                             }
                         }
+                        let common_settings = integration_box.integr_common();
+                        result.integr_values = integration_box.integr_settings_as_json();
+                        result.integr_values["available"]["on_your_laptop"] = common_settings.available.on_your_laptop.into();
+                        result.integr_values["available"]["when_isolated"] = common_settings.available.when_isolated.into();
+                        result.integr_values["confirmation"]["ask_user"] = common_settings.confirmation.ask_user.into();
+                        result.integr_values["confirmation"]["deny"] = common_settings.confirmation.deny.into();
                     }
-                    Err(e) => {
-                        return Err(format!("failed to parse: {}", e.to_string()));
+                    Err(err) => {
+                        result.error_log.push(YamlError {
+                            integr_config_path: better_integr_config_path.clone(),
+                            error_line: err.location().map(|loc| loc.line()).unwrap_or(0),
+                            error_msg: err.to_string(),
+                        });
+                        tracing::warn!("cannot parse {better_integr_config_path}: {err}");
+                        return Ok(result);
                     }
                 };
             }
@@ -436,7 +501,7 @@ pub async fn integration_config_save(
     let mut integration_box = crate::integrations::integration_from_name(integr_name.as_str())
         .map_err(|e| format!("Failed to load integrations: {}", e))?;
 
-    integration_box.integr_settings_apply(integr_values)?;  // this will produce "no field XXX" errors
+    integration_box.integr_settings_apply(integr_values, integr_config_path.clone())?;  // this will produce "no field XXX" errors
     let mut sanitized_json: serde_json::Value = integration_box.integr_settings_as_json();
     let common_settings = integration_box.integr_common();
     if let (Value::Object(sanitized_json_m), Value::Object(common_settings_m)) = (&mut sanitized_json, json!(common_settings)) {

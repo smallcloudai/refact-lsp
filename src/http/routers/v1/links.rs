@@ -3,7 +3,7 @@ use std::fs;
 use axum::Extension;
 use axum::http::{Response, StatusCode};
 use hyper::Body;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock as ARwLock;
 
 use crate::call_validation::{ChatMessage, ChatMeta, ChatMode};
@@ -13,7 +13,7 @@ use crate::integrations::go_to_configuration_message;
 use crate::tools::tool_patch_aux::tickets_parsing::get_tickets_from_messages;
 use crate::agentic::generate_follow_up_message::generate_follow_up_message;
 use crate::git::{get_commit_information_from_current_changes, generate_commit_messages};
-use crate::http::routers::v1::git::GitCommitPost;
+// use crate::http::routers::v1::git::GitCommitPost;
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct LinksPost {
@@ -22,17 +22,20 @@ pub struct LinksPost {
     meta: ChatMeta,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 enum LinkAction {
+    #[default]
     PatchAll,
     FollowUp,
     Commit,
     Goto,
     SummarizeProject,
+    PostChat,
+    RegenerateWithIncreasedContextSize,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Default, Serialize, Debug)]
 pub struct Link {
     link_action: LinkAction,
     link_text: String,
@@ -41,18 +44,35 @@ pub struct Link {
     #[serde(skip_serializing_if = "Option::is_none")]
     link_summary_path: Option<String>,
     link_tooltip: String,
-    link_payload: Option<LinkPayload>,
+    #[serde(default, skip_serializing_if = "is_default_json_value")]
+    link_payload: serde_json::Value,
 }
 
-#[derive(Debug)]
-pub enum LinkPayload {
-    CommitPayload(GitCommitPost),
+fn is_default_json_value(value: &serde_json::Value) -> bool {
+    value == &serde_json::Value::Null
 }
-impl Serialize for LinkPayload {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            LinkPayload::CommitPayload(post) => post.serialize(serializer),
-        }
+
+fn last_message_assistant_without_tools(messages: &Vec<ChatMessage>) -> bool {
+    if let Some(m) = messages.last() {
+        m.role == "assistant" && m.tool_calls.as_ref().map(|x| x.is_empty()).unwrap_or(true)
+    } else {
+        false
+    }
+}
+
+fn last_message_stripped_assistant(messages: &Vec<ChatMessage>) -> bool {
+    if let Some(m) = messages.last() {
+        m.role == "assistant" && m.finish_reason == Some("length".to_string())
+    } else {
+        false
+    }
+}
+
+fn last_message_have_pinned_messages(messages: &Vec<ChatMessage>) -> bool {
+    if let Some(m) = messages.last() {
+        m.role == "assistant" && m.content.content_text_only().contains("📍")
+    } else {
+        false
     }
 }
 
@@ -68,20 +88,20 @@ pub async fn handle_v1_links(
 
     tracing::info!("for links, post.meta.chat_mode == {:?}", post.meta.chat_mode);
     let experimental = gcx.read().await.cmdline.experimental;
-    let (integrations_map, integration_yaml_errors) = crate::integrations::running_integrations::load_integrations(gcx.clone(), "".to_string(), experimental).await;
+    let (integrations_map, integration_yaml_errors) = crate::integrations::running_integrations::load_integrations(gcx.clone(), experimental).await;
 
-    if post.meta.chat_mode == ChatMode::CONFIGURE {
-        if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
-            links.push(Link {
-                link_action: LinkAction::PatchAll,
-                link_text: "Save and return".to_string(),
-                link_goto: Some("SETTINGS:DEFAULT".to_string()),
-                link_summary_path: None,
-                link_tooltip: format!(""),
-                link_payload: None,
-            });
-        }
-    }
+    // if post.meta.chat_mode == ChatMode::CONFIGURE {
+    //     if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
+    //         links.push(Link {
+    //             link_action: LinkAction::PatchAll,
+    //             link_text: "Save and return".to_string(),
+    //             link_goto: Some("SETTINGS:DEFAULT".to_string()),
+    //             link_summary_path: None,
+    //             link_tooltip: format!(""),
+    //             link_payload: None,
+    //         });
+    //     }
+    // }
 
     if post.meta.chat_mode == ChatMode::PROJECT_SUMMARY {
         if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
@@ -91,30 +111,40 @@ pub async fn handle_v1_links(
                 link_goto: Some("NEWCHAT".to_string()),
                 link_summary_path: None,
                 link_tooltip: format!(""),
-                link_payload: None,
+                ..Default::default()
+            });
+        } else if last_message_assistant_without_tools(&post.messages) {
+            links.push(Link {
+                link_action: LinkAction::FollowUp,
+                link_text: "Looks alright! Please, save the generated summary!".to_string(),
+                link_goto: None,
+                link_summary_path: None,
+                link_tooltip: format!(""),
+                ..Default::default()
             });
         }
     }
 
     // GIT uncommitted
-    if post.meta.chat_mode == ChatMode::AGENT {
+    if post.meta.chat_mode == ChatMode::AGENT && post.messages.is_empty() {
         let commits = get_commit_information_from_current_changes(gcx.clone()).await;
 
-        let mut project_changes = Vec::new();
+        let mut s = Vec::new();
         for commit in &commits {
-            project_changes.push(format!(
+            s.push(format!(
                 "In project {}:\n{}{}",
                 commit.get_project_name(),
                 commit.file_changes.iter().take(3).map(|f| format!("{} {}", f.status.initial(), f.path)).collect::<Vec<_>>().join("\n"),
-                if commit.file_changes.len() > 3 { "\n...\n" } else { "\n" },
+                if commit.file_changes.len() > 3 { format!("\n...{} files more\n", commit.file_changes.len() - 3) } else { format!("\n") },
             ));
         }
-        if !project_changes.is_empty() && post.messages.is_empty() {
-            if project_changes.len() > 4 {
-                project_changes.truncate(4);
-                project_changes.push("...".to_string());
+        if !s.is_empty() {
+            if s.len() > 5 {
+                let omitted_projects = s.len() - 4;
+                s.truncate(4);
+                s.push(format!("...{} projects more", omitted_projects));
             }
-            uncommited_changes_warning = format!("You have uncommitted changes:\n```\n{}\n```\nIt's fine, but you might have a problem rolling back agent's changes.", project_changes.join("\n"));
+            uncommited_changes_warning = format!("You have uncommitted changes:\n```\n{}\n```\nIt's fine, but you might have a problem rolling back agent's changes.", s.join("\n"));
         }
 
         if false {
@@ -131,7 +161,7 @@ pub async fn handle_v1_links(
                     link_goto: Some("LINKS_AGAIN".to_string()),
                     link_summary_path: None,
                     link_tooltip: tooltip_message,
-                    link_payload: Some(LinkPayload::CommitPayload(GitCommitPost { commits: vec![commit_with_msg] })),
+                    link_payload: serde_json::json!({ "commits": [commit_with_msg] }),
                 });
             }
         }
@@ -146,7 +176,7 @@ pub async fn handle_v1_links(
                 link_goto: Some(format!("SETTINGS:{failed_integr_name}")),
                 link_summary_path: None,
                 link_tooltip: format!(""),
-                link_payload: None,
+                ..Default::default()
             })
         }
     }
@@ -159,14 +189,44 @@ pub async fn handle_v1_links(
             link_goto: Some(format!("SETTINGS:{}", e.integr_config_path)),
             link_summary_path: None,
             link_tooltip: format!("Error at line {}: {}", e.error_line, e.error_msg),
-            link_payload: None,
+            ..Default::default()
         });
+    }
+    
+    // RegenerateWithIncreasedContextSize
+    if last_message_stripped_assistant(&post.messages) {
+        links.push(Link {
+            link_action: LinkAction::RegenerateWithIncreasedContextSize,
+            link_text: format!("Regenerate last with increased token limit"),
+            link_goto: None,
+            link_summary_path: None,
+            link_tooltip: format!(""),
+            ..Default::default()
+        });
+        links.push(Link {
+            link_action: LinkAction::FollowUp,
+            link_text: "Continue the last message".to_string(),
+            link_goto: None,
+            link_summary_path: None,
+            link_tooltip: format!(""),
+            ..Default::default()
+        });
+        if last_message_have_pinned_messages(&post.messages) {
+            links.push(Link {
+                link_action: LinkAction::FollowUp,
+                link_text: "Split 📍 tickets into smaller parts ".to_string(),
+                link_goto: None,
+                link_summary_path: None,
+                link_tooltip: format!(""),
+                ..Default::default()
+            });
+        }
     }
 
     // Tool recommendations
     if post.messages.is_empty() {
-        let (already_exists, summary_path_option) = crate::scratchpads::chat_utils_prompts::dig_for_project_summarization_file(gcx.clone()).await;
-        if !already_exists {
+        let (summary_exists, summary_path_option) = crate::scratchpads::chat_utils_prompts::dig_for_project_summarization_file(gcx.clone()).await;
+        if !summary_exists {
             // doesn't exist
             links.push(Link {
                 link_action: LinkAction::SummarizeProject,
@@ -174,7 +234,7 @@ pub async fn handle_v1_links(
                 link_goto: None,
                 link_summary_path: summary_path_option,
                 link_tooltip: format!("Project summary is a starting point for Refact Agent."),
-                link_payload: None,
+                ..Default::default()
             });
         } else {
             // exists
@@ -184,6 +244,7 @@ pub async fn handle_v1_links(
                         match serde_yaml::from_str::<serde_yaml::Value>(&content) {
                             Ok(yaml) => {
                                 if let Some(recommended_integrations) = yaml.get("recommended_integrations").and_then(|rt| rt.as_sequence()) {
+                                    let mut any_recommended = false;
                                     for igname_value in recommended_integrations {
                                         if let Some(igname) = igname_value.as_str() {
                                             if igname == "isolation" || igname == "docker" {
@@ -197,12 +258,37 @@ pub async fn handle_v1_links(
                                                     link_goto: Some(format!("SETTINGS:{igname}")),
                                                     link_summary_path: None,
                                                     link_tooltip: format!(""),
-                                                    link_payload: None,
+                                                    ..Default::default()
                                                 });
+                                                any_recommended = true;
                                             } else {
                                                 tracing::info!("tool {} present => happy", igname);
                                             }
                                         }
+                                    }
+                                    if any_recommended {
+                                        links.push(Link {
+                                            link_action: LinkAction::PostChat,
+                                            link_text: format!("Stop recommending integrations"),
+                                            link_goto: None,
+                                            link_summary_path: None,
+                                            link_tooltip: format!(""),
+                                            link_payload: serde_json::json!({
+                                                "chat_meta": crate::call_validation::ChatMeta {
+                                                    chat_id: "".to_string(),
+                                                    chat_remote: false,
+                                                    chat_mode: crate::call_validation::ChatMode::CONFIGURE,
+                                                    current_config_file: summary_path.clone(),
+                                                },
+                                                "messages": [
+                                                    crate::call_validation::ChatMessage {
+                                                        role: "user".to_string(),
+                                                        content: crate::call_validation::ChatContent::SimpleText(format!("Make recommended_integrations an empty list, follow the system prompt.")),
+                                                        ..Default::default()
+                                                    },
+                                                ]
+                                            }),
+                                        });
                                     }
                                 }
                             },
@@ -232,13 +318,13 @@ pub async fn handle_v1_links(
                     link_goto: None,
                     link_summary_path: None,
                     link_tooltip: format!(""),
-                    link_payload: None,
+                    ..Default::default()
                 });
             }
         }
     }
 
-    tracing::info!("generated links2: {:?}", links);
+    tracing::info!("generated links2\n{}", serde_json::to_string_pretty(&links).unwrap());
 
     Ok(Response::builder()
         .status(StatusCode::OK)

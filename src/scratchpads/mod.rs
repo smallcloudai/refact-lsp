@@ -91,7 +91,6 @@ pub async fn create_chat_scratchpad(
             tokenizer_arc.clone(), post, messages, allow_at
         ));
     } else if scratchpad_name == "PASSTHROUGH" {
-        post.stream = Some(true);  // this should be passed from the request
         result = Box::new(chat_passthrough::ChatPassthrough::new(
             tokenizer_arc.clone(), post, messages, allow_at, supports_tools, supports_clicks
         ));

@@ -94,6 +94,9 @@ pub struct CommandLine {
 
     #[structopt(long, default_value="", help="Specify the integrations.yaml, this also disables the global integrations.d")]
     pub integrations_yaml: String,
+
+    #[structopt(long, default_value="", help="Specify the variables.yaml, this also disables the global variables.yaml")]
+    pub variables_yaml: String,
 }
 
 impl CommandLine {
@@ -204,6 +207,7 @@ pub async fn try_load_caps_quickly_if_not_present(
     let caps_reading_lock: Arc<AMutex<bool>> = gcx.read().await.caps_reading_lock.clone();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let caps_last_attempted_ts;
+
     {
         // gcx is not locked, but a specialized async mutex is, up until caps are saved
         let _caps_reading_locked = caps_reading_lock.lock().await;
@@ -376,9 +380,6 @@ pub async fn create_global_context(
         chore_db: crate::agent_db::db_init::chore_db_init(&config_dir, cmdline.reset_memory).await,
     };
     let gcx = Arc::new(ARwLock::new(cx));
-    {
-        let gcx_weak = Arc::downgrade(&gcx);
-        gcx.write().await.documents_state.init_watcher(gcx_weak);
-    }
+    crate::files_in_workspace::watcher_init(gcx.clone()).await;
     (gcx, ask_shutdown_receiver, cmdline)
 }

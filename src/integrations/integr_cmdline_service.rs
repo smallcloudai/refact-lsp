@@ -12,11 +12,12 @@ use crate::at_commands::at_commands::AtCommandsContext;
 use crate::tools::tools_description::{Tool, ToolParam, ToolDesc};
 use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
 use crate::global_context::GlobalContext;
+use crate::postprocessing::pp_command_output::output_mini_postprocessing;
 use crate::integrations::process_io_utils::{blocking_read_until_token_or_timeout, is_someone_listening_on_that_tcp_port};
 use crate::integrations::sessions::IntegrationSession;
-use crate::postprocessing::pp_command_output::output_mini_postprocessing;
 use crate::integrations::integr_abstract::{IntegrationTrait, IntegrationCommon, IntegrationConfirmation};
 use crate::integrations::integr_cmdline::*;
+use crate::integrations::setting_up_integrations::YamlError;
 
 
 const REALLY_HORRIBLE_ROUNDTRIP: u64 = 3000;   // 3000 should be a really bad ping via internet, just in rare case it's a remote port
@@ -26,12 +27,13 @@ pub struct ToolService {
     pub common:  IntegrationCommon,
     pub name: String,
     pub cfg: CmdlineToolConfig,
+    pub config_path: String,
 }
 
 impl IntegrationTrait for ToolService {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &serde_json::Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &serde_json::Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<CmdlineToolConfig>(value.clone()) {
             Ok(x) => self.cfg = x,
             Err(e) => {
@@ -46,6 +48,7 @@ impl IntegrationTrait for ToolService {
                 return Err(e.to_string());
             }
         }
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -62,6 +65,7 @@ impl IntegrationTrait for ToolService {
             common: self.common.clone(),
             name: integr_name.to_string(),
             cfg: self.cfg.clone(),
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -284,7 +288,8 @@ impl Tool for ToolService {
 
         let command = replace_args(self.cfg.command.as_str(), &args_str);
         let workdir = replace_args(self.cfg.command_workdir.as_str(), &args_str);
-        let env_variables = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone()).await;
+        let mut error_log = Vec::<YamlError>::new();
+        let env_variables = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone(), &mut error_log).await;
 
         let tool_ouput = {
             let action = args_str.get("action").cloned().unwrap_or("start".to_string());
@@ -333,8 +338,12 @@ impl Tool for ToolService {
         }
     }
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -378,10 +387,17 @@ confirmation:
   ask_user_default: ["*"]
   deny_default: ["sudo*"]
 smartlinks:
-  - sl_label: "Auto Configure"
+  - sl_label: "Test"
     sl_chat:
       - role: "user"
         content: |
           🔧 Test the tool that corresponds to %CURRENT_CONFIG%
           If the tool isn't available or doesn't work, go through the usual plan in the system prompt. If it works express happiness, and change nothing.
+    sl_enable_only_with_tool: true
+  - sl_label: "Auto Configure"
+    sl_chat:
+      - role: "user"
+        content: |
+          🔧 Please write %CURRENT_CONFIG% based on what you see in the project. Follow the plan in the system prompt. Remember that service_ tools
+          are only suitable for blocking command line commands that run until you hit Ctrl+C, like web servers or `tail -f`.
 "#;

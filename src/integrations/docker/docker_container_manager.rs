@@ -10,7 +10,6 @@ use url::Url;
 use walkdir::WalkDir;
 
 use crate::files_correction::get_project_dirs;
-use crate::files_in_workspace::retrieve_files_in_workspace_folders;
 use crate::global_context::GlobalContext;
 use crate::http::http_post;
 use crate::http::routers::v1::lsp_like_handlers::LspLikeInit;
@@ -123,7 +122,7 @@ pub async fn docker_container_check_status_or_start(
             ports_to_forward.insert(0, Port {published: "0".to_string(), target: LSP_PORT.to_string()});
 
             let container_id = docker_container_create(&docker, &isolation, &chat_id, &ports_to_forward, LSP_PORT, gcx.clone()).await?;
-            docker_container_sync_yaml_configs(&docker, &container_id, gcx.clone()).await?;
+            docker_container_sync_config_folder(&docker, &container_id, gcx.clone()).await?;
             docker_container_start(gcx.clone(), &docker, &container_id).await?;
             let exposed_ports = docker_container_get_exposed_ports(&docker, &container_id, &ports_to_forward, gcx.clone()).await?;
             let host_lsp_port = exposed_ports.iter().find(|p| p.target == LSP_PORT)
@@ -205,6 +204,10 @@ pub async fn docker_container_get_host_lsp_port_to_connect(
     }
 }
 
+pub fn get_container_name(chat_id: &str) -> String {
+    format!("refact-{chat_id}")
+}
+
 async fn docker_container_create(
     docker: &ToolDocker,
     isolation: &SettingsIsolation,
@@ -219,21 +222,30 @@ async fn docker_container_create(
     }
     let host_lsp_path  = isolation.host_lsp_path.clone();
 
-    let (address_url, api_key) = {
+    let (address_url, api_key, integrations_yaml) = {
         let gcx_locked = gcx.read().await;
-        (gcx_locked.cmdline.address_url.clone(), gcx_locked.cmdline.api_key.clone())
+        (gcx_locked.cmdline.address_url.clone(), gcx_locked.cmdline.api_key.clone(), gcx_locked.cmdline.integrations_yaml.clone())
     };
 
-    let lsp_command = format!(
+    let mut lsp_command = format!(
         "{DEFAULT_CONTAINER_LSP_PATH} --http-port {lsp_port} --logs-stderr --inside-container \
         --address-url {address_url} --api-key {api_key} --vecdb --reset-memory --ast --experimental",
     );
+    if !integrations_yaml.is_empty() { 
+        lsp_command.push_str(" --integrations-yaml ~/.config/refact/integrations.yaml"); 
+    }
 
     let ports_to_forward_as_arg_list = ports_to_forward.iter()
         .map(|p| format!("--publish={}:{}", p.published, p.target)).collect::<Vec<_>>().join(" ");
+    let network_if_set = if !isolation.docker_network.is_empty() {
+        format!("--network {}", isolation.docker_network)
+    } else {
+        String::new()
+    };
+    let container_name = get_container_name(chat_id);
     let run_command = format!(
-        "container create --name=refact-{chat_id} --volume={host_lsp_path}:{DEFAULT_CONTAINER_LSP_PATH} \
-        {ports_to_forward_as_arg_list} --entrypoint sh {docker_image_id} -c '{lsp_command}'",
+        "container create --name={container_name} --volume={host_lsp_path}:{DEFAULT_CONTAINER_LSP_PATH} \
+        {ports_to_forward_as_arg_list} {network_if_set} --entrypoint sh {docker_image_id} -c '{lsp_command}'",
     );
 
     info!("Executing docker command: {}", &run_command);
@@ -247,44 +259,33 @@ async fn docker_container_create(
     Ok(container_id[..12].to_string())
 }
 
-async fn docker_container_sync_yaml_configs(
+async fn docker_container_sync_config_folder(
     docker: &ToolDocker,
     container_id: &str,
     gcx: Arc<ARwLock<GlobalContext>>,
 ) -> Result<(), String> {
-    let config_dir = {
+    let (config_dir, integrations_yaml, variables_yaml) = {
         let gcx_locked = gcx.read().await;
-        gcx_locked.config_dir.clone()
+        (gcx_locked.config_dir.clone(), gcx_locked.cmdline.integrations_yaml.clone(), gcx_locked.cmdline.variables_yaml.clone())
     };
+    let config_dir_string = config_dir.to_string_lossy().to_string();
     let container_home_dir = docker_container_get_home_dir(&docker, &container_id, gcx.clone()).await?;
 
     // Creating intermediate folders one by one, as docker cp does not support --parents
     let temp_dir = tempfile::Builder::new().tempdir()
         .map_err(|e| format!("Error creating temporary directory: {}", e))?;
     let temp_dir_path = temp_dir.path().to_string_lossy().to_string();
-    // XXX now we're using .config
-    docker.command_execute(&format!("container cp {temp_dir_path} {container_id}:{container_home_dir}/.cache/"), gcx.clone(), true, true).await?;
-    docker.command_execute(&format!("container cp {temp_dir_path} {container_id}:{container_home_dir}/.cache/refact"), gcx.clone(), true, true).await?;
-
-    let config_files_to_sync = ["privacy.yaml", "integrations.yaml", "bring-your-own-key.yaml", "competency.yaml"];
-    let remote_integrations_path = {
-        let gcx_locked = gcx.read().await;
-        gcx_locked.cmdline.integrations_yaml.clone()
-    };
-    for file in &config_files_to_sync {
-        let local_path = match *file {
-            "integrations.yaml" if !remote_integrations_path.is_empty() => remote_integrations_path.clone(),
-            // "competency.yaml" if !competency_path.is_empty() => competency_path.clone(),
-            _ => config_dir.join(file).to_string_lossy().to_string(),
-        };
-        let container_path = format!("{container_id}:{container_home_dir}/.cache/refact/{file}");
-        docker.command_execute(&format!("container cp {local_path} {container_path}"), gcx.clone(), true, true).await?;
-    }
-
-    // Copying config folder
-    let config_dir_string = config_dir.to_string_lossy().to_string();
     docker.command_execute(&format!("container cp {temp_dir_path} {container_id}:{container_home_dir}/.config/"), gcx.clone(), true, true).await?;
     docker.command_execute(&format!("container cp {config_dir_string} {container_id}:{container_home_dir}/.config/refact"), gcx.clone(), true, true).await?;
+
+    if !integrations_yaml.is_empty() {
+        let cp_integrations_command = format!("container cp {integrations_yaml} {container_id}:{container_home_dir}/.config/refact/integrations.yaml");
+        docker.command_execute(&cp_integrations_command, gcx.clone(), true, true).await?;
+    }
+    if !variables_yaml.is_empty() {
+        let cp_variables_command = format!("container cp {variables_yaml} {container_id}:{container_home_dir}/.config/refact/variables.yaml");
+        docker.command_execute(&cp_variables_command, gcx.clone(), true, true).await?;
+    }
 
     Ok(())
 }
@@ -335,6 +336,7 @@ async fn docker_container_sync_workspace(
     container_id: &str,
     lsp_port_to_connect: &str,
 ) -> Result<(), String> {
+    // XXX should be many dirs
     let workspace_folder = get_project_dirs(gcx.clone())
         .await
         .into_iter()
@@ -352,9 +354,13 @@ async fn docker_container_sync_workspace(
     tar_builder.follow_symlinks(true);
     tar_builder.mode(async_tar::HeaderMode::Complete);
 
-    let files = retrieve_files_in_workspace_folders(
-        vec![workspace_folder.clone()], true, true).await;
-    for file in &files {
+    let (all_files, _vcs_folders) = crate::files_in_workspace::retrieve_files_in_workspace_folders(
+        vec![workspace_folder.clone()],
+        false,
+        false,
+    ).await;
+
+    for file in &all_files {
         let relative_path = file.strip_prefix(&workspace_folder)
            .map_err(|e| format!("Error stripping prefix: {}", e))?;
 

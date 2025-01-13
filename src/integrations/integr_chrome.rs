@@ -16,6 +16,7 @@ use crate::scratchpads::multimodality::MultimodalElement;
 use crate::postprocessing::pp_command_output::{CmdlineOutputFilter, output_mini_postprocessing};
 use crate::tools::tools_description::{Tool, ToolDesc, ToolParam};
 use crate::integrations::integr_abstract::{IntegrationTrait, IntegrationCommon, IntegrationConfirmation};
+use crate::integrations::docker::docker_container_manager::get_container_name;
 
 use tokio::time::sleep;
 use chrono::DateTime;
@@ -72,6 +73,7 @@ pub struct ToolChrome {
     pub common: IntegrationCommon,
     pub settings_chrome: SettingsChrome,
     pub supports_clicks: bool,
+    pub config_path: String,
 }
 
 #[derive(Clone, Debug)]
@@ -149,7 +151,7 @@ impl IntegrationSession for ChromeSession
 impl IntegrationTrait for ToolChrome {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<SettingsChrome>(value.clone()) {
             Ok(settings_chrome) => self.settings_chrome = settings_chrome,
             Err(e) => {
@@ -164,6 +166,7 @@ impl IntegrationTrait for ToolChrome {
                 return Err(e.to_string());
             }
         }
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -180,6 +183,7 @@ impl IntegrationTrait for ToolChrome {
             common: self.common.clone(),
             settings_chrome: self.settings_chrome.clone(),
             supports_clicks: false,
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -229,7 +233,7 @@ impl Tool for ToolChrome {
                     break
                 }
             };
-            match chrome_command_exec(&parsed_command, command_session.clone(), &self.settings_chrome).await {
+            match chrome_command_exec(&parsed_command, command_session.clone(), &self.settings_chrome, gcx.clone(), &chat_id).await {
                 Ok((execute_log, command_multimodal_els)) => {
                     tool_log.extend(execute_log);
                     mutlimodal_els.extend(command_multimodal_els);
@@ -299,8 +303,12 @@ impl Tool for ToolChrome {
     }
 
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -341,6 +349,23 @@ async fn setup_chrome_session(
         let debug_ws_url: String = args.chrome_path.clone();
         setup_log.push("Connect to existing web socket.".to_string());
         Browser::connect_with_timeout(debug_ws_url, idle_browser_timeout).map_err(|e| e.to_string())
+    } else if let Some (container_address) = args.chrome_path.strip_prefix("container://") {
+        setup_log.push("Connect to chrome from container.".to_string());
+        let response = reqwest::get(&format!("http://{container_address}/json")).await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("Response from {} resulted in status code: {}", args.chrome_path, response.status().as_u16()));
+        }
+        let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        let ws_url_returned = json[0]["webSocketDebuggerUrl"].as_str()
+            .ok_or_else(|| "webSocketDebuggerUrl not found in the response JSON".to_string())?;
+        setup_log.push("Extracted webSocketDebuggerUrl from HTTP response.".to_string());
+
+        let mut ws_url_parts: Vec<&str> = ws_url_returned.split('/').collect();
+        if ws_url_parts.len() > 2 {
+            ws_url_parts[2] = container_address;
+        }
+        let ws_url = ws_url_parts.join("/");
+        Browser::connect_with_timeout(ws_url, idle_browser_timeout).map_err(|e| e.to_string())
     } else {
         let mut path: Option<PathBuf> = None;
         if !args.chrome_path.is_empty() {
@@ -616,6 +641,8 @@ async fn chrome_command_exec(
     cmd: &Command,
     chrome_session: Arc<AMutex<Box<dyn IntegrationSession>>>,
     settings_chrome: &SettingsChrome,
+    gcx: Arc<ARwLock<GlobalContext>>,
+    chat_id: &str,
 ) -> Result<(Vec<String>, Vec<MultimodalElement>), String> {
     let mut tool_log = vec![];
     let mut multimodal_els = vec![];
@@ -635,10 +662,17 @@ async fn chrome_command_exec(
                 let chrome_session = chrome_session_locked.as_any_mut().downcast_mut::<ChromeSession>().ok_or("Failed to downcast to ChromeSession")?;
                 session_get_tab_arc(chrome_session, &args.tab_id).await?
             };
+            let mut url = args.uri.clone();
+            if settings_chrome.chrome_path.starts_with("container://") {
+                let is_inside_container = gcx.read().await.cmdline.inside_container;
+                if is_inside_container {
+                    url = replace_host_with_container_if_needed(&url, chat_id);
+                }
+            }
             let log = {
                 let tab_lock = tab.lock().await;
                 match {
-                    tab_lock.headless_tab.navigate_to(args.uri.as_str()).map_err(|e| e.to_string())?;
+                    tab_lock.headless_tab.navigate_to(&url).map_err(|e| e.to_string())?;
                     tab_lock.headless_tab.wait_until_navigated().map_err(|e| e.to_string())?;
                     Ok::<(), String>(())
                 } {
@@ -1231,6 +1265,19 @@ fn parse_single_command(command: &String) -> Result<Command, String> {
     }
 }
 
+fn replace_host_with_container_if_needed(url: &str, chat_id: &str) -> String {
+    if let Ok(mut parsed_url) = url::Url::parse(url) {
+        if let Some(host) = parsed_url.host_str() {
+            if host == "127.0.0.1" || host == "0.0.0.0" || host == "localhost" {
+                parsed_url.set_host(Some(&get_container_name(chat_id))).unwrap();
+                return parsed_url.to_string();
+            }
+        }
+    }
+    url.to_string()
+}
+
+
 const CHROME_INTEGRATION_SCHEMA: &str = r#"
 fields:
   chrome_path:
@@ -1285,6 +1332,7 @@ available:
   on_your_laptop_possible: true
   when_isolated_possible: true
 confirmation:
+  not_applicable: true
   ask_user_default: []
   deny_default: []
 smartlinks:

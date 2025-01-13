@@ -138,6 +138,8 @@ pub struct ChatMessage {
     pub role: String,
     pub content: ChatContent,
     #[serde(default, skip_serializing_if="is_none")]
+    pub finish_reason: Option<String>,
+    #[serde(default, skip_serializing_if="is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
     #[serde(default, skip_serializing_if="is_empty_string")]
     pub tool_call_id: String,
@@ -185,6 +187,8 @@ pub struct ChatPost {
     #[serde(default)]
     pub tool_choice: Option<String>,
     #[serde(default)]
+    pub tools_confirmation: bool,
+    #[serde(default)]
     pub only_deterministic_messages: bool,  // means don't sample from the model
     #[serde(default)]
     pub subchat_tool_parameters: IndexMap<String, SubchatParameters>, // tool_name: {model, allowed_context, temperature}
@@ -196,7 +200,7 @@ pub struct ChatPost {
     pub style: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ChatMeta {
     #[serde(default)]
     pub chat_id: String,

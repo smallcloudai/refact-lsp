@@ -21,6 +21,8 @@ use crate::tools::tools_execute::run_tools;
 #[derive(Serialize, Deserialize, Clone)]
 struct ToolsPermissionCheckPost {
     pub tool_calls: Vec<ChatToolCall>,
+    #[serde(default)]
+    pub messages: Vec<ChatMessage>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +39,7 @@ struct PauseReason {
     command: String,
     rule: String,
     tool_call_id: String,
+    integr_config_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -49,6 +52,7 @@ pub struct ToolsExecutePost {
     pub model_name: String,
     pub chat_id: String,
     pub style: Option<String>,
+    pub tools_confirmation: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,6 +102,10 @@ pub async fn handle_v1_tools_check_if_confirmation_needed(
     let post = serde_json::from_slice::<ToolsPermissionCheckPost>(&body_bytes)
         .map_err(|e| ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("JSON problem: {}", e)))?;
 
+    let ccx = Arc::new(AMutex::new(AtCommandsContext::new(
+        gcx.clone(), 1000, 1, false, post.messages.clone(), "".to_string(), false
+    ).await)); // used only for should_confirm
+
     let all_tools = match tools_merged_and_filtered(gcx.clone(), true).await {
         Ok(tools) => tools,
         Err(e) => {
@@ -126,28 +134,35 @@ pub async fn handle_v1_tools_check_if_confirmation_needed(
             }
         };
 
-        let result = {
+        let should_confirm = {
             let tool_locked = tool.lock().await;
-            tool_locked.match_against_confirm_deny(&args)
+            tool_locked.match_against_confirm_deny(ccx.clone(), &args).await
         }.map_err(|e| {
             ScratchError::new(StatusCode::UNPROCESSABLE_ENTITY, e)
         })?;
 
-        match result.result {
+        let has_config_path = {
+            let tool_locked = tool.lock().await;
+            tool_locked.has_config_path()
+        };
+
+        match should_confirm.result {
             MatchConfirmDenyResult::DENY => {
                 result_messages.push(PauseReason {
                     reason_type: PauseReasonType::Denial,
-                    command: result.command.clone(),
-                    rule: result.rule.clone(),
+                    command: should_confirm.command.clone(),
+                    rule: should_confirm.rule.clone(),
                     tool_call_id: tool_call.id.clone(),
+                    integr_config_path: has_config_path,
                 });
             },
             MatchConfirmDenyResult::CONFIRMATION => {
                 result_messages.push(PauseReason {
                     reason_type: PauseReasonType::Confirmation,
-                    command: result.command.clone(),
-                    rule: result.rule.clone(),
+                    command: should_confirm.command.clone(),
+                    rule: should_confirm.rule.clone(),
                     tool_call_id: tool_call.id.clone(),
+                    integr_config_path: has_config_path,
                 });
             },
             _ => {},
@@ -194,7 +209,7 @@ pub async fn handle_v1_tools_execute(
         ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error getting at_tools: {}", e))
     })?;
     let (messages, tools_runned) = run_tools( // todo: fix typo "runned"
-        ccx_arc.clone(), at_tools, tokenizer.clone(), tools_execute_post.maxgen, &tools_execute_post.messages, &tools_execute_post.style
+        ccx_arc.clone(), at_tools, tokenizer.clone(), tools_execute_post.maxgen, &tools_execute_post.messages, &tools_execute_post.style, tools_execute_post.tools_confirmation
     ).await.map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Error running tools: {}", e)))?;
 
     let response = ToolExecuteResponse {

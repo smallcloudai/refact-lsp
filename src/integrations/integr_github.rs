@@ -25,14 +25,15 @@ pub struct SettingsGitHub {
 
 #[derive(Default)]
 pub struct ToolGithub {
-    pub common:  IntegrationCommon,
+    pub common: IntegrationCommon,
     pub settings_github: SettingsGitHub,
+    pub config_path: String,
 }
 
 impl IntegrationTrait for ToolGithub {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<SettingsGitHub>(value.clone()) {
             Ok(settings_github) => {
                 self.settings_github = settings_github;
@@ -49,6 +50,7 @@ impl IntegrationTrait for ToolGithub {
                 return Err(e.to_string());
             }
         };
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -63,7 +65,8 @@ impl IntegrationTrait for ToolGithub {
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
         Box::new(ToolGithub {
             common: self.common.clone(),
-            settings_github: self.settings_github.clone()
+            settings_github: self.settings_github.clone(),
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -98,7 +101,7 @@ impl Tool for ToolGithub {
             .env("GITHUB_TOKEN", &self.settings_github.gh_token)
             .output()
             .await
-            .map_err(|e| format!("!{}, {} failed:\n{}", 
+            .map_err(|e| format!("!{}, {} failed:\n{}",
                 go_to_configuration_message("github"), gh_binary_path, e.to_string()))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -126,7 +129,7 @@ impl Tool for ToolGithub {
         if !stderr.is_empty() {
             content.push_str(format!("stderr:\n{}\n", stderr).as_str());
         }
-        
+
         let mut results = vec![];
         results.push(ContextEnum::ChatMessage(ChatMessage {
             role: "tool".to_string(),
@@ -158,8 +161,12 @@ impl Tool for ToolGithub {
         unsafe { &mut DEFAULT_USAGE }
     }
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -188,7 +195,7 @@ const GITHUB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   gh_token:
     f_type: string_long
-    f_desc: "GitHub Personal Access Token, you can create one at https://github.com/settings/tokens. If you don't want to send your key to the AI model that helps you to configure the agent, put it into secrets.yaml and write $MY_SECRET_VARIABLE in this field."
+    f_desc: "GitHub Personal Access Token, you can create one [here](https://github.com/settings/tokens). If you don't want to send your key to the AI model that helps you to configure the agent, put it into secrets.yaml and write `$MY_SECRET_VARIABLE` in this field."
     f_placeholder: "ghp_xxxxxxxxxxxxxxxx"
     f_label: "Token"
     smartlinks:

@@ -15,6 +15,7 @@ use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
 use crate::postprocessing::pp_command_output::{CmdlineOutputFilter, output_mini_postprocessing};
 use crate::integrations::integr_abstract::{IntegrationTrait, IntegrationCommon, IntegrationConfirmation};
 use crate::integrations::utils::{serialize_num_to_str, deserialize_str_to_num, serialize_opt_num_to_str, deserialize_str_to_opt_num};
+use crate::integrations::setting_up_integrations::YamlError;
 
 
 #[derive(Deserialize, Serialize, Clone, Default)]
@@ -52,12 +53,13 @@ pub struct ToolCmdline {
     pub common: IntegrationCommon,
     pub name: String,
     pub cfg: CmdlineToolConfig,
+    pub config_path: String,
 }
 
 impl IntegrationTrait for ToolCmdline {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &serde_json::Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &serde_json::Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<CmdlineToolConfig>(value.clone()) {
             Ok(x) => self.cfg = x,
             Err(e) => {
@@ -72,6 +74,7 @@ impl IntegrationTrait for ToolCmdline {
                 return Err(e.to_string());
             }
         }
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -88,6 +91,7 @@ impl IntegrationTrait for ToolCmdline {
             common: self.common.clone(),
             name: integr_name.to_string(),
             cfg: self.cfg.clone(),
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -109,7 +113,7 @@ pub fn format_output(stdout_out: &str, stderr_out: &str) -> String {
     let mut out = String::new();
     if !stdout_out.is_empty() && stderr_out.is_empty() {
         // special case: just clean output, nice
-        out.push_str(&format!("{}\n", stdout_out));
+        out.push_str(&format!("{}\n\n", stdout_out));
     } else {
         if !stdout_out.is_empty() {
             out.push_str(&format!("STDOUT\n```\n{}```\n\n", stdout_out));
@@ -130,16 +134,9 @@ pub fn create_command_from_string(
     env_variables: &HashMap<String, String>,
     project_dirs: Vec<PathBuf>,
 ) -> Result<Command, String> {
-    let command_args = shell_words::split(cmd_string)
-        .map_err(|e| format!("Failed to parse command: {}", e))?;
-    if command_args.is_empty() {
-        return Err("Command is empty after parsing".to_string());
-    }
-    let mut cmd = Command::new(&command_args[0]);
-    if command_args.len() > 1 {
-        cmd.args(&command_args[1..]);
-    }
-    tracing::info!("command_args: {:?}", command_args);
+    let shell = if cfg!(target_os = "windows") { "powershell.exe" } else { "sh" };
+    let shell_arg = if cfg!(target_os = "windows") { "-Command" } else { "-c" };
+    let mut cmd = Command::new(shell);
 
     if command_workdir.is_empty() {
         if let Some(first_project_dir) = project_dirs.first() {
@@ -154,6 +151,13 @@ pub fn create_command_from_string(
     for (key, value) in env_variables {
         cmd.env(key, value);
     }
+
+    if cmd_string.is_empty() {
+        return Err("Command is empty".to_string());
+    }
+    cmd.arg(shell_arg).arg(cmd_string);
+    tracing::info!("command: {}", cmd_string);
+
     Ok(cmd)
 }
 
@@ -191,7 +195,7 @@ pub async fn execute_blocking_command(
 
         let mut out = format_output(&stdout, &stderr);
         let exit_code = output.status.code().unwrap_or_default();
-        out.push_str(&format!("command was running {:.3}s, finished with exit code {exit_code}\n", duration.as_secs_f64()));
+        out.push_str(&format!("The command was running {:.3}s, finished with exit code {exit_code}\n", duration.as_secs_f64()));
         Ok(out)
     };
 
@@ -243,7 +247,8 @@ impl Tool for ToolCmdline {
         let (command, workdir) = parse_command_args(args, &self.cfg)?;
 
         let gcx = ccx.lock().await.global_context.clone();
-        let env_variables = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone()).await;
+        let mut error_log = Vec::<YamlError>::new();
+        let env_variables = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone(), &mut error_log).await;
         let project_dirs = crate::files_correction::get_project_dirs(gcx.clone()).await;
 
         let tool_output = execute_blocking_command(&command, &self.cfg, &workdir, &env_variables, project_dirs).await?;
@@ -285,8 +290,12 @@ impl Tool for ToolCmdline {
         return Ok(command);
     }
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -310,7 +319,6 @@ fields:
     f_type: string_short
     f_desc: "The command must immediately return the results, it can't be interactive. If the command runs for too long, it will be terminated and stderr/stdout collected will be presented to the model."
     f_default: "10"
-    f_extra: true
   output_filter:
     f_type: "output_filter"
     f_desc: "The output from the command can be long or even quasi-infinite. This section allows to set limits, prioritize top or bottom, or use regexp to show the model the relevant part."
@@ -326,10 +334,16 @@ confirmation:
   ask_user_default: ["*"]
   deny_default: ["sudo*"]
 smartlinks:
-  - sl_label: "Auto Configure"
+  - sl_label: "Test"
     sl_chat:
       - role: "user"
         content: |
           🔧 Test the tool that corresponds to %CURRENT_CONFIG%
           If the tool isn't available or doesn't work, go through the usual plan in the system prompt. If it works express happiness, and change nothing.
+    sl_enable_only_with_tool: true
+  - sl_label: "Auto Configure"
+    sl_chat:
+      - role: "user"
+        content: |
+          🔧 Please write %CURRENT_CONFIG% based on what you see in the project. Follow the plan in the system prompt.
 "#;

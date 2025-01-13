@@ -25,12 +25,13 @@ pub struct SettingsGitLab {
 pub struct ToolGitlab {
     pub common:  IntegrationCommon,
     pub settings_gitlab: SettingsGitLab,
+    pub config_path: String,
 }
 
 impl IntegrationTrait for ToolGitlab {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<SettingsGitLab>(value.clone()) {
             Ok(settings_gitlab) => {
                 info!("GitLab settings applied: {:?}", settings_gitlab);
@@ -48,6 +49,7 @@ impl IntegrationTrait for ToolGitlab {
                 return Err(e.to_string());
             }
         };
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -62,7 +64,8 @@ impl IntegrationTrait for ToolGitlab {
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
         Box::new(ToolGitlab {
             common: self.common.clone(),
-            settings_gitlab: self.settings_gitlab.clone()
+            settings_gitlab: self.settings_gitlab.clone(),
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -96,9 +99,9 @@ impl Tool for ToolGitlab {
             .env("GITLAB_TOKEN", &self.settings_gitlab.glab_token)
             .output()
             .await
-            .map_err(|e| format!("!{}, {} failed:\n{}", 
+            .map_err(|e| format!("!{}, {} failed:\n{}",
                 go_to_configuration_message("gitlab"), glab_binary_path, e.to_string()))?;
-        
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -156,8 +159,12 @@ impl Tool for ToolGitlab {
         unsafe { &mut DEFAULT_USAGE }
     }
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -186,7 +193,7 @@ const GITLAB_INTEGRATION_SCHEMA: &str = r#"
 fields:
   glab_token:
     f_type: string_long
-    f_desc: "GitLab Personal Access Token, you can get one at https://gitlab.com/-/user_settings/personal_access_tokens. If you don't want to send your key to the AI model that helps you to configure the agent, put it into secrets.yaml and write $MY_SECRET_VARIABLE in this field."
+    f_desc: "GitLab Personal Access Token, you can get one [here](https://gitlab.com/-/user_settings/personal_access_tokens). If you don't want to send your key to the AI model that helps you to configure the agent, put it into secrets.yaml and write `$MY_SECRET_VARIABLE` in this field."
     f_placeholder: "glpat_xxxxxxxxxxxxxxxx"
     smartlinks:
       - sl_label: "Open secrets.yaml"

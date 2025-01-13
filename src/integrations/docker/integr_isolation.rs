@@ -11,6 +11,7 @@ use crate::tools::tools_description::Tool;
 pub struct SettingsIsolation {
     pub container_workspace_folder: String,
     pub docker_image_id: String,
+    pub docker_network: String,
     pub host_lsp_path: String,
     #[serde(serialize_with = "serialize_ports", deserialize_with = "deserialize_ports")]
     pub ports: Vec<Port>,
@@ -27,7 +28,7 @@ pub struct IntegrationIsolation {
 impl IntegrationTrait for IntegrationIsolation {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value, _config_path: String) -> Result<(), String> {
         match serde_json::from_value::<SettingsIsolation>(value.clone()) {
             Ok(settings_isolation) => {
                 tracing::info!("Isolation settings applied: {:?}", settings_isolation);

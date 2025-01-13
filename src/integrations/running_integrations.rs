@@ -10,10 +10,9 @@ use crate::integrations::integr_abstract::IntegrationTrait;
 
 pub async fn load_integration_tools(
     gcx: Arc<ARwLock<GlobalContext>>,
-    _current_project: String,
     allow_experimental: bool,
 ) -> IndexMap<String, Arc<AMutex<Box<dyn Tool + Send>>>> {
-    let (integraions_map, _yaml_errors) = load_integrations(gcx.clone(), _current_project, allow_experimental).await;
+    let (integraions_map, _yaml_errors) = load_integrations(gcx.clone(), allow_experimental).await;
     let mut tools = IndexMap::new();
     for (name, integr) in integraions_map {
         if integr.can_upgrade_to_tool() {
@@ -25,26 +24,32 @@ pub async fn load_integration_tools(
 
 pub async fn load_integrations(
     gcx: Arc<ARwLock<GlobalContext>>,
-    _current_project: String,
     allow_experimental: bool,
 ) -> (IndexMap<String, Box<dyn IntegrationTrait + Send + Sync>>, Vec<crate::integrations::setting_up_integrations::YamlError>) {
-    // XXX filter _workspace_folders_arc that fit _current_project
-    let (config_dirs, global_config_dir) = crate::integrations::setting_up_integrations::get_config_dirs(gcx.clone()).await;
-    let integrations_yaml_path = crate::integrations::setting_up_integrations::get_integrations_yaml_path(gcx.clone()).await;
+    let active_project_path = crate::files_correction::get_active_project_path(gcx.clone()).await;
+    let (config_dirs, global_config_dir) = crate::integrations::setting_up_integrations::get_config_dirs(gcx.clone(), &active_project_path).await;
+    let (integrations_yaml_path, is_inside_container) = {
+        let gcx_locked = gcx.read().await;
+        (gcx_locked.cmdline.integrations_yaml.clone(), gcx_locked.cmdline.inside_container)
+    };
 
     let mut error_log: Vec<crate::integrations::setting_up_integrations::YamlError> = Vec::new();
     let lst: Vec<&str> = crate::integrations::integrations_list(allow_experimental);
-    let vars_for_replacements = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone()).await;
-    let records = crate::integrations::setting_up_integrations::read_integrations_d(&config_dirs, &global_config_dir, &integrations_yaml_path, &vars_for_replacements, &lst, &mut error_log);
+    let vars_for_replacements = crate::integrations::setting_up_integrations::get_vars_for_replacements(gcx.clone(), &mut error_log).await;
+    let records = crate::integrations::setting_up_integrations::read_integrations_d(
+        &config_dirs,
+        &global_config_dir,
+        &integrations_yaml_path,
+        &vars_for_replacements,
+        &lst,
+        &mut error_log,
+    );
 
     let mut integrations_map = IndexMap::new();
     for rec in records {
-        if !rec.on_your_laptop {
-            continue;
-        }
-        if !rec.integr_config_exists {
-            continue;
-        }
+        if !is_inside_container && !rec.on_your_laptop { continue; }
+        if is_inside_container && !rec.when_isolated { continue; }
+        if !rec.integr_config_exists { continue; }
         let mut integr = match crate::integrations::integration_from_name(&rec.integr_name) {
             Ok(x) => x,
             Err(e) => {
@@ -52,7 +57,7 @@ pub async fn load_integrations(
                 continue;
             }
         };
-        let should_be_fine = integr.integr_settings_apply(&rec.config_unparsed);
+        let should_be_fine = integr.integr_settings_apply(&rec.config_unparsed, rec.integr_config_path.clone());
         if should_be_fine.is_err() {
             // tracing::warn!("failed to apply settings for integration {}: {:?}", rec.integr_name, should_be_fine.err());
             error_log.push(crate::integrations::setting_up_integrations::YamlError {

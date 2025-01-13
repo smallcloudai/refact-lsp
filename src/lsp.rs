@@ -185,7 +185,7 @@ impl LspBackend {
             let gcx_locked = self.gcx.write().await;
             (gcx_locked.cmdline.http_port, gcx_locked.http_client.clone())
         };
-        
+
         let url = "http://127.0.0.1:".to_string() + &port.to_string() + &"/v1/ping".to_string();
         let mut attempts = 0;
         while attempts < 15 {
@@ -243,10 +243,10 @@ impl LanguageServer for LspBackend {
                 }
             }],
         };
-        
-        
+
+
         // wait for http server to be ready
-        self.ping_http_server().await?;      
+        self.ping_http_server().await?;
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -286,6 +286,9 @@ impl LanguageServer for LspBackend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let cpath = crate::files_correction::canonical_path(&params.text_document.uri.to_file_path().unwrap_or_default().display().to_string());
+        if cpath.to_string_lossy().contains("keybindings.json") {
+            return;
+        }
         files_in_workspace::on_did_open(
             self.gcx.clone(),
             &cpath,
@@ -334,11 +337,15 @@ impl LanguageServer for LspBackend {
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
-        for add_folder in params.event.added {
-            info!("UNCLEAR LSP EVENT: did_change_workspace_folders/add {}", add_folder.name);
+        for folder in params.event.added {
+            info!("did_change_workspace_folders/add {}", folder.name);
+            let path = crate::files_correction::canonical_path(&folder.uri.to_file_path().unwrap_or_default().display().to_string());
+            files_in_workspace::add_folder(self.gcx.clone(), &path).await;
         }
-        for delete_folder in params.event.removed {
-            info!("UNCLEAR LSP EVENT: did_change_workspace_folders/delete {}", delete_folder.name);
+        for folder in params.event.removed {
+            info!("did_change_workspace_folders/delete {}", folder.name);
+            let path = crate::files_correction::canonical_path(&folder.uri.to_file_path().unwrap_or_default().display().to_string());
+            files_in_workspace::remove_folder(self.gcx.clone(), &path).await;
         }
     }
 
@@ -414,7 +421,16 @@ pub async fn spawn_lsp_task(
             let (lsp_service, socket) = build_lsp_service(gcx_t.clone()).await;
             tower_lsp::Server::new(stdin, stdout, socket).serve(lsp_service).await;
             info!("LSP loop exit");
-            gcx_t.write().await.ask_shutdown_sender.lock().unwrap().send("going-down-because-lsp-exited".to_string()).unwrap();
+            match gcx_t.write().await.ask_shutdown_sender.lock() {
+                Ok(sender) => {
+                    if let Err(err) = sender.send("going-down-because-lsp-exited".to_string()) {
+                        error!("Failed to send shutdown message: {}", err);
+                    }
+                }
+                Err(err) => {
+                    error!("Failed to lock ask_shutdown_sender: {}", err);
+                }
+            }
         }));
     }
 

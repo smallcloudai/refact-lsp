@@ -2,6 +2,7 @@ use std::io::Write;
 use std::env;
 use std::panic;
 
+use files_correction::to_pathbuf_normalize;
 use tokio::task::JoinHandle;
 use tracing::{info, Level};
 use tracing_appender;
@@ -65,7 +66,6 @@ mod autonomy;
 
 mod integrations;
 mod privacy;
-mod privacy_compiled_in;
 mod git;
 mod agentic;
 mod trajectories;
@@ -74,9 +74,9 @@ mod trajectories;
 async fn main() {
     let cpu_num = std::thread::available_parallelism().unwrap().get();
     rayon::ThreadPoolBuilder::new().num_threads(cpu_num / 2).build_global().unwrap();
-    let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
-    let cache_dir = home_dir.join(".cache/refact");
-    let config_dir = home_dir.join(".config/refact");
+    let home_dir = to_pathbuf_normalize(&home::home_dir().ok_or(()).expect("failed to find home dir").to_string_lossy().to_string());
+    let cache_dir = home_dir.join(".cache").join("refact");
+    let config_dir = home_dir.join(".config").join("refact");
     let (gcx, ask_shutdown_receiver, cmdline) = global_context::create_global_context(cache_dir.clone(), config_dir.clone()).await;
     let mut writer_is_stderr = false;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
@@ -138,17 +138,20 @@ async fn main() {
         println!("{}", byok_config_path);
         std::process::exit(0);
     }
-    if cmdline.print_customization {
-        match load_customization(gcx.clone(), false).await {
-            Ok(customization) => {
-                println!("{}", serde_json::to_string(&customization).unwrap());
-                std::process::exit(0);
-            }
-            Err(_) => {
-                println!("Failed to load customization, exiting");
-                std::process::exit(1);
-            }
+
+    if cmdline.print_customization {  // used in JB
+        let mut error_log = Vec::new();
+        let cust = load_customization(gcx.clone(), false, &mut error_log).await;
+        for e in error_log.iter() {
+            eprintln!(
+                "{}:{} {:?}",
+                crate::nicer_logs::last_n_chars(&e.integr_config_path, 30),
+                e.error_line,
+                e.error_msg,
+            );
         }
+        println!("{}", serde_json::to_string_pretty(&cust).unwrap());
+        std::process::exit(0);
     }
 
     if cmdline.ast {

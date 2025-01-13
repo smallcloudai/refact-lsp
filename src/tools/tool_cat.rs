@@ -21,10 +21,29 @@ use image::{ImageFormat, ImageReader};
 pub struct ToolCat;
 
 
+const CAT_MAX_IMAGES_CNT: usize = 1;
+
+pub fn parse_skeleton_from_args(args: &HashMap<String, Value>) -> Result<bool, String> {
+    Ok(match args.get("skeleton") {
+        Some(Value::Bool(s)) => *s,
+        Some(Value::String(s)) => {
+            if s == "true" {
+                true
+            } else if s == "false" {
+                false
+            } else {
+                return Err(format!("argument `skeleton` is not a bool: {:?}", s));
+            }
+        }
+        Some(v) => return Err(format!("argument `skeleton` is not a bool: {:?}", v)),
+        None => false
+    })
+}
+
 #[async_trait]
 impl Tool for ToolCat {
     fn as_any(&self) -> &dyn std::any::Any { self }
-    
+
     async fn tool_execute(
         &mut self,
         ccx: Arc<AMutex<AtCommandsContext>>,
@@ -54,20 +73,7 @@ impl Tool for ToolCat {
             Some(v) => return Err(format!("argument `symbols` is not a string: {:?}", v)),
             None => vec![],
         };
-        let skeleton = match args.get("skeleton") {
-            Some(Value::Bool(s)) => *s,
-            Some(Value::String(s)) => {
-                if s == "true" {
-                    true
-                } else if s == "false" {
-                    false
-                } else {
-                    return Err(format!("argument `skeleton` is not a bool: {:?}", s));
-                }
-            }
-            Some(v) => return Err(format!("argument `skeleton` is not a bool: {:?}", v)),
-            None => false,  // the default
-        };
+        let skeleton = parse_skeleton_from_args(args)?;
         ccx.lock().await.pp_skeleton = skeleton;
 
         let (filenames_present, symbols_not_found, not_found_messages, context_enums, multimodal) = paths_and_symbols_to_cat(ccx.clone(), paths, symbols).await;
@@ -81,7 +87,7 @@ impl Tool for ToolCat {
             }
         }
         if !not_found_messages.is_empty() {
-            content.push_str(&format!("Path problems:\n\n{}\n\n", not_found_messages.join("\n\n")));
+            content.push_str(&format!("Problems:\n{}\n\n", not_found_messages.join("\n\n")));
             corrections = true;
         }
 
@@ -260,14 +266,22 @@ pub async fn paths_and_symbols_to_cat(
         .filter_map(|x| if let ContextEnum::ContextFile(cf) = x { Some(cf.file_name.clone()) } else { None })
         .collect::<Vec<_>>();
 
+    let mut image_counter = 0;
     for p in unique_paths.iter().filter(|x|!filenames_got_symbols_for.contains(x)) {
         // don't have symbols for these, so we need to mention them as files, without a symbol, analog of @file
         let f_type = get_file_type(&PathBuf::from(p));
 
         if f_type.starts_with("image/") {
+            filenames_present.push(p.clone());
+            if image_counter == CAT_MAX_IMAGES_CNT {
+                not_found_messages.push("Cat() shows only 1 image per call to avoid token overflow, call several cat() in parallel to see more images.".to_string());
+            }
+            image_counter += 1;
+            if image_counter > CAT_MAX_IMAGES_CNT {
+                continue
+            }
             match load_image(p, &f_type).await {
                 Ok(mm) => {
-                    filenames_present.push(p.clone());
                     multimodal.push(mm);
                 },
                 Err(e) => { not_found_messages.push(format!("{}: {}", p, e)); }

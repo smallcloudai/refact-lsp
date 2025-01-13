@@ -28,12 +28,13 @@ pub struct SettingsPostgres {
 pub struct ToolPostgres {
     pub common:  IntegrationCommon,
     pub settings_postgres: SettingsPostgres,
+    pub config_path: String,
 }
 
 impl IntegrationTrait for ToolPostgres {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value) -> Result<(), String> {
+    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
         match serde_json::from_value::<SettingsPostgres>(value.clone()) {
             Ok(settings_postgres) => self.settings_postgres = settings_postgres,
             Err(e) => {
@@ -48,6 +49,7 @@ impl IntegrationTrait for ToolPostgres {
                 return Err(e.to_string());
             }
         }
+        self.config_path = config_path;
         Ok(())
     }
 
@@ -62,7 +64,8 @@ impl IntegrationTrait for ToolPostgres {
     fn integr_upgrade_to_tool(&self, _integr_name: &str) -> Box<dyn Tool + Send> {
         Box::new(ToolPostgres {
             common: self.common.clone(),
-            settings_postgres: self.settings_postgres.clone()
+            settings_postgres: self.settings_postgres.clone(),
+            config_path: self.config_path.clone(),
         }) as Box<dyn Tool + Send>
     }
 
@@ -162,8 +165,12 @@ impl Tool for ToolPostgres {
         unsafe { &mut DEFAULT_USAGE }
     }
 
-    fn confirmation_info(&self) -> Option<IntegrationConfirmation> {
+    fn confirm_deny_rules(&self) -> Option<IntegrationConfirmation> {
         Some(self.integr_common().confirmation)
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        Some(self.config_path.clone())
     }
 }
 
@@ -213,7 +220,7 @@ smartlinks:
   - sl_label: "Test"
     sl_chat:
       - role: "user"
-        content: |
+        content: >
           🔧 The postgres tool should be visible now. To test the tool, list the tables available, briefly describe the tables and express
           happiness, and change nothing. If it doesn't work or the tool isn't available, go through the usual plan in the system prompt.
     sl_enable_only_with_tool: true
@@ -239,14 +246,16 @@ docker:
     - sl_label: "Add Database Container"
       sl_chat:
         - role: "user"
-          content: |
-            🔧 Your job is to create a postgres container, using the image and environment from new_container_default section in the current config file: %CURRENT_CONFIG%. Follow the system prompt.
+          content: >
+            🔧 Your job is to create a postgres container, using the image and environment from new_container_default section in the current config schema. Follow the system prompt.
   smartlinks_for_each_container:
     - sl_label: "Use for integration"
       sl_chat:
         - role: "user"
-          content: |
-            🔧 Your job is to modify postgres connection config in the current file to match the variables from the container, use docker tool to inspect the container if needed. Current config file: %CURRENT_CONFIG%.
+          content: >
+            🔧 Your job is to modify postgres() tool config in %CURRENT_CONFIG% to match the variables from the container. Use docker() tool to inspect the container if needed.
+            Ask user before proceeding with the changes. After re-writing the config, test it to see if works. If it does, also update variables.yaml but
+            ask the user first.
 "#;
 
 // To think about: PGPASSWORD PGHOST PGUSER PGPORT PGDATABASE maybe tell the model to set that in variables.yaml as well

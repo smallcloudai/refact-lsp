@@ -38,7 +38,16 @@ pub async fn create_chat_post_and_scratchpad(
         warn!("no caps: {:?}", e);
         "no caps".to_string()
     })?;
-    let tconfig = load_customization(global_context.clone(), true).await?;
+    let mut error_log = Vec::new();
+    let tconfig = load_customization(global_context.clone(), true, &mut error_log).await;
+    for e in error_log.iter() {
+        tracing::error!(
+            "{}:{} {:?}",
+            crate::nicer_logs::last_n_chars(&e.integr_config_path, 30),
+            e.error_line,
+            e.error_msg,
+        );
+    }
 
     let mut chat_post = ChatPost {
         messages: messages.iter().map(|x|json!(x)).collect(),
@@ -195,6 +204,7 @@ async fn chat_interaction_non_stream(
             tool_calls,
             tool_call_id,
             usage: usage_mb.clone(),
+            ..Default::default()
         };
         ch_results.extend(det_messages.clone());
         ch_results.push(msg);

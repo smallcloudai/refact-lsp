@@ -1,8 +1,9 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::fs;
 use tokio::sync::RwLock as ARwLock;
-use std::collections::HashMap;
 
+use crate::files_correction::{get_active_project_path, to_pathbuf_normalize};
 use crate::global_context::GlobalContext;
 use crate::call_validation::{ChatContent, ChatMessage, ContextFile, ChatMeta};
 use crate::scratchpads::scratchpad_utils::HasRagResults;
@@ -43,7 +44,21 @@ pub async fn mix_config_messages(
         context_file_vec.push(context_file);
     }
 
-    let (config_dirs, global_config_dir) = crate::integrations::setting_up_integrations::get_config_dirs(gcx.clone()).await;
+    let global_config_dir = gcx.read().await.config_dir.clone();
+    let current_config_path = to_pathbuf_normalize(&chat_meta.current_config_file);
+    let mut active_project_path = if current_config_path.starts_with(&global_config_dir) {
+        Some(PathBuf::new()) // If it's global config, it shouldn't use specific project info
+    } else {
+        current_config_path.parent().and_then(|p| {
+            p.parent().filter(|gp| p.file_name() == Some("integrations.d".as_ref()) && gp.file_name() == Some(".refact".as_ref()))
+                .and_then(|gp| gp.parent().map(|gpp| gpp.to_path_buf()))
+        })
+    };
+    if active_project_path.is_none() {
+        active_project_path = get_active_project_path(gcx.clone()).await;
+    }
+
+    let (config_dirs, global_config_dir) = crate::integrations::setting_up_integrations::get_config_dirs(gcx.clone(), &active_project_path).await;
     let mut variables_yaml_instruction = String::new();
     for dir in config_dirs.iter().chain(std::iter::once(&global_config_dir)) {
         let variables_path = dir.join("variables.yaml");
@@ -102,9 +117,7 @@ pub async fn mix_config_messages(
             ChatMessage {
                 role: "cd_instruction".to_string(),
                 content: ChatContent::SimpleText(msg),
-                tool_calls: None,
-                tool_call_id: String::new(),
-                usage: None,
+                ..Default::default()
             }
         },
         Err(e) => {
@@ -113,34 +126,31 @@ pub async fn mix_config_messages(
         }
     };
 
-    // XXX should be a better way to load the prompt
-    let custom: crate::yaml_configs::customization_loader::CustomizationYaml = match crate::yaml_configs::customization_loader::load_customization(gcx.clone(), true).await {
-        Ok(x) => x,
-        Err(why) => {
-            tracing::error!("Failed to load customization.yaml, will use compiled-in default for the configurator system prompt:\n{:?}", why);
-            crate::yaml_configs::customization_loader::load_and_mix_with_users_config(
-                crate::yaml_configs::customization_compiled_in::COMPILED_IN_INITIAL_USER_YAML,
-                "", "", true, true, &HashMap::new(),
-            ).unwrap()
-        }
-    };
+    let mut error_log = Vec::new();
+    let custom = crate::yaml_configs::customization_loader::load_customization(gcx.clone(), true, &mut error_log).await;
+    // XXX: let model know there are errors
+    for e in error_log.iter() {
+        tracing::error!(
+            "{}:{} {:?}",
+            crate::nicer_logs::last_n_chars(&e.integr_config_path, 30),
+            e.error_line,
+            e.error_msg,
+        );
+    }
+
     let sp: &crate::yaml_configs::customization_loader::SystemPrompt = custom.system_prompts.get("configurator").unwrap();
 
     let context_file_message = ChatMessage {
         role: "context_file".to_string(),
         content: ChatContent::SimpleText(serde_json::to_string(&context_file_vec).unwrap()),
-        tool_calls: None,
-        tool_call_id: String::new(),
-        usage: None,
+        ..Default::default()
     };
     let system_message = ChatMessage {
         role: "system".to_string(),
         content: ChatContent::SimpleText(
             crate::scratchpads::chat_utils_prompts::system_prompt_add_workspace_info(gcx.clone(), &sp.text).await
         ),
-        tool_calls: None,
-        tool_call_id: String::new(),
-        usage: None,
+        ..Default::default()
     };
 
     // Interestingly, here you can stream messages to user or not, and both options will work -- this function will be called or not called again the next chat call.

@@ -119,7 +119,7 @@ pub const KNOWN_MODELS: &str = r####"
         "gpt-4o": {
             "n_ctx": 128000,
             "supports_scratchpads": {
-                "REPLACE_PASSTHROUGH": { 
+                "REPLACE_PASSTHROUGH": {
                     "context_format": "chat",
                     "rag_ratio": 0.5
                 }
@@ -127,25 +127,32 @@ pub const KNOWN_MODELS: &str = r####"
             "similar_models": [
                 "gpt-4o-2024-05-13",
                 "gpt-4o-2024-08-06",
-                "openai/gpt-4o"
+                "openai/gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4o-mini-2024-07-18"
             ]
         },
-        "gpt-4o-mini": {
-            "n_ctx": 128000,
+        "claude-3-sonnet": {
+            "n_ctx": 200000,
             "supports_scratchpads": {
-                "REPLACE_PASSTHROUGH": { 
+                "REPLACE_PASSTHROUGH": {
                     "context_format": "chat",
                     "rag_ratio": 0.5
                 }
             },
             "similar_models": [
-                "gpt-4o-mini-2024-07-18"
+                "claude-3-haiku",
+                "claude-3-5-haiku",
+                "claude-3-5-haiku-20241022",
+                "claude-3-opus",
+                "claude-3-5-sonnet",
+                "claude-3-5-sonnet-20241022"
             ]
         },
         "groq-llama-3.1-8b": {
             "n_ctx": 128000,
             "supports_scratchpads": {
-                "REPLACE_PASSTHROUGH": { 
+                "REPLACE_PASSTHROUGH": {
                     "context_format": "chat",
                     "rag_ratio": 0.5
                 }
@@ -157,17 +164,71 @@ pub const KNOWN_MODELS: &str = r####"
                 "groq-llama-3.2-11b-vision",
                 "groq-llama-3.2-90b-vision"
             ]
-        },        
+        },
         "cerebras-llama3.1-8b": {
             "n_ctx": 8192,
             "supports_scratchpads": {
-                "REPLACE_PASSTHROUGH": { 
+                "REPLACE_PASSTHROUGH": {
                     "context_format": "chat",
                     "rag_ratio": 0.5
                 }
             },
             "similar_models": [
                 "cerebras-llama3.1-70b"
+            ]
+        },
+        "gemini-2.0-flash-exp": {
+            "n_ctx": 128000,
+            "supports_tools": true,
+            "supports_multimodality": true,
+            "supports_agent": true,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-pro",
+                "gemini-2.0-exp-advanced"
+            ]
+        },
+        "grok-beta": {
+            "n_ctx": 128000,
+            "supports_tools": true,
+            "supports_agent": true,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "grok-2-1212",
+                "grok-2"
+            ]
+        },
+        "grok-vision-beta": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            }
+        },
+        "grok-2-vision-1212": {
+            "n_ctx": 32000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "grok-2-vision"
             ]
         },
         "qwen2.5/coder/0.5b/instruct": {
@@ -232,23 +293,6 @@ pub const KNOWN_MODELS: &str = r####"
         }
     },
     "code_chat_models": {
-        "gpt-3.5-turbo": {
-            "n_ctx": 16384,
-            "supports_tools": true,
-            "supports_scratchpads": {
-                "PASSTHROUGH": {}
-            },
-            "similar_models": [
-                "gpt-3.5-turbo-1106",
-                "gpt-3.5-turbo-0125",
-                "gpt-4",
-                "gpt-4-turbo",
-                "gpt-4-turbo-2024-04-09",
-                "openai/gpt-3.5-turbo",
-                "openai/gpt-4",
-                "openai/gpt-4-turbo"
-            ]
-        },
         "gpt-4o": {
             "n_ctx": 128000,
             "supports_tools": true,
@@ -318,18 +362,40 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             }
         },
+        "claude-3-5-haiku": {
+            "n_ctx": 16384,
+            "supports_tools": true,
+            "supports_multimodality": false,
+            "supports_agent": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "claude-3-5-haiku-20241022"
+            ]
+        },
+        "claude-3-5-haiku-20241022": {
+            "n_ctx": 16384,
+            "supports_tools": true,
+            "supports_multimodality": false,
+            "supports_agent": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
+        },
         "gemini-2.0-flash-exp": {
             "n_ctx": 128000,
             "supports_tools": true,
             "supports_multimodality": true,
-            "supports_agent": false,
+            "supports_agent": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
             },
             "similar_models": [
                 "gemini-1.5-flash",
                 "gemini-1.5-flash-8b",
-                "gemini-1.5-pro"
+                "gemini-1.5-pro",
+                "gemini-2.0-exp-advanced"
             ]
         },
         "llama3/8b/instruct": {
@@ -499,7 +565,14 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             }
         },
-
+        "grok-2": {
+            "n_ctx": 128000,
+            "supports_tools": true,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
+        },
         "qwen2.5/coder/0.5b/instruct": {
             "n_ctx": 8192,
             "supports_tools": false,
@@ -537,39 +610,36 @@ pub const KNOWN_MODELS: &str = r####"
     "tokenizer_rewrite_path": {
         "Refact/1.6B": "smallcloudai/Refact-1_6B-fim",
         "starcoder2/3b": "bigcode/starcoder2-3b",
+
         "text-embedding-3-small": "Xenova/text-embedding-ada-002",
-        "gpt-3.5-turbo":          "Xenova/gpt-3.5-turbo-16k",
-        "gpt-3.5-turbo-1106":     "Xenova/gpt-3.5-turbo-16k",
-        "gpt-3.5-turbo-0125":     "Xenova/gpt-3.5-turbo-16k",
-        "openai/gpt-3.5-turbo":   "Xenova/gpt-3.5-turbo-16k",
-        "gpt-4":                  "Xenova/gpt-4",
-        "gpt-4-turbo":            "Xenova/gpt-4",
-        "gpt-4-turbo-2024-04-09": "Xenova/gpt-4",
         "gpt-4o":                 "Xenova/gpt-4o",
         "gpt-4o-2024-05-13":      "Xenova/gpt-4o",
         "gpt-4o-2024-08-06":      "Xenova/gpt-4o",
         "gpt-4o-mini":            "Xenova/gpt-4o",
         "gpt-4o-mini-2024-07-18": "Xenova/gpt-4o",
         "o1-mini":                "Xenova/gpt-4o",
-        "openai/gpt-4":           "Xenova/gpt-4",
-        "openai/gpt-4-turbo":     "Xenova/gpt-4",
         "openai/gpt-4o":          "Xenova/gpt-4o",
-        "openai/gpt-4o-mini":     "Xenova/gpt-4o",
+
         "claude-3-5-sonnet":          "Xenova/claude-tokenizer",
+        "claude-3-5-haiku":           "Xenova/claude-tokenizer",
+        "claude-3-5-haiku-20241022":  "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20240620": "Xenova/claude-tokenizer",
         "claude-3-5-sonnet-20241022": "Xenova/claude-tokenizer",
+
         "groq-llama-3.1-8b":      "Xenova/Meta-Llama-3.1-Tokenizer",
         "cerebras-llama3.1-8b":     "Xenova/Meta-Llama-3.1-Tokenizer",
 
         "grok-beta": "Xenova/grok-1-tokenizer",
         "grok-vision-beta": "Xenova/grok-1-tokenizer",
+        "grok-2": "Xenova/grok-1-tokenizer",
         "grok-2-vision-1212": "Xenova/grok-1-tokenizer",
         "grok-2-1212": "Xenova/grok-1-tokenizer",
 
         "gemini-2.0-flash-exp": "Xenova/gemma2-tokenizer",
         "gemini-1.5-flash": "Xenova/gemma2-tokenizer",
         "gemini-1.5-flash-8b": "Xenova/gemma2-tokenizer",
-        "gemini-1.5-pro": "Xenova/gemma2-tokenizer"
+        "gemini-1.5-pro": "Xenova/gemma2-tokenizer",
+        "gemini-2.0-exp-advanced": "Xenova/gemma2-tokenizer"
     }
 }
 "####;

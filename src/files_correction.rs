@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+use std::path::{Component, PathBuf};
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
 
@@ -139,7 +139,7 @@ fn winpath_normalize(p: &str) -> PathBuf {
     }
 }
 
-pub fn to_pathbuf_normalize(path: &String) -> PathBuf {
+pub fn to_pathbuf_normalize(path: &str) -> PathBuf {
     if cfg!(target_os = "windows") {
         PathBuf::from(winpath_normalize(path))
     } else {
@@ -274,12 +274,33 @@ pub async fn get_project_dirs(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<PathBuf> 
 }
 
 pub async fn get_active_project_path(gcx: Arc<ARwLock<GlobalContext>>) -> Option<PathBuf> {
-    let active_file = gcx.read().await.documents_state.active_file_path.clone();
     let workspace_folders = get_project_dirs(gcx.clone()).await;
     if workspace_folders.is_empty() { return None; }
 
-    Some(detect_vcs_for_a_file_path(&active_file.unwrap_or_else(|| workspace_folders[0].clone()))
-        .await.map(|(path, _)| path).unwrap_or_else(|| workspace_folders[0].clone()))
+    let active_file = gcx.read().await.documents_state.active_file_path.clone();
+    tracing::info!("get_active_project_path(), active_file={:?} workspace_folders={:?}", active_file, workspace_folders);
+
+    let active_file_path = if let Some(active_file) = active_file {
+        active_file
+    } else {
+        tracing::info!("returning the first workspace folder: {:?}", workspace_folders[0]);
+        return Some(workspace_folders[0].clone());
+    };
+
+    if let Some((path, _)) = detect_vcs_for_a_file_path(&active_file_path).await {
+        tracing::info!("found VCS path: {:?}", path);
+        return Some(path);
+    }
+
+    // Without VCS, return one of workspace_folders that is a parent for active_file_path
+    for f in workspace_folders {
+        if active_file_path.starts_with(&f) {
+            tracing::info!("found that {:?} is the workspace folder", f);
+            return Some(f);
+        }
+    }
+
+    None
 }
 
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: &Vec<String>) -> Vec<String> {
@@ -338,7 +359,7 @@ fn absolute(path: &std::path::Path) -> std::io::Result<PathBuf> {
     Ok(normalized)
 }
 
-pub fn canonical_path(s: &String) -> PathBuf {
+pub fn canonical_path(s: &str) -> PathBuf {
     let mut res = match PathBuf::from(s).canonicalize() {
         Ok(x) => x,
         Err(_) => {

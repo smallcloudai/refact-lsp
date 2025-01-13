@@ -18,11 +18,14 @@ use crate::integrations::docker::docker_container_manager::docker_container_chec
 
 pub fn available_tools_by_chat_mode(current_tools: Vec<Value>, chat_mode: &ChatMode) -> Vec<Value> {
     match chat_mode {
-        ChatMode::EXPLORE | ChatMode::AGENT | ChatMode::NO_TOOLS => {
+        ChatMode::NO_TOOLS => {
+            vec![]
+        },
+        ChatMode::EXPLORE | ChatMode::AGENT => {
             current_tools
         },
         ChatMode::CONFIGURE => {
-            let blacklist = vec!["tree", "patch", "locate", "knowledge", "search"];
+            let blacklist = vec!["tree", "locate", "knowledge", "search"];
             current_tools
                 .into_iter()
                 .filter(|x| {

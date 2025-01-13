@@ -40,8 +40,9 @@ pub trait Tool: Send + Sync {
         args: &HashMap<String, Value>
     ) -> Result<(bool, Vec<ContextEnum>), String>;
 
-    fn match_against_confirm_deny(
+    async fn match_against_confirm_deny(
         &self,
+        _ccx: Arc<AMutex<AtCommandsContext>>,
         args: &HashMap<String, Value>
     ) -> Result<MatchConfirmDeny, String> {
         let command_to_match = self.command_to_match_against_confirm_deny(&args).map_err(|e| {
@@ -49,7 +50,8 @@ pub trait Tool: Send + Sync {
         })?;
 
         if !command_to_match.is_empty() {
-            if let Some(rules) = &self.confirmation_info() {
+            if let Some(rules) = &self.confirm_deny_rules() {
+                tracing::info!("confirmation: match {:?} against {:?}", command_to_match, rules);
                 let (is_denied, deny_rule) = command_should_be_denied(&command_to_match, &rules.deny);
                 if is_denied {
                     return Ok(MatchConfirmDeny {
@@ -66,6 +68,8 @@ pub trait Tool: Send + Sync {
                         rule: confirmation_rule.clone(),
                     });
                 }
+            } else {
+                tracing::error!("No confirmation info available for {:?}", command_to_match);
             }
         }
         Ok(MatchConfirmDeny {
@@ -82,10 +86,14 @@ pub trait Tool: Send + Sync {
         Ok("".to_string())
     }
 
-    fn confirmation_info(
+    fn confirm_deny_rules(
         &self,
     ) -> Option<IntegrationConfirmation> {
         None
+    }
+
+    fn has_config_path(&self) -> Option<String> {
+        return None;
     }
 
     fn tool_depends_on(&self) -> Vec<String> { vec![] }   // "ast", "vecdb"
@@ -134,7 +142,6 @@ pub async fn tools_merged_and_filtered(
 
     let integrations = crate::integrations::running_integrations::load_integration_tools(
         gcx.clone(),
-        "".to_string(),
         allow_experimental,
     ).await;
     tools_all.extend(integrations);
@@ -255,18 +262,16 @@ tools:
   - name: "patch"
     agentic: true
     description: |
-      Collect context first, then write the necessary changes using the 📍-notation before code blocks, then call this function to apply the changes.
-      To make this call correctly, you only need the tickets.
-      If you wrote changes for multiple files, call this tool in parallel for each file.
-      If you have several attempts to change a single thing, for example following a correction from the user, pass only the ticket for the latest one.
-      Multiple tickets is allowed only for PARTIAL_EDIT, otherwise only one ticket must be provided.
+      The function to apply changes from the existing 📍-notation edit blocks.
+      Do not call the function unless you have a generated 📍-notation edit blocks, you need an existing 📍-notation edit block ticket number!
+      Multiple tickets is allowed only for 📍PARTIAL_EDIT, otherwise only one ticket must be provided.
     parameters:
       - name: "path"
         type: "string"
         description: "Path to the file to change."
       - name: "tickets"
         type: "string"
-        description: "Use 3-digit tickets comma separated to refer to the changes within ONE file. No need to copy anything else. Additionaly, you can put DELETE here to delete the file."
+        description: "Use 3-digit tickets comma separated to refer to the changes within a single file"
     parameters_required:
       - "tickets"
       - "path"
@@ -334,7 +339,6 @@ tools:
         type: "string"
         description: "Examples: docker images"
     parameters_required:
-      - "project_dir"
       - "command"
 
   - name: "knowledge"

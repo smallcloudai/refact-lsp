@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::RwLock as ARwLock;
 use std::path::PathBuf;
 use url::Url;
@@ -48,7 +48,7 @@ impl FileChangeStatus {
 pub fn git_ls_files(repository_path: &PathBuf) -> Option<Vec<PathBuf>> {
     let repository = Repository::open(repository_path)
         .map_err(|e| error!("Failed to open repository: {}", e)).ok()?;
-    
+
     let mut status_options = StatusOptions::new();
     status_options
         .include_untracked(true)
@@ -97,7 +97,7 @@ pub fn git_ls_files(repository_path: &PathBuf) -> Option<Vec<PathBuf>> {
 pub fn stage_changes(repository: &Repository, file_changes: &Vec<FileChange>) -> Result<(), String> {
     let mut index = repository.index()
         .map_err(|e| format!("Failed to get index: {}", e))?;
-    
+
     for file_change in file_changes {
         match file_change.status {
             FileChangeStatus::ADDED | FileChangeStatus::MODIFIED => {
@@ -110,10 +110,10 @@ pub fn stage_changes(repository: &Repository, file_changes: &Vec<FileChange>) ->
             },
         }
     }
-    
+
     index.write()
         .map_err(|e| format!("Failed to write index: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -124,24 +124,24 @@ pub fn get_file_changes(repository: &Repository, include_unstaged: bool) -> Resu
         .map_err(|e| format!("Failed to get statuses: {}", e))?;
     for entry in statuses.iter() {
         let status = entry.status();
-        if status.contains(Status::INDEX_NEW) { 
-            result.push(FileChange {status: FileChangeStatus::ADDED, path: entry.path().unwrap().to_string()}) 
+        if status.contains(Status::INDEX_NEW) {
+            result.push(FileChange {status: FileChangeStatus::ADDED, path: entry.path().unwrap().to_string()})
         }
-        if status.contains(Status::INDEX_MODIFIED) { 
-            result.push(FileChange {status: FileChangeStatus::MODIFIED, path: entry.path().unwrap().to_string()}) 
+        if status.contains(Status::INDEX_MODIFIED) {
+            result.push(FileChange {status: FileChangeStatus::MODIFIED, path: entry.path().unwrap().to_string()})
         }
-        if status.contains(Status::INDEX_DELETED) { 
-            result.push(FileChange {status: FileChangeStatus::DELETED, path: entry.path().unwrap().to_string()}) 
+        if status.contains(Status::INDEX_DELETED) {
+            result.push(FileChange {status: FileChangeStatus::DELETED, path: entry.path().unwrap().to_string()})
         }
         if include_unstaged {
-            if status.contains(Status::WT_NEW) { 
-                result.push(FileChange {status: FileChangeStatus::ADDED, path: entry.path().unwrap().to_string()}) 
+            if status.contains(Status::WT_NEW) {
+                result.push(FileChange {status: FileChangeStatus::ADDED, path: entry.path().unwrap().to_string()})
             }
-            if status.contains(Status::WT_MODIFIED) { 
-                result.push(FileChange {status: FileChangeStatus::MODIFIED, path: entry.path().unwrap().to_string()}) 
+            if status.contains(Status::WT_MODIFIED) {
+                result.push(FileChange {status: FileChangeStatus::MODIFIED, path: entry.path().unwrap().to_string()})
             }
-            if status.contains(Status::WT_DELETED) { 
-                result.push(FileChange {status: FileChangeStatus::DELETED, path: entry.path().unwrap().to_string()}) 
+            if status.contains(Status::WT_DELETED) {
+                result.push(FileChange {status: FileChangeStatus::DELETED, path: entry.path().unwrap().to_string()})
             }
         }
     }
@@ -159,7 +159,7 @@ pub fn get_configured_author_email_and_name(repository: &Repository) -> Result<(
 }
 
 pub fn commit(repository: &Repository, branch: &Branch, message: &str, author_name: &str, author_email: &str) -> Result<Oid, String> {
-    
+
     let mut index = repository.index()
         .map_err(|e| format!("Failed to get index: {}", e))?;
     let tree_id = index.write_tree()
@@ -231,23 +231,31 @@ pub fn git_diff(repository: &Repository, file_changes: &Vec<FileChange>, max_siz
     Ok(diff_str)
 }
 
-pub async fn get_commit_information_from_current_changes(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<CommitInfo> {
+pub async fn get_commit_information_from_current_changes(gcx: Arc<ARwLock<GlobalContext>>) -> Vec<CommitInfo>
+{
     let mut commits = Vec::new();
 
-    for project_path in crate::files_correction::get_project_dirs(gcx.clone()).await {
-        let repository = match git2::Repository::open(&project_path) {
+    let workspace_vcs_roots: Arc<StdMutex<Vec<PathBuf>>> = {
+        let cx_locked = gcx.write().await;
+        cx_locked.documents_state.workspace_vcs_roots.clone()
+    };
+
+    let vcs_roots_locked = workspace_vcs_roots.lock().unwrap();
+    tracing::info!("get_commit_information_from_current_changes() vcs_roots={:?}", vcs_roots_locked);
+    for project_path in vcs_roots_locked.iter() {
+        let repository = match git2::Repository::open(project_path) {
             Ok(repo) => repo,
-            Err(e) => { error!("{}", e); continue; }
+            Err(e) => { tracing::warn!("{}", e); continue; }
         };
 
         let file_changes = match crate::git::get_file_changes(&repository, true) {
             Ok(changes) if changes.is_empty() => { continue; }
             Ok(changes) => changes,
-            Err(e) => { error!("{}", e); continue; }
+            Err(e) => { tracing::warn!("{}", e); continue; }
         };
 
         commits.push(CommitInfo {
-            project_path: Url::from_file_path(&project_path).ok().unwrap_or_else(|| Url::parse("file:///").unwrap()),
+            project_path: Url::from_file_path(project_path).ok().unwrap_or_else(|| Url::parse("file:///").unwrap()),
             commit_message: "".to_string(),
             file_changes,
         });

@@ -20,17 +20,28 @@ use crate::yaml_configs::customization_loader::load_customization;
 use crate::caps::get_model_record;
 use crate::http::routers::v1::at_tools::{ToolExecuteResponse, ToolsExecutePost};
 
+
 pub async fn unwrap_subchat_params(ccx: Arc<AMutex<AtCommandsContext>>, tool_name: &str) -> Result<SubchatParameters, String> {
     let (gcx, params_mb) = {
         let ccx_locked = ccx.lock().await;
         let gcx = ccx_locked.global_context.clone();
-        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();
+        let params = ccx_locked.subchat_tool_parameters.get(tool_name).cloned();  // comes from the request, the request has specified parameters
         (gcx, params)
     };
+
     let mut params = match params_mb {
         Some(params) => params,
         None => {
-            let tconfig = load_customization(gcx.clone(), true).await?;
+            let mut error_log = Vec::new();
+            let tconfig = load_customization(gcx.clone(), true, &mut error_log).await;
+            for e in error_log.iter() {
+                tracing::error!(
+                    "{}:{} {:?}",
+                    crate::nicer_logs::last_n_chars(&e.integr_config_path, 30),
+                    e.error_line,
+                    e.error_msg,
+                );
+            }
             tconfig.subchat_tool_parameters.get(tool_name).cloned()
                 .ok_or_else(|| format!("subchat params for tool {} not found (checked in Post and in Customization)", tool_name))?
         }
@@ -55,6 +66,7 @@ pub async fn run_tools_remotely(
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
     style: &Option<String>,
+    tools_confirmation: bool,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (n_ctx, subchat_tool_parameters, postprocess_parameters, gcx, chat_id) = {
         let ccx_locked = ccx.lock().await;
@@ -76,6 +88,7 @@ pub async fn run_tools_remotely(
         model_name: model_name.to_string(),
         chat_id: chat_id.clone(),
         style: style.clone(),
+        tools_confirmation: tools_confirmation.clone(),
     };
 
     let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
@@ -102,9 +115,10 @@ pub async fn run_tools_locally(
     original_messages: &Vec<ChatMessage>,
     stream_back_to_user: &mut HasRagResults,
     style: &Option<String>,
+    tools_confirmation: bool,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let (new_messages, tools_runned) = run_tools( // todo: fix typo "runned"
-        ccx, tools, tokenizer, maxgen, original_messages, style
+        ccx, tools, tokenizer, maxgen, original_messages, style, tools_confirmation
     ).await?;
 
     let mut all_messages = original_messages.to_vec();
@@ -123,6 +137,7 @@ pub async fn run_tools(
     maxgen: usize,
     original_messages: &Vec<ChatMessage>,
     style: &Option<String>,
+    tools_confirmation: bool,
 ) -> Result<(Vec<ChatMessage>, bool), String> {
     let n_ctx = ccx.lock().await.n_ctx;
     let reserve_for_context = max_tokens_for_rag_chat(n_ctx, maxgen);
@@ -172,10 +187,10 @@ pub async fn run_tools(
             }
         };
         info!("tool use {}({:?})", &t_call.function.name, args);
-        
+
         {
             let cmd_lock = cmd.lock().await;
-            match cmd_lock.match_against_confirm_deny(&args) {
+            match cmd_lock.match_against_confirm_deny(ccx.clone(), &args).await {
                 Ok(res) => {
                     match res.result {
                         MatchConfirmDenyResult::DENY => {
@@ -183,6 +198,13 @@ pub async fn run_tools(
                                 .command_to_match_against_confirm_deny(&args)
                                 .unwrap_or("<error_command>".to_string());
                             generated_tool.push(tool_answer(format!("tool use: command '{command_to_match}' is denied"), t_call.id.to_string()));
+                            continue;
+                        }
+                        MatchConfirmDenyResult::CONFIRMATION if !tools_confirmation => {
+                            let command_to_match = cmd_lock
+                                .command_to_match_against_confirm_deny(&args)
+                                .unwrap_or("<error_command>".to_string());
+                            generated_tool.push(tool_answer(format!("tool use: command '{command_to_match}' has been denied by the user"), t_call.id.to_string()));
                             continue;
                         }
                         _ => {}
@@ -194,7 +216,7 @@ pub async fn run_tools(
                 }
             }
         };
-        
+
         let (corrections, tool_execute_results) = {
             let mut cmd_lock = cmd.lock().await;
             match cmd_lock.tool_execute(ccx.clone(), &t_call.id.to_string(), &args).await {
