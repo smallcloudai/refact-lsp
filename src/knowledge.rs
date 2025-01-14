@@ -351,15 +351,32 @@ impl MemoriesDatabase {
         Ok(table_contents)
     }
 
-    pub async fn permdb_select_all(&self, filter: Option<&str>) -> Result<Vec<MemoRecord>, String> {
+    pub async fn permdb_select_all(&self) -> Result<Vec<MemoRecord>, String> {
         let conn = self.conn.lock();
-        let query = match filter {
-            Some(f) => format!("SELECT {} FROM memories WHERE {f}", fields_ordered()),
-            None => format!("SELECT {} FROM memories", fields_ordered()),
-        };
+        let query = format!("SELECT {} FROM memories", fields_ordered());
 
         let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], map_row_to_memo_record).map_err(|e| e.to_string())?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub async fn permdb_select_like(&self, query: &String) -> Result<Vec<MemoRecord>, String> {
+        let conn = self.conn.lock();
+
+        let query_str = format!(
+            "SELECT {} FROM memories WHERE 
+            m_type LIKE ? COLLATE NOCASE OR 
+            m_goal LIKE ? COLLATE NOCASE OR 
+            m_project LIKE ? COLLATE NOCASE OR 
+            m_payload LIKE ? COLLATE NOCASE", 
+            fields_ordered()
+        );
+
+        let pattern = format!("%{}%", query);
+        let mut stmt = conn.prepare(&query_str).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![pattern, pattern, pattern, pattern], map_row_to_memo_record)
+            .map_err(|e| e.to_string())?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }

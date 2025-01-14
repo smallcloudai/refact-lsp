@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use async_stream::stream;
 use tokio::sync::RwLock as ARwLock;
@@ -168,7 +169,9 @@ pub async fn handle_mem_query(
 #[derive(Deserialize, Default)]
 pub struct MemSubscriptionPost {
     #[serde(default)]
-    pub memid: Option<String>,
+    pub quick_search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 pub async fn handle_mem_sub(
@@ -192,15 +195,31 @@ pub async fn handle_mem_sub(
             })?
     );
 
-    let preexisting_memories = crate::vecdb::vdb_highlev::memories_select_all(vec_db.clone()).await.
-        map_err(|e| {
-            ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
-        })?;
+    let (preexisting_memories, maybe_memids_to_keep) = if let Some(quick_search_query) = post.quick_search {
+        let mut preexisting_memories = crate::vecdb::vdb_highlev::memories_select_like(vec_db.clone(), &quick_search_query).await.
+            map_err(|e| {
+                ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+            })?;
+        if let Some(limit) = post.limit {
+            preexisting_memories = preexisting_memories.into_iter().take(limit).collect();
+        }
+        let memids_to_keep = preexisting_memories.iter().map(|x| x.memid.clone()).collect::<HashSet<String>>();
+        (preexisting_memories, Some(memids_to_keep))
+    } else {
+        let mut preexisting_memories = crate::vecdb::vdb_highlev::memories_select_all(vec_db.clone()).await.
+            map_err(|e| {
+                ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+            })?;
+        if let Some(limit) = post.limit {
+            preexisting_memories = preexisting_memories.into_iter().take(limit).collect();
+        }
+        (preexisting_memories, None)
+    };
 
     let sse = stream! {
         for memory in preexisting_memories.iter() {
-            if post.memid.is_some() {
-                if post.memid != Some(memory.memid.clone()) {
+            if let Some(memids_to_keep) = &maybe_memids_to_keep {
+                if !memids_to_keep.contains(&memory.memid) {
                     continue;
                 }
             }
@@ -223,12 +242,11 @@ pub async fn handle_mem_sub(
             match crate::vecdb::vdb_highlev::memdb_subscription_poll(vec_db.clone(), Some(last_pubevent_id)).await {
                 Ok(new_events) => {
                     for event in new_events.iter() {
-                        if post.memid.is_some() {
-                            if post.memid != Some(event.pubevent_memid.clone()) {
+                        if let Some(memids_to_keep) = &maybe_memids_to_keep {
+                            if !memids_to_keep.contains(&event.pubevent_memid) {
                                 continue;
                             }
                         }
-                        
                         yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&event).unwrap()));
                     }
                     if !new_events.is_empty() {

@@ -57,7 +57,7 @@ async def memdb_sub(session):
     try:
         while True:
             try:
-                async with session.get(f"{BASE_URL}/v1/mem-sub") as response:
+                async with session.post(f"{BASE_URL}/v1/mem-sub") as response:
                     if response.status != 200:
                         print(termcolor.colored(f"Failed to connect to SSE. Status code: {response.status}", "red"))
                         await sleep(1)

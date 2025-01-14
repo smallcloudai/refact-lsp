@@ -392,7 +392,22 @@ pub async fn memories_select_all(
     };
 
     let memdb_locked = memdb.lock().await;
-    let results = memdb_locked.permdb_select_all(None).await?;
+    let results = memdb_locked.permdb_select_all().await?;
+    Ok(results)
+}
+
+pub async fn memories_select_like(
+    vec_db: Arc<AMutex<Option<VecDb>>>,
+    query: &String
+) -> Result<Vec<MemoRecord>, String> {
+    let memdb = {
+        let vec_db_guard = vec_db.lock().await;
+        let vec_db = vec_db_guard.as_ref().ok_or("VecDb is not initialized")?;
+        vec_db.memdb.clone()
+    };
+
+    let memdb_locked = memdb.lock().await;
+    let results = memdb_locked.permdb_select_like(query).await?;
     Ok(results)
 }
 
