@@ -124,11 +124,13 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3/8b/instruct/vllm",
                 "llama3.1/8b/instruct/vllm",
                 "llama3.2/1b/instruct/vllm",
+                "llama3.3/70b/instruct/vllm",
                 "qwen2.5/coder/32b/instruct/vllm",
                 "qwen2.5/coder/14b/instruct/vllm",
                 "qwen2.5/coder/1.5b/instruct/vllm",
                 "qwen2.5/coder/3b/instruct/vllm",
-                "qwen2.5/coder/7b/instruct/vllm"
+                "qwen2.5/coder/7b/instruct/vllm",
+                "deepseek-coder/6.7b/instruct-finetune/vllm"
             ]
         },
         "gpt-4o": {
@@ -476,11 +478,13 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3/8b/instruct/vllm",
                 "llama3.1/8b/instruct/vllm",
                 "llama3.2/1b/instruct/vllm",
+                "llama3.3/70b/instruct/vllm",
                 "qwen2.5/coder/32b/instruct/vllm",
                 "qwen2.5/coder/14b/instruct/vllm",
                 "qwen2.5/coder/1.5b/instruct/vllm",
                 "qwen2.5/coder/3b/instruct/vllm",
-                "qwen2.5/coder/7b/instruct/vllm"
+                "qwen2.5/coder/7b/instruct/vllm",
+                "deepseek-coder/6.7b/instruct-finetune/vllm"
             ]
         },
         "wizardlm/7b": {
@@ -561,8 +565,7 @@ pub const KNOWN_MODELS: &str = r####"
             },
             "similar_models": [
                 "deepseek-coder/33b/instruct",
-                "deepseek-coder/6.7b/instruct-finetune",
-                "deepseek-coder/6.7b/instruct-finetune/vllm"
+                "deepseek-coder/6.7b/instruct-finetune"
             ]
         },
         "groq-llama-3.1-8b": {
