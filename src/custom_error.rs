@@ -62,11 +62,10 @@ impl ScratchError {
     pub fn to_response(&self) -> Response<Body> {
         let body = json!({"detail": self.message}).to_string();
         error!("client will see {}", body);
-        let response = Response::builder()
+        Response::builder()
             .status(self.status_code)
             .header("Content-Type", "application/json")
             .body(Body::from(body))
-            .unwrap();
-        response
+            .unwrap()
     }
 }
