@@ -2,6 +2,7 @@ use std::fs;
 #[cfg(not(windows))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use crate::privacy::FilePrivacySettings;
 
 const LARGE_FILE_SIZE_THRESHOLD: u64 = 180*1024; // 180k files (180k is ~0.2% of all files on our dataset)
 const SMALL_FILE_SIZE_THRESHOLD: u64 = 5;        // 5 Bytes
@@ -14,14 +15,6 @@ pub const SOURCE_FILE_EXTENSIONS: &[&str] = &[
     "mdf", "cfg", "conf", "ini", "toml", "dockerfile", "ipynb", "rmd", "xml", "kt",
     "xaml", "unity", "gd", "uproject", "uasset", "asm", "s", "tex", "makefile", "mk",
     "cmake", "gradle", "liquid"
-];
-
-pub(crate) const BLACKLISTED_DIRS: &[&str] = &[
-    "target", "node_modules", "vendor", "build", "dist",
-    "bin", "pkg", "lib", "lib64", "obj",
-    "out", "venv", "env", "tmp", "temp", "logs",
-    "coverage", "backup", "__pycache__",
-    "_trajectories", ".gradle"
 ];
 
 pub fn is_valid_file(path: &PathBuf, allow_hidden_folders: bool, ignore_size_thresholds: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -58,12 +51,28 @@ pub fn is_valid_file(path: &PathBuf, allow_hidden_folders: bool, ignore_size_thr
     Ok(())
 }
 
-pub fn is_this_inside_blacklisted_dir(path: &PathBuf) -> bool {
+pub fn is_this_inside_blacklisted_dir(path: &PathBuf, privacy_settings: &FilePrivacySettings) -> bool {
     let mut path = path.clone();
     while path.parent().is_some() {
         path = path.parent().unwrap().to_path_buf();
-        if let Some(file_name) = path.file_name() {
-            if BLACKLISTED_DIRS.contains(&file_name.to_str().unwrap_or_default()) {
+        if is_this_blacklisted_file(&path, &privacy_settings) {
+            return true;
+        }
+    }
+    false
+}
+
+
+pub fn is_this_blacklisted_file(path: &PathBuf, privacy_settings: &FilePrivacySettings) -> bool {
+    if let Some(file_name) = path.file_name() {
+        let filename_str = file_name.to_str().unwrap_or_default().to_string();
+        if privacy_settings.blacklisted.contains(&filename_str)
+            && !privacy_settings.whitelisted.contains(&filename_str) {
+            return true;
+        }
+        // TODO: this is not obvious code
+        if let Some(file_name_str) = file_name.to_str() {
+            if file_name_str.starts_with(".") {
                 return true;
             }
             if let Some(file_name_str) = file_name.to_str() {

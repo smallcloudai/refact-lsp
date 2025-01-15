@@ -1,12 +1,14 @@
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::path::Path;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tokio::sync::RwLock as ARwLock;
 use tokio::time::Duration;
 use tokio::fs;
 use tracing::error;
 use glob::Pattern;
 use std::time::SystemTime;
+use serde::de::{self, MapAccess, Visitor};
+use std::fmt;
 
 use crate::global_context::GlobalContext;
 
@@ -25,22 +27,101 @@ pub struct PrivacySettings {
     pub loaded_ts: u64,
 }
 
-#[allow(non_snake_case)]
-#[derive(Debug, Deserialize)]
-pub struct FilePrivacySettings {
-    pub only_send_to_servers_I_control: Vec<String>,
-    pub blocked: Vec<String>,
-}
-
 impl Default for PrivacySettings {
     fn default() -> Self {
         PrivacySettings {
-            privacy_rules: FilePrivacySettings {
-                blocked: vec!["*".to_string()],
-                only_send_to_servers_I_control: vec![],
-            },
+            privacy_rules: FilePrivacySettings::default(),
             loaded_ts: 0,
         }
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug)]
+pub struct FilePrivacySettings {
+    pub only_send_to_servers_I_control: Vec<String>,
+    pub blocked: Vec<String>,
+    pub blacklisted: Vec<String>,
+    pub whitelisted: Vec<String>,
+}
+
+const DEFAULT_BLACKLISTED_DIRS: &[&str] = &[
+    "target", "node_modules", "vendor", "build", "dist",
+    "bin", "pkg", "lib", "lib64", "obj",
+    "out", "venv", "env", "tmp", "temp", "logs",
+    "coverage", "backup", "__pycache__",
+    "_trajectories", ".gradle",
+    ".idea", ".git", ".hg", ".svn", ".bzr", ".DS_Store",
+];
+
+impl Default for FilePrivacySettings {
+    fn default() -> Self {
+        FilePrivacySettings {
+            blocked: vec!["*".to_string()],
+            only_send_to_servers_I_control: vec![],
+            blacklisted: DEFAULT_BLACKLISTED_DIRS.iter().map(|s| s.to_string()).collect::<Vec<String>>(),
+            whitelisted: vec![],
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FilePrivacySettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct FilePrivacySettingsVisitor;
+
+        impl<'de> Visitor<'de> for FilePrivacySettingsVisitor {
+            type Value = FilePrivacySettings;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct FilePrivacySettings")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let default_privacy_settings = FilePrivacySettings::default();
+                #[allow(non_snake_case)]
+                let mut only_send_to_servers_I_control = default_privacy_settings.only_send_to_servers_I_control.clone();
+                let mut blocked = default_privacy_settings.blocked.clone();
+                let mut blacklisted = default_privacy_settings.blacklisted.clone();
+                let mut whitelisted = default_privacy_settings.whitelisted.clone();
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "only_send_to_servers_I_control" => {
+                            only_send_to_servers_I_control = map.next_value()?;
+                        }
+                        "blocked" => {
+                            blocked = map.next_value()?;
+                        }
+                        "blacklisted" => {
+                            blacklisted = map.next_value()?;
+                        }
+                        "whitelisted" => {
+                            whitelisted = map.next_value()?;
+                        }
+                        _ => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+
+                let r = FilePrivacySettings {
+                    only_send_to_servers_I_control,
+                    blocked,
+                    blacklisted,
+                    whitelisted,
+                };
+
+                Ok(r)
+            }
+        }
+
+        deserializer.deserialize_map(FilePrivacySettingsVisitor)
     }
 }
 
@@ -89,6 +170,26 @@ pub async fn load_privacy_if_needed(gcx: Arc<ARwLock<GlobalContext>>) -> Arc<Pri
     }
 }
 
+pub async fn load_privacy_rules_if_needed(gcx: Arc<ARwLock<GlobalContext>>) -> Arc<FilePrivacySettings>
+{
+    let privacy_settings = load_privacy_if_needed(gcx.clone()).await;
+    Arc::new(FilePrivacySettings{
+        only_send_to_servers_I_control: privacy_settings.privacy_rules.only_send_to_servers_I_control.clone(),
+        blocked: privacy_settings.privacy_rules.blocked.clone(),
+        blacklisted: privacy_settings.privacy_rules.blacklisted.clone(),
+        whitelisted: privacy_settings.privacy_rules.whitelisted.clone(),
+    })
+}
+
+pub async fn load_privacy_rules_if_needed_weak(gcx_weak: Weak<ARwLock<GlobalContext>>) -> Arc<FilePrivacySettings>
+{
+    let mut privacy_rules = Arc::new(FilePrivacySettings::default());
+    if let Some(gcx) = gcx_weak.clone().upgrade() {
+        privacy_rules = load_privacy_rules_if_needed(gcx).await;
+    }
+    privacy_rules
+}
+
 fn any_glob_matches_path(globs: &Vec<String>, path: &Path) -> bool {
     globs.iter().any(|glob| {
         let pattern = Pattern::new(glob).unwrap();
@@ -129,6 +230,8 @@ mod tests {
             privacy_rules: FilePrivacySettings {
                 only_send_to_servers_I_control: vec!["*.pem".to_string(), "*/semi_private_dir/*.md".to_string()],
                 blocked: vec!["*.pem".to_string(), "*/secret_dir/*".to_string(), "secret_passwords.txt".to_string()],
+                blacklisted: vec![],
+                whitelisted: vec![],
             },
             loaded_ts: 0,
         });
@@ -168,6 +271,8 @@ mod tests {
             privacy_rules: FilePrivacySettings {
                 only_send_to_servers_I_control: vec!["*.cat.txt".to_string(), "*.md".to_string(), "*/.venv/*".to_string(), "**/tests_dir/**/*".to_string()],
                 blocked: vec!["*/make.png".to_string(), "*.txt".to_string()],
+                blacklisted: vec![],
+                whitelisted: vec![],
             },
             loaded_ts: 0,
         });
@@ -202,6 +307,8 @@ mod tests {
             }
         }
     }
+
+    // TODO: test black/white lists
 }
 
 

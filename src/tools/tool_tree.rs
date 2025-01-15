@@ -12,7 +12,7 @@ use crate::tools::tools_description::Tool;
 use crate::call_validation::{ChatMessage, ChatContent, ContextEnum};
 use crate::files_correction::{correct_to_nearest_dir_path, correct_to_nearest_filename, get_project_dirs, paths_from_anywhere};
 use crate::files_in_workspace::ls_files;
-
+use crate::privacy::load_privacy_rules_if_needed;
 
 pub struct ToolTree;
 
@@ -64,7 +64,8 @@ impl Tool for ToolTree {
                     return Err(format!("Cannot execute tree(), '{path}' is not within the project directories."));
                 }
 
-                let paths_in_dir = ls_files(&true_path, true).unwrap_or(vec![]);
+                let privacy_rules = load_privacy_rules_if_needed(gcx.clone()).await;
+                let paths_in_dir = ls_files(&true_path, privacy_rules, true).unwrap_or(vec![]);
                 construct_tree_out_of_flat_list_of_paths(&paths_in_dir)
             },
             None => construct_tree_out_of_flat_list_of_paths(&paths_from_anywhere)

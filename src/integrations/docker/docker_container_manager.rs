@@ -20,6 +20,7 @@ use crate::integrations::docker::docker_ssh_tunnel_utils::{ssh_tunnel_open, SshT
 use crate::integrations::docker::integr_docker::ToolDocker;
 use crate::integrations::docker::docker_and_isolation_load;
 use crate::integrations::docker::integr_isolation::SettingsIsolation;
+use crate::privacy::load_privacy_rules_if_needed;
 
 pub const DEFAULT_CONTAINER_LSP_PATH: &str = "/usr/local/bin/refact-lsp";
 
@@ -354,8 +355,10 @@ async fn docker_container_sync_workspace(
     tar_builder.follow_symlinks(true);
     tar_builder.mode(async_tar::HeaderMode::Complete);
 
+    let privacy_rules = load_privacy_rules_if_needed(gcx.clone()).await;
     let (all_files, _vcs_folders) = crate::files_in_workspace::retrieve_files_in_workspace_folders(
         vec![workspace_folder.clone()],
+        privacy_rules,
         false,
         false,
     ).await;

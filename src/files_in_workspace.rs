@@ -16,8 +16,9 @@ use tracing::info;
 use crate::git::git_ls_files;
 use crate::global_context::GlobalContext;
 use crate::telemetry;
-use crate::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS, SOURCE_FILE_EXTENSIONS};
+use crate::file_filter::{is_this_inside_blacklisted_dir, is_this_blacklisted_file, is_valid_file, SOURCE_FILE_EXTENSIONS};
 use crate::ast::ast_indexer_thread::ast_indexer_enqueue_files;
+use crate::privacy::{FilePrivacySettings, load_privacy_rules_if_needed, load_privacy_rules_if_needed_weak};
 use crate::privacy::{check_file_privacy, load_privacy_if_needed, PrivacySettings, FilePrivacyLevel};
 
 
@@ -241,7 +242,11 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
     }
 }
 
-pub fn ls_files(path: &PathBuf, recursive: bool) -> Result<Vec<PathBuf>, String> {
+pub fn ls_files(
+    path: &PathBuf,
+    privacy_rules: Arc<FilePrivacySettings>,
+    recursive: bool
+) -> Result<Vec<PathBuf>, String> {
     if !path.is_dir() {
         return Err(format!("path '{}' is not a directory", path.display()));
     }
@@ -265,10 +270,7 @@ pub fn ls_files(path: &PathBuf, recursive: bool) -> Result<Vec<PathBuf>, String>
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let path = entry.path();
-            if recursive && path.is_dir() && !(
-                path.file_name().unwrap_or_default().to_str().unwrap_or_default().starts_with(".") ||
-                BLACKLISTED_DIRS.contains(&path.file_name().unwrap_or_default().to_str().unwrap_or_default())
-            ) {
+            if recursive && path.is_dir() && !is_this_blacklisted_file(&path, &privacy_rules) {
                 dirs_to_visit.push(path);
             } else if path.is_file() {
                 paths.push(path);
@@ -332,6 +334,7 @@ async fn _ls_files_under_version_control_recursive(
     all_files: &mut Vec<PathBuf>,
     vcs_folders: &mut Vec<PathBuf>,
     path: PathBuf,
+    privacy_rules: Arc<FilePrivacySettings>,
     allow_files_in_hidden_folders: bool,
     ignore_size_thresholds: bool
 ) {
@@ -354,7 +357,7 @@ async fn _ls_files_under_version_control_recursive(
             }
         }
         if local_path.is_dir() {
-            if BLACKLISTED_DIRS.contains(&local_path.file_name().unwrap().to_str().unwrap()) {
+            if is_this_blacklisted_file(&local_path, &privacy_rules) {
                 blacklisted_dirs_cnt += 1;
                 continue;
             }
@@ -396,6 +399,7 @@ async fn _ls_files_under_version_control_recursive(
 
 pub async fn retrieve_files_in_workspace_folders(
     proj_folders: Vec<PathBuf>,
+    privacy_rules: Arc<FilePrivacySettings>,
     allow_files_in_hidden_folders: bool,   // true when syncing to remote container
     ignore_size_thresholds: bool,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
@@ -406,6 +410,7 @@ pub async fn retrieve_files_in_workspace_folders(
             &mut all_files,
             &mut vcs_folders,
             proj_folder.clone(),
+            privacy_rules.clone(),
             allow_files_in_hidden_folders,
             ignore_size_thresholds
         ).await;
@@ -477,8 +482,10 @@ pub async fn enqueue_all_files_from_workspace_folders(
     let folders: Vec<PathBuf> = gcx.read().await.documents_state.workspace_folders.lock().unwrap().clone();
 
     info!("enqueue_all_files_from_workspace_folders started files search with {} folders", folders.len());
+    let privacy_rules = load_privacy_rules_if_needed(gcx.clone()).await;
     let (all_files, vcs_folders) = retrieve_files_in_workspace_folders(
         folders,
+        privacy_rules,
         false,
         false
     ).await;
@@ -664,9 +671,10 @@ pub async fn remove_folder(gcx: Arc<ARwLock<GlobalContext>>, path: &PathBuf)
 pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalContext>>)
 {
     async fn on_create_modify(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
+        let privacy_rules = load_privacy_rules_if_needed_weak(gcx_weak.clone()).await;
         let mut docs = vec![];
         for p in &event.paths {
-            if is_this_inside_blacklisted_dir(&p) {  // important to filter BEFORE canonical_path
+            if is_this_inside_blacklisted_dir(&p, &privacy_rules) {  // important to filter BEFORE canonical_path
                 continue;
             }
 
@@ -694,14 +702,15 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
     }
 
     async fn on_remove(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
+        let privacy_rules = load_privacy_rules_if_needed_weak(gcx_weak.clone()).await;
         let mut never_mind = true;
         for p in &event.paths {
-            never_mind &= is_this_inside_blacklisted_dir(&p);
+            never_mind &= is_this_inside_blacklisted_dir(&p, &privacy_rules);
         }
         let mut docs = vec![];
         if !never_mind {
             for p in &event.paths {
-                if is_this_inside_blacklisted_dir(&p) {
+                if is_this_inside_blacklisted_dir(&p, &privacy_rules) {
                     continue;
                 }
                 let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());

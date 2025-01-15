@@ -76,14 +76,18 @@ where I: IntoIterator<Item = String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use crate::files_in_workspace::retrieve_files_in_workspace_folders;
+    use crate::privacy::FilePrivacySettings;
 
     async fn get_candidates_from_workspace_files() -> Vec<String> {
         let proj_folders = vec![PathBuf::from(".").canonicalize().unwrap()];
         let proj_folder = &proj_folders[0];
 
+        let privacy_rules = Arc::new(FilePrivacySettings::default());
         let (workspace_files, _vcs_folders) = retrieve_files_in_workspace_folders(
             proj_folders.clone(),
+            privacy_rules,
             false,
             false
         ).await;
