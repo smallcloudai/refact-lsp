@@ -113,3 +113,5 @@ process-wrap = { version = "8.0.2", features = ["tokio1"] }
 rust-embed = "8.5.0"
 serde_urlencoded = "0.7.1"
 libsqlite3-sys = "0.27.0"
+sqlite-vec = "0.1.6"
+zerocopy = "0.7.35"
