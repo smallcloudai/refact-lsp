@@ -123,8 +123,8 @@ pub fn make_v1_router() -> Router {
 
         .route("/git-commit", telemetry_post!(handle_v1_git_commit))
 
-        .route("/prepend-system-prompt-and-maybe-more-initial-messages", 
-            telemetry_post!(handle_v1_prepend_system_prompt_and_maybe_more_initial_messages)) // because it works remotely
+        .route("/prepend-system-prompt-and-maybe-more-initial-messages",
+               telemetry_post!(handle_v1_prepend_system_prompt_and_maybe_more_initial_messages)) // because it works remotely
 
         .route("/at-command-completion", telemetry_post!(handle_v1_command_completion))
         .route("/at-command-preview", telemetry_post!(handle_v1_command_preview))

@@ -329,7 +329,7 @@ impl MemoriesDatabase {
 
     pub async fn permdb_update_used(&self, memid: &str, mstat_correct: i32, mstat_relevant: i32) -> rusqlite::Result<usize, String> {
         let conn = self.conn.lock().await;
-        let memid_owned = memid.to_string();        
+        let memid_owned = memid.to_string();
         conn.call(move |conn| {
             let count: usize = conn.execute(
                 "UPDATE memories SET 

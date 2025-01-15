@@ -50,7 +50,7 @@ async fn vecdb_test_request(
     }
 }
 
-async fn _create_vecdb( 
+async fn _create_vecdb(
     gcx: Arc<ARwLock<GlobalContext>>,
     background_tasks: &mut BackgroundTasksHolder,
     constants: VecdbConstants,
@@ -157,7 +157,7 @@ async fn do_i_need_to_reload_vecdb(
         None => {}
         Some(ref db) => {
             if
-                db.constants.embedding_model == consts.embedding_model &&
+            db.constants.embedding_model == consts.embedding_model &&
                 db.constants.endpoint_embeddings_template == consts.endpoint_embeddings_template &&
                 db.constants.endpoint_embeddings_style == consts.endpoint_embeddings_style &&
                 db.constants.splitter_window_size == consts.splitter_window_size &&
@@ -442,7 +442,7 @@ pub async fn memories_update(
         updated_cnt
     };
     vectorizer_enqueue_dirty_memory(vectorizer_service).await;
-    
+
     Ok(updated_cnt)
 }
 
