@@ -1,15 +1,16 @@
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::sync::Arc;
-use std::sync::RwLock as StdRwLock;
+use hyper::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::RwLock as StdRwLock;
 use tokio::sync::RwLock as ARwLock;
-use url::Url;
 use tracing::{error, info, warn};
+use url::Url;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::{try_load_caps_quickly_if_not_present, GlobalContext};
@@ -157,7 +158,7 @@ pub struct CodeAssistantCaps {
 fn load_caps_from_buf(
     buffer: &String,
     caps_url: &String,
-) -> Result<Arc<StdRwLock<CodeAssistantCaps>>, ScratchError> {
+) -> Result<Arc<StdRwLock<CodeAssistantCaps>>, String> {
     let mut r1_mb_error_text = "".to_string();
 
     let r1_mb: Option<CodeAssistantCaps> = match serde_json::from_str(&buffer) {
@@ -178,15 +179,12 @@ fn load_caps_from_buf(
             }
         }
     };
-    let mut r1 = r1_mb.ok_or(ScratchError::new_internal(format!(
-        "failed to parse caps: {}",
-        r1_mb_error_text
-    )))?;
+    let mut r1 = r1_mb.ok_or(format!("failed to parse caps: {}", r1_mb_error_text))?;
 
     let r0: ModelsOnly = serde_json::from_str(&KNOWN_MODELS).map_err(|e| {
         let up_to_line = KNOWN_MODELS.lines().take(e.line()).collect::<Vec<&str>>().join("\n");
         error!("{}\nfailed to parse KNOWN_MODELS: {}", up_to_line, e);
-        ScratchError::new_internal(format!("failed to parse KNOWN_MODELS: {}", e))
+        format!("failed to parse KNOWN_MODELS: {}", e)
     })?;
 
     if !r1.code_chat_default_model.is_empty() && !r1.running_models.contains(&r1.code_chat_default_model) {

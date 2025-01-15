@@ -49,6 +49,8 @@ impl ScratchError {
         }
     }
 
+    /// This is a helper function to create a new [`ScratchError`]
+    /// with `status_code` = `INTERNAL_SERVER_ERROR`
     pub fn new_internal(message: String) -> Self {
         ScratchError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
