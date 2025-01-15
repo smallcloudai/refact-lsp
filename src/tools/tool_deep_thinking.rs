@@ -93,7 +93,7 @@ impl Tool for ToolDeepThinking {
             ccx_subchat.clone(),
             subchat_params.subchat_model.as_str(),
             msgs,
-            vec![],
+            Some(vec![]),
             None,
             false,
             None,
