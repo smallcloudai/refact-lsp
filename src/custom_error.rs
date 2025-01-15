@@ -49,6 +49,14 @@ impl ScratchError {
         }
     }
 
+    pub fn new_internal(message: String) -> Self {
+        ScratchError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+            telemetry_skip: false,
+        }
+    }
+
     pub fn to_response(&self) -> Response<Body> {
         let body = json!({"detail": self.message}).to_string();
         error!("client will see {}", body);
