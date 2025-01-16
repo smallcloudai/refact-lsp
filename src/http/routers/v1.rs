@@ -38,6 +38,7 @@ use crate::http::routers::v1::patch::{handle_v1_patch_apply_all, handle_v1_patch
 use crate::http::routers::v1::subchat::{handle_v1_subchat, handle_v1_subchat_single};
 use crate::http::routers::v1::sync_files::handle_v1_sync_files_extract_tar;
 use crate::http::routers::v1::system_prompt::handle_v1_prepend_system_prompt_and_maybe_more_initial_messages;
+use crate::http::routers::v1::privacy::{handle_v1_privacy_get, handle_v1_privacy_set};
 
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
@@ -76,6 +77,7 @@ pub mod handlers_memdb;
 #[cfg(feature="vecdb")]
 pub mod vecdb;
 mod v1_integrations;
+mod privacy;
 
 
 pub fn make_v1_router() -> Router {
@@ -141,6 +143,9 @@ pub fn make_v1_router() -> Router {
         .route("/patch-apply-all", telemetry_post!(handle_v1_patch_apply_all))
 
         .route("/links", telemetry_post!(handle_v1_links))
+
+        .route("/privacy-get", telemetry_get!(handle_v1_privacy_get))
+        .route("/privacy-set", telemetry_post!(handle_v1_privacy_set))
 
         // experimental
         .route("/get-dashboard-plots", telemetry_get!(get_dashboard_plots))

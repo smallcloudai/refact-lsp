@@ -1,6 +1,6 @@
 use std::sync::{Arc, Weak};
 use std::path::Path;
-use serde::{Deserialize, Deserializer};
+use serde::{Serialize, Deserialize, Deserializer};
 use tokio::sync::RwLock as ARwLock;
 use tokio::time::Duration;
 use tokio::fs;
@@ -20,10 +20,10 @@ pub enum FilePrivacyLevel {
     AllowToSendAnywhere = 2,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PrivacySettings {
     pub privacy_rules: FilePrivacySettings,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub loaded_ts: u64,
 }
 
@@ -37,7 +37,7 @@ impl Default for PrivacySettings {
 }
 
 #[allow(non_snake_case)]
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct FilePrivacySettings {
     pub only_send_to_servers_I_control: Vec<String>,
     pub blocked: Vec<String>,
@@ -168,6 +168,25 @@ pub async fn load_privacy_if_needed(gcx: Arc<ARwLock<GlobalContext>>) -> Arc<Pri
         gcx_locked.privacy_settings = Arc::new(new_privacy_settings);
         gcx_locked.privacy_settings.clone()
     }
+}
+
+pub async fn set_privacy_rules(gcx: Arc<ARwLock<GlobalContext>>, privacy_rules: FilePrivacySettings)
+{
+    let path = {
+        let gcx_locked = gcx.read().await;
+        gcx_locked.config_dir.join("privacy.yaml")
+    };
+    let loaded_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let new_privacy_settings = PrivacySettings{
+        privacy_rules,
+        loaded_ts,
+    };
+
+    let yaml_string = serde_yaml::to_string(&new_privacy_settings).unwrap();
+    fs::write(&path, yaml_string).await.unwrap();
+
+    let mut gcx_locked = gcx.write().await;
+    gcx_locked.privacy_settings = Arc::new(new_privacy_settings);
 }
 
 pub async fn load_privacy_rules_if_needed(gcx: Arc<ARwLock<GlobalContext>>) -> Arc<FilePrivacySettings>
