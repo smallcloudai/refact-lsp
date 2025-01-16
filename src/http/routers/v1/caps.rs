@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::RwLock as ARwLock;
 
-use axum::Extension;
-use axum::response::Result;
-use hyper::{Body, Response, StatusCode};
+use axum::{response::Result, Extension};
+use hyper::{Body, Response};
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
