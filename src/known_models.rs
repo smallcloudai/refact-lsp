@@ -112,7 +112,16 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3.2/1b/instruct"
             ]
         },
-        "llama3.2/3b/instruct/vllm": {
+        "deepseek-coder/6.7b/instruct-finetune/vllm": {
+            "n_ctx": 4096,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            }
+        },
+        "llama3/8b/instruct/vllm": {
             "n_ctx": 8192,
             "supports_scratchpads": {
                 "REPLACE_PASSTHROUGH": {
@@ -121,16 +130,34 @@ pub const KNOWN_MODELS: &str = r####"
                 }
             },
             "similar_models": [
-                "llama3/8b/instruct/vllm",
-                "llama3.1/8b/instruct/vllm",
-                "llama3.2/1b/instruct/vllm",
-                "llama3.3/70b/instruct/vllm",
-                "qwen2.5/coder/32b/instruct/vllm",
-                "qwen2.5/coder/14b/instruct/vllm",
-                "qwen2.5/coder/1.5b/instruct/vllm",
+                "llama3.1/8b/instruct/vllm"
+            ]
+        },
+        "llama3.2/1b/instruct/vllm": {
+            "n_ctx": 16384,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
+                "llama3.2/3b/instruct/vllm"
+            ]
+        },
+        "qwen2.5/coder/1.5b/instruct/vllm": {
+            "n_ctx": 32768,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            },
+            "similar_models": [
                 "qwen2.5/coder/3b/instruct/vllm",
                 "qwen2.5/coder/7b/instruct/vllm",
-                "deepseek-coder/6.7b/instruct-finetune/vllm"
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/vllm"
             ]
         },
         "gpt-4o": {
@@ -280,7 +307,6 @@ pub const KNOWN_MODELS: &str = r####"
             },
             "default_scratchpad": "REPLACE",
             "similar_models": [
-                "qwen2.5/coder/0.5b/instruct/vllm",
                 "qwen2.5/coder/1.5b/instruct",
                 "qwen2.5/coder/3b/instruct",
                 "qwen2.5/coder/7b/instruct/gptq8bit",
@@ -478,23 +504,41 @@ pub const KNOWN_MODELS: &str = r####"
                 "llama3.2/1b/instruct"
             ]
         },
-        "llama3.2/3b/instruct/vllm": {
+        "deepseek-coder/6.7b/instruct-finetune/vllm": {
             "n_ctx": 4096,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
+        },
+        "llama3/8b/instruct/vllm": {
+            "n_ctx": 8192,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "llama3.1/8b/instruct/vllm"
+            ]
+        },
+        "llama3.2/1b/instruct/vllm": {
+            "n_ctx": 16384,
             "supports_tools": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
             },
             "similar_models": [
-                "llama3/8b/instruct/vllm",
-                "llama3.1/8b/instruct/vllm",
-                "llama3.2/1b/instruct/vllm",
-                "llama3.3/70b/instruct/vllm",
-                "qwen2.5/coder/32b/instruct/vllm",
-                "qwen2.5/coder/14b/instruct/vllm",
-                "qwen2.5/coder/1.5b/instruct/vllm",
+                "llama3.3/70b/instruct/vllm"
+            ]
+        },
+        "qwen2.5/coder/1.5b/instruct/vllm": {
+            "n_ctx": 32768,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
                 "qwen2.5/coder/3b/instruct/vllm",
                 "qwen2.5/coder/7b/instruct/vllm",
-                "deepseek-coder/6.7b/instruct-finetune/vllm"
+                "qwen2.5/coder/14b/instruct/vllm",
+                "qwen2.5/coder/32b/instruct/vllm"
             ]
         },
         "wizardlm/7b": {
