@@ -145,6 +145,8 @@ pub struct ChatMessage {
     pub tool_call_id: String,
     #[serde(default, skip_serializing_if="is_none")]
     pub usage: Option<ChatUsage>,
+    #[serde(default, skip_serializing_if="is_empty_string")]
+    pub revision: String,
 }
 
 fn is_none<T>(opt: &Option<T>) -> bool {
