@@ -68,6 +68,8 @@ mod git;
 mod agentic;
 mod trajectories;
 
+mod blocklist;
+
 #[tokio::main]
 async fn main() {
     let cpu_num = std::thread::available_parallelism().unwrap().get();
