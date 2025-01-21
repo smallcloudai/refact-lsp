@@ -235,10 +235,17 @@ async fn parse_tickets(gcx: Arc<ARwLock<GlobalContext>>, content: &str, message_
             if !code_block_fence_line.starts_with("```") {
                 return Err("failed to parse ticket, invalid code block fence".to_string());
             }
-            for (idx, line) in stripped_lines.iter().enumerate().skip(line_num + 2).rev() {
-                if line.starts_with("```") {
-                    ticket.code = stripped_lines[line_num + 2..idx].iter().join("\n").trim_end().to_string();
-                    return Ok((2 + idx, ticket));
+            let mut depth = 0;
+            for (idx, line) in lines.iter().enumerate().skip(line_num + 2) {
+                if line.starts_with("```") && line.len() > 3 {
+                    depth += 1;
+                } else if *line == "```" {
+                    if depth == 0 {
+                        ticket.code = stripped_lines[line_num + 2..idx].iter().join("\n").trim_end().to_string();
+                        return Ok((2 + idx, ticket));
+                    } else {
+                        depth -= 1;
+                    }
                 }
             }
             Err("failed to parse ticket, no ending fence for the code block".to_string())
