@@ -59,7 +59,7 @@ mod forward_to_openai_endpoint;
 mod restream;
 
 mod call_validation;
-mod agent_db;
+mod memdb;
 mod dashboard;
 mod lsp;
 mod http;

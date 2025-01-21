@@ -9,7 +9,7 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use async_stream::stream;
 
-use crate::agent_db::db_structs::{ChoreDB, Chore, ChoreEvent};
+use crate::memdb::db_structs::{ChoreDB, Chore, ChoreEvent};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 
@@ -136,9 +136,9 @@ pub fn chore_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
     chore: Chore,
 ) {
-    let (lite, chore_sleeping_point) = {
+    let (lite, memdb_sleeping_point) = {
         let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
+        (db.lite.clone(), db.memdb_sleeping_point.clone())
     };
     {
         let mut conn = lite.lock();
@@ -149,22 +149,22 @@ pub fn chore_set(
             let j = serde_json::json!({
                 "chore_id": chore.chore_id,
             });
-            crate::agent_db::chore_pubub_push(&tx, "chore", "update", &j);
+            crate::memdb::chore_pubub_push(&tx, "chore", "update", &j);
             if let Err(e) = tx.commit() {
                 tracing::error!("Failed to commit transaction:\n{}", e);
             }
         }
     }
-    chore_sleeping_point.notify_waiters();
+    memdb_sleeping_point.notify_waiters();
 }
 
 pub fn chore_event_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cevent: ChoreEvent,
 ) {
-    let (lite, chore_sleeping_point) = {
+    let (lite, memdb_sleeping_point) = {
         let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
+        (db.lite.clone(), db.memdb_sleeping_point.clone())
     };
     {
         let mut conn = lite.lock();
@@ -175,13 +175,13 @@ pub fn chore_event_set(
             let j = serde_json::json!({
                 "chore_id": cevent.chore_event_belongs_to_chore_id,
             });
-            crate::agent_db::chore_pubub_push(&tx, "chore", "update", &j);
+            crate::memdb::chore_pubub_push(&tx, "chore", "update", &j);
             if let Err(e) = tx.commit() {
                 tracing::error!("Failed to commit transaction:\n{}", e);
             }
         }
     }
-    chore_sleeping_point.notify_waiters();
+    memdb_sleeping_point.notify_waiters();
 }
 
 pub fn chore_get(
@@ -225,7 +225,7 @@ pub async fn handle_db_v1_chore_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let cdb = gcx.read().await.chore_db.clone();
+    let cdb = gcx.read().await.memdb.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
@@ -243,7 +243,7 @@ pub async fn handle_db_v1_chore_update(
     };
 
     let mut chore_json = serde_json::to_value(&chore_rec).unwrap();
-    crate::agent_db::merge_json(&mut chore_json, &incoming_json);
+    crate::memdb::merge_json(&mut chore_json, &incoming_json);
 
     let chore_rec: Chore = serde_json::from_value(chore_json).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
@@ -265,7 +265,7 @@ pub async fn handle_db_v1_chore_event_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let cdb = gcx.read().await.chore_db.clone();
+    let cdb = gcx.read().await.memdb.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
@@ -283,7 +283,7 @@ pub async fn handle_db_v1_chore_event_update(
     };
 
     let mut chore_event_json = serde_json::to_value(&chore_event_rec).unwrap();
-    crate::agent_db::merge_json(&mut chore_event_json, &incoming_json);
+    crate::memdb::merge_json(&mut chore_event_json, &incoming_json);
 
     let chore_event_rec: ChoreEvent = serde_json::from_value(chore_event_json).map_err(|e| {
         ScratchError::new(StatusCode::BAD_REQUEST, format!("Deserialization error: {}", e))
@@ -316,7 +316,7 @@ pub async fn handle_db_v1_chores_sub(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    let cdb = gcx.read().await.chore_db.clone();
+    let cdb = gcx.read().await.memdb.clone();
     let lite_arc = cdb.lock().lite.clone();
 
     let (pre_existing_chores, pre_existing_cevents, mut last_pubsub_id) = {
@@ -345,7 +345,7 @@ pub async fn handle_db_v1_chores_sub(
         }
 
         loop {
-            if !crate::agent_db::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
+            if !crate::memdb::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
                 break;
             }
             let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {

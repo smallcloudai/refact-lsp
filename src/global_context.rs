@@ -165,7 +165,7 @@ pub struct GlobalContext {
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
     pub codelens_cache: Arc<AMutex<crate::http::routers::v1::code_lens::CodeLensCache>>,
     pub docker_ssh_tunnel: Arc<AMutex<Option<SshTunnel>>>,
-    pub chore_db: Arc<ParkMutex<crate::agent_db::db_structs::ChoreDB>>,
+    pub memdb: Arc<ParkMutex<crate::memdb::db_structs::ChoreDB>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
@@ -281,7 +281,7 @@ pub async fn look_for_piggyback_fields(
 pub async fn block_until_signal(
     ask_shutdown_receiver: std::sync::mpsc::Receiver<String>,
     shutdown_flag: Arc<AtomicBool>,
-    chore_sleeping_point: Arc<ANotify>,
+    memdb_sleeping_point: Arc<ANotify>,
 ) {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -329,7 +329,7 @@ pub async fn block_until_signal(
             info!("graceful shutdown to store telemetry");
         }
     }
-    chore_sleeping_point.notify_waiters();
+    memdb_sleeping_point.notify_waiters();
 }
 
 pub async fn create_global_context(
@@ -377,7 +377,7 @@ pub async fn create_global_context(
         integration_sessions: HashMap::new(),
         codelens_cache: Arc::new(AMutex::new(crate::http::routers::v1::code_lens::CodeLensCache::default())),
         docker_ssh_tunnel: Arc::new(AMutex::new(None)),
-        chore_db: crate::agent_db::db_init::chore_db_init(&config_dir, cmdline.reset_memory).await,
+        memdb: crate::memdb::db_init::memdb_init(&config_dir, cmdline.reset_memory).await,
     };
     let gcx = Arc::new(ARwLock::new(cx));
     crate::files_in_workspace::watcher_init(gcx.clone()).await;

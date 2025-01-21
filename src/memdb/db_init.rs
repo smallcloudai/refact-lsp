@@ -4,13 +4,13 @@ use tokio::sync::Notify as ANotify;
 use parking_lot::Mutex as ParkMutex;
 use rusqlite::Connection;
 
-use crate::agent_db::db_structs::ChoreDB;
+use crate::memdb::db_structs::ChoreDB;
 
 
 fn _make_connection(
     config_dir: &PathBuf,
 ) -> Result<Arc<ParkMutex<ChoreDB>>, String> {
-    let db_path = config_dir.join("chore_db.sqlite");
+    let db_path = config_dir.join("memdb.sqlite");
     let db = Connection::open_with_flags(
         db_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -26,12 +26,12 @@ fn _make_connection(
     }
     let db = ChoreDB {
         lite: Arc::new(ParkMutex::new(db)),
-        chore_sleeping_point: Arc::new(ANotify::new()),
+        memdb_sleeping_point: Arc::new(ANotify::new()),
     };
     Ok(Arc::new(ParkMutex::new(db)))
 }
 
-pub async fn chore_db_init(
+pub async fn memdb_init(
     config_dir: &PathBuf,
     reset_memory: bool,
 ) -> Arc<ParkMutex<ChoreDB>> {
@@ -39,9 +39,11 @@ pub async fn chore_db_init(
         Ok(db) => db,
         Err(err) => panic!("Failed to initialize chore database: {}", err),
     };
-    let lite_arc = {
-        db.lock().lite.clone()
+    let (lite_arc, memdb_sleeping_point) = {
+        let locked_db = db.lock();
+        (locked_db.lite.clone(), locked_db.memdb_sleeping_point.clone())
     };
-    crate::agent_db::db_schema_20241102::create_tables_20241102(&*lite_arc.lock(), reset_memory).expect("Failed to create tables");
+    crate::memdb::db_schema::create_tables_202412(&*lite_arc.lock(), memdb_sleeping_point, reset_memory)
+        .expect("Failed to create tables");
     db
 }

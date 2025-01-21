@@ -10,8 +10,9 @@ pub mod db_chore;
 pub mod db_cmessage;
 pub mod db_cthread;
 pub mod db_init;
-pub mod db_schema_20241102;
+pub mod db_schema;
 pub mod db_structs;
+
 
 pub fn chore_pubub_push(
     transaction: &rusqlite::Transaction,
@@ -40,7 +41,7 @@ pub async fn chore_pubsub_sleeping_procedure(
     if shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
-    let sleeping_point = db.lock().chore_sleeping_point.clone();
+    let sleeping_point = db.lock().memdb_sleeping_point.clone();
     match tokio::time::timeout(tokio::time::Duration::from_secs(sleep_seconds), sleeping_point.notified()).await {
         Ok(_) => { },
         Err(_) => { },   // timeout

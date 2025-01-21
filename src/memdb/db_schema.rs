@@ -1,20 +1,74 @@
+use std::os::raw::{c_int, c_void};
+use std::sync::Arc;
 use rusqlite::Connection;
+use tokio::sync::Notify;
+use tracing::info;
+
+pub fn setup_triggers(conn: &Connection, table_name: &str, fields: Vec<&str>, id_field: &str) -> Result<(), String> {
+    for method in ["INSERT", "UPDATE", "DELETE"] {
+        let field_obj = if method == "DELETE" { "OLD" } else { "NEW" };
+        let json_object_fields: String = fields
+            .iter()
+            .map(|field| format!("'{field}', {field_obj}.{field}"))
+            .collect::<Vec<String>>()
+            .join(",\n");
+        let sql = format!(
+            "CREATE TRIGGER IF NOT EXISTS pubsub_events_on_insert
+            AFTER {method} ON {table_name}
+            BEGIN
+                INSERT INTO pubsub_events (pubevent_action, pubevent_channel, pubevent_obj_id, pubevent_obj_json)
+                VALUES ('{method}', '{table_name}', '{field_obj}.{id_field}', json_object(
+                    {json_object_fields}
+                ));
+            END;",
+            table_name = table_name,
+            json_object_fields = json_object_fields
+        );
+        conn.execute(&sql, []).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+extern "C" fn pubsub_trigger_hook(
+    user_data: *mut c_void,
+    action: c_int,
+    db_name: *const i8,
+    table_name: *const i8,
+    _: i64,
+) {
+    let notify = unsafe { &*(user_data as *const Notify) };
+    let db_name = unsafe { std::ffi::CStr::from_ptr(db_name).to_str().unwrap_or("unknown") };
+    let table_name = unsafe { std::ffi::CStr::from_ptr(table_name).to_str().unwrap_or("unknown") };
+    let operation = match action {
+        18 => "INSERT",
+        9 => "DELETE",
+        23 => "UPDATE",
+        _ => "UNKNOWN",
+    };
+    if db_name != "main" && table_name != "pubsub_events" {
+        return;
+    }
+    info!("pubsub {} action triggered", operation);
+    notify.notify_waiters();
+}
 
 
-pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(), String> {
+pub fn create_tables_202412(conn: &Connection, sleeping_point: Arc<Notify>, reset_memory: bool) -> Result<(), String> {
     if reset_memory {
         conn.execute("DROP TABLE IF EXISTS pubsub_events", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS chores", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS chore_events", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cthreads", []).map_err(|e| e.to_string())?;
         conn.execute("DROP TABLE IF EXISTS cmessages", []).map_err(|e| e.to_string())?;
+        conn.execute("DROP TABLE IF EXISTS memories", []).map_err(|e| e.to_string())?;
     }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS pubsub_events (
             pubevent_id INTEGER PRIMARY KEY AUTOINCREMENT,
             pubevent_channel TEXT NOT NULL,
             pubevent_action TEXT NOT NULL,
-            pubevent_json TEXT NOT NULL,
+            pubevent_obj_id TEXT NOT NULL,                  -- useful for extra filtering
+            pubevent_obj_json TEXT NOT NULL,
             pubevent_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )",
         [],
@@ -91,6 +145,45 @@ pub fn create_tables_20241102(conn: &Connection, reset_memory: bool) -> Result<(
         )",
         [],
     ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS memories (
+            memid TEXT PRIMARY KEY,
+            m_type TEXT NOT NULL,
+            m_goal TEXT NOT NULL,
+            m_project TEXT NOT NULL,
+            m_payload TEXT NOT NULL,
+            m_origin TEXT NOT NULL,
+            mstat_correct REAL NOT NULL DEFAULT 0,
+            mstat_relevant REAL NOT NULL DEFAULT 0,
+            mstat_times_used INTEGER NOT NULL DEFAULT 0
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    setup_triggers(&conn, "memories", vec![
+        "memid", "m_type", "m_goal", "m_project", "m_payload", "m_origin",
+        "mstat_correct", "mstat_relevant", "mstat_times_used"
+    ], "memid")?;
+    setup_triggers(&conn, "cthread", vec![
+        "cthread_id", "cthread_belongs_to_chore_event_id", "cthread_title",
+        "cthread_toolset", "cthread_model", "cthread_temperature",
+        "cthread_max_new_tokens", "cthread_n", "cthread_error",
+        "cthread_anything_new", "cthread_created_ts", "cthread_updated_ts",
+        "cthread_archived_ts", "cthread_locked_by", "cthread_locked_ts"
+    ], "cthread_id")?;
+    setup_triggers(&conn, "cmessages", vec![
+        "cmessage_belongs_to_cthread_id", "cmessage_alt", "cmessage_num",
+        "cmessage_prev_alt", "cmessage_usage_model", "cmessage_usage_prompt",
+        "cmessage_usage_completion", "cmessage_json"
+    ], "cmessage_belongs_to_cthread_id")?;
+    unsafe {
+        libsqlite3_sys::sqlite3_update_hook(
+            conn.handle(),
+            Some(pubsub_trigger_hook),
+            Arc::into_raw(sleeping_point.clone()) as *mut c_void,
+        );
+    }
+
     // Useful to speed up SELECT .. JOIN
     // conn.execute("CREATE INDEX IF NOT EXISTS idx_chore_event_belongs_to_chore_id ON chore_events (chore_event_belongs_to_chore_id)", []).map_err(|e| e.to_string())?;
     // conn.execute("CREATE INDEX IF NOT EXISTS idx_cthread_belongs_to_chore_event_id ON cthreads (cthread_belongs_to_chore_event_id)", []).map_err(|e| e.to_string())?;

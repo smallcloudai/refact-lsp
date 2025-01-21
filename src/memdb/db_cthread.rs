@@ -10,8 +10,8 @@ use async_stream::stream;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::agent_db::db_structs::{ChoreDB, CThread};
-use crate::agent_db::chore_pubsub_sleeping_procedure;
+use crate::memdb::db_structs::{ChoreDB, CThread};
+use crate::memdb::chore_pubsub_sleeping_procedure;
 
 
 pub fn cthread_get(
@@ -140,9 +140,9 @@ pub fn cthread_set(
     cdb: Arc<ParkMutex<ChoreDB>>,
     cthread: &CThread,
 ) {
-    let (lite, chore_sleeping_point) = {
+    let (lite, memdb_sleeping_point) = {
         let db = cdb.lock();
-        (db.lite.clone(), db.chore_sleeping_point.clone())
+        (db.lite.clone(), db.memdb_sleeping_point.clone())
     };
     {
         let mut conn = lite.lock();
@@ -154,13 +154,13 @@ pub fn cthread_set(
             "cthread_id": cthread.cthread_id,
             "cthread_belongs_to_chore_event_id": cthread.cthread_belongs_to_chore_event_id,
         });
-        crate::agent_db::chore_pubub_push(&tx, "cthread", "update", &j);
+        crate::memdb::chore_pubub_push(&tx, "cthread", "update", &j);
         if let Err(e) = tx.commit() {
             tracing::error!("Failed to commit transaction:\n{}", e);
             return;
         }
     }
-    chore_sleeping_point.notify_waiters();
+    memdb_sleeping_point.notify_waiters();
 }
 
 pub fn cthread_apply_json(
@@ -174,7 +174,7 @@ pub fn cthread_apply_json(
     // all default values if not found, as a way to create new cthreads
     let mut cthread_rec = cthread_get(cdb.clone(), cthread_id.clone()).unwrap_or_default();
     let mut chat_thread_json = serde_json::to_value(&cthread_rec).unwrap();
-    crate::agent_db::merge_json(&mut chat_thread_json, &incoming_json);
+    crate::memdb::merge_json(&mut chat_thread_json, &incoming_json);
     cthread_rec = serde_json::from_value(chat_thread_json).unwrap();
     cthread_set(cdb, &cthread_rec);
     Ok(cthread_rec)
@@ -185,7 +185,7 @@ pub async fn handle_db_v1_cthread_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let cdb = gcx.read().await.chore_db.clone();
+    let cdb = gcx.read().await.memdb.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
         tracing::info!("cannot parse input:\n{:?}", body_bytes);
@@ -226,7 +226,7 @@ pub async fn handle_db_v1_cthreads_sub(
         post.limit = 100;
     }
 
-    let cdb = gcx.read().await.chore_db.clone();
+    let cdb = gcx.read().await.memdb.clone();
     let lite_arc = cdb.lock().lite.clone();
 
     let (pre_existing_cthreads, mut last_pubsub_id) = {

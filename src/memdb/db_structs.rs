@@ -89,5 +89,5 @@ pub struct CMessage {
 
 pub struct ChoreDB {
     pub lite: Arc<ParkMutex<rusqlite::Connection>>,
-    pub chore_sleeping_point: Arc<ANotify>,
+    pub memdb_sleeping_point: Arc<ANotify>,
 }
