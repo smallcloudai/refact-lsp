@@ -19,7 +19,7 @@ use crate::telemetry;
 use crate::file_filter::{is_valid_file, SOURCE_FILE_EXTENSIONS};
 use crate::ast::ast_indexer_thread::ast_indexer_enqueue_files;
 use crate::privacy::{check_file_privacy, load_privacy_if_needed, PrivacySettings, FilePrivacyLevel};
-use crate::blocklist::{is_this_inside_blacklisted_dir, is_path_blacklisted, load_indexing_settings_if_needed, IndexingSettings, WorkspaceIndexingSettings};
+use crate::blocklist::{is_path_in_additional_indexing_dirs, is_this_inside_blacklisted_dir, is_path_blacklisted, load_indexing_settings_if_needed, WorkspaceIndexingSettings};
 
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
@@ -243,7 +243,7 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
 }
 
 pub fn ls_files(
-    indexing_settings: &IndexingSettings,
+    workspace_indexing_settings: &Arc<WorkspaceIndexingSettings>,
     path: &PathBuf,
     recursive: bool,
 ) -> Result<Vec<PathBuf>, String> {
@@ -270,10 +270,14 @@ pub fn ls_files(
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let path = entry.path();
-            if recursive && path.is_dir() && !is_path_blacklisted(&indexing_settings, &path) {
+            if recursive && path.is_dir() {
+                // NOTE: we're visiting all subdirs even if they blacklisted to match with additional_indexing_dirs later
                 dirs_to_visit.push(path);
             } else if path.is_file() {
-                paths.push(path);
+                let indexing_settings = workspace_indexing_settings.get_indexing_settings(path.clone());
+                if is_path_in_additional_indexing_dirs(&indexing_settings, &path) || !is_this_inside_blacklisted_dir(&indexing_settings, &path) {
+                    paths.push(path);
+                }
             }
         }
     }
@@ -358,6 +362,7 @@ async fn _ls_files_under_version_control_recursive(
         }
         if local_path.is_dir() {
             let indexing_settings = workspace_indexing_settings.get_indexing_settings(path.clone());
+            // TODO: this code doesn't support to look forward in file path so we need to investigate how to rewrite it to match paths with additional_indexing_dirs
             if is_path_blacklisted(&indexing_settings, &local_path) {
                 blacklisted_dirs_cnt += 1;
                 continue;
@@ -679,7 +684,9 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
         }
         for p in &event.paths {
             let indexing_settings = workspace_indexing_settings.get_indexing_settings(p.clone());
-            if is_this_inside_blacklisted_dir(&indexing_settings, &p) {  // important to filter BEFORE canonical_path
+
+            // important to filter BEFORE canonical_path
+            if !is_path_in_additional_indexing_dirs(&indexing_settings, &p) && is_this_inside_blacklisted_dir(&indexing_settings, &p) {
                 continue;
             }
 
@@ -714,13 +721,13 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
         }
         for p in &event.paths {
             let indexing_settings = workspace_indexing_settings.get_indexing_settings(p.clone());
-            never_mind &= is_this_inside_blacklisted_dir(&indexing_settings, &p);
+            never_mind &= !is_path_in_additional_indexing_dirs(&indexing_settings, &p) && is_this_inside_blacklisted_dir(&indexing_settings, &p);
         }
         let mut docs = vec![];
         if !never_mind {
             for p in &event.paths {
                 let indexing_settings = workspace_indexing_settings.get_indexing_settings(p.clone());
-                if is_this_inside_blacklisted_dir(&indexing_settings, &p) {
+                if !is_path_in_additional_indexing_dirs(&indexing_settings, &p) && is_this_inside_blacklisted_dir(&indexing_settings, &p) {
                     continue;
                 }
                 let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());

@@ -5,7 +5,6 @@ use tokio::sync::RwLock as ARwLock;
 use tokio::time::Duration;
 use tokio::fs;
 use tracing::error;
-use tracing::info;
 use std::time::SystemTime;
 use std::collections::HashMap;
 use walkdir::WalkDir;
@@ -24,7 +23,7 @@ pub const DEFAULT_BLOCKLIST_DIRS: &[&str] = &[
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexingSettings {
     pub blocklist: Vec<String>,
-    pub additional_indexing_dirs: Vec<String>,  // TODO: this field requires different mechanism
+    pub additional_indexing_dirs: Vec<String>,
 }
 
 impl Default for IndexingSettings {
@@ -118,8 +117,6 @@ async fn load_project_indexing_settings(gcx: Arc<ARwLock<GlobalContext>>) -> Wor
         }
     }
 
-    info!("loaded indexing settings: {:?}", indexing_settings_map);
-
     let loaded_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
     WorkspaceIndexingSettings{
         indexing_settings_map,
@@ -147,19 +144,19 @@ pub async fn load_indexing_settings_if_needed(gcx: Arc<ARwLock<GlobalContext>>) 
     }
 }
 
-// fn is_path_in_additional_indexing_dirs(indexing_settings: &IndexingSettings, path: &str) -> bool {
-//     for dir in indexing_settings.additional_indexing_dirs.iter() {
-//         if !dir.is_empty() && path.contains(dir.as_str()) {
-//             return true;
-//         }
-//     }
-//     false
-// }
+pub fn is_path_in_additional_indexing_dirs(indexing_settings: &IndexingSettings, path: &PathBuf) -> bool {
+    if let Some(path_str) = path.to_str() {
+        for dir in indexing_settings.additional_indexing_dirs.iter() {
+            // TODO: contains doesn't work correctly, we should match subpath instaead of substring
+            if !dir.is_empty() && path_str.contains(dir.as_str()) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 pub fn is_this_inside_blacklisted_dir(indexing_settings: &IndexingSettings, path: &PathBuf) -> bool {
-    // if is_path_in_additional_indexing_dirs(indexing_settings, path.to_str().unwrap()) {
-    //     return false;
-    // }
     let mut path = path.clone();
     while path.parent().is_some() {
         path = path.parent().unwrap().to_path_buf();
@@ -170,10 +167,8 @@ pub fn is_this_inside_blacklisted_dir(indexing_settings: &IndexingSettings, path
     false
 }
 
+// TODO: should be private in module
 pub fn is_path_blacklisted(indexing_settings: &IndexingSettings, path: &PathBuf) -> bool {
-    // if is_path_in_additional_indexing_dirs(indexing_settings, path.to_str().unwrap()) {
-    //     return false;
-    // }
     if let Some(file_name) = path.file_name() {
         if indexing_settings.blocklist.contains(&file_name.to_str().unwrap_or_default().to_string()) {
             return true;
