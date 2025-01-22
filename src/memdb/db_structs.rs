@@ -88,7 +88,7 @@ pub struct CMessage {
 // db_v1/cmessage_update  { cthread_id, n_onwards } -> ok or detail
 
 
-pub struct MemdbDB {
+pub struct MemDB {
     pub lite: Arc<ParkMutex<rusqlite::Connection>>,
     pub vecdb_constants: VecdbConstants,
     pub dirty_memids: Vec<String>,

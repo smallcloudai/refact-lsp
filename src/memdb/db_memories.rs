@@ -14,7 +14,7 @@ use crate::ast::chunk_utils::official_text_hashing_function;
 use crate::caps::get_custom_embedding_api_key;
 use crate::fetch_embedding;
 use crate::global_context::GlobalContext;
-use crate::memdb::db_structs::MemdbDB;
+use crate::memdb::db_structs::MemDB;
 use crate::vecdb::vdb_sqlite::VecDBSqlite;
 use crate::vecdb::vdb_structs::{
     MemoRecord, MemoSearchResult, SimpleTextHashVector, VecDbStatus, VecdbConstants,
@@ -52,7 +52,7 @@ fn fields_ordered() -> String {
 }
 
 pub async fn memories_add(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
     mem_type: &str,
     goal: &str,
@@ -79,7 +79,7 @@ pub async fn memories_add(
 }
 
 pub async fn memories_erase(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     memid: &str,
 ) -> rusqlite::Result<usize, String> {
     let lite = mdb.lock().lite.clone();
@@ -91,7 +91,7 @@ pub async fn memories_erase(
 }
 
 pub async fn memories_select_all(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
 ) -> rusqlite::Result<Vec<MemoRecord>, String> {
     let lite = mdb.lock().lite.clone();
     let query = format!("SELECT {} FROM memories", fields_ordered());
@@ -106,7 +106,7 @@ pub async fn memories_select_all(
 }
 
 pub async fn memories_select_like(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     query: &String,
 ) -> rusqlite::Result<Vec<MemoRecord>, String> {
     let lite = mdb.lock().lite.clone();
@@ -133,7 +133,7 @@ pub async fn memories_select_like(
 }
 
 pub async fn memories_update(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     vectorizer_service: Arc<AMutex<FileVectorizerService>>,
     memid: &str,
     m_type: &str,
@@ -162,7 +162,7 @@ pub async fn memories_update(
 }
 
 pub async fn memories_update_used(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     memid: &str,
     mstat_correct: i32,
     mstat_relevant: i32,
@@ -280,7 +280,7 @@ pub async fn memories_search(
 }
 
 pub async fn memdb_subscription_poll(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     from_memid: Option<i64>,
 ) -> rusqlite::Result<Vec<MemdbSubEvent>, String> {
     let lite = mdb.lock().lite.clone();
@@ -309,7 +309,7 @@ pub async fn memdb_subscription_poll(
 }
 
 async fn recall_dirty_memories_and_mark_them_not_dirty(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
 ) -> rusqlite::Result<(Vec<String>, Vec<SimpleTextHashVector>), String> {
     let (query, params) = {
         let memdb_locked = mdb.lock();
@@ -369,7 +369,7 @@ async fn recall_dirty_memories_and_mark_them_not_dirty(
 }
 
 pub async fn vectorize_dirty_memories(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     vecdb_handler: Arc<AMutex<VecDBSqlite>>,
     _status: Arc<AMutex<VecDbStatus>>,
     client: Arc<AMutex<Client>>,

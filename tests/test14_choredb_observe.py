@@ -259,7 +259,7 @@ async def main(only_sub=False, quicksearch=""):
     print(termcolor.colored("\nTEST OVER", "green", attrs=["bold"]))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ChoreDB test script")
+    parser = argparse.ArgumentParser(description="MemDB test script")
     parser.add_argument("--only-sub", action="store_true", help="Run only the subscription part")
     parser.add_argument("--quicksearch", type=str, default="", help="Quicksearch term for filtering")
     args = parser.parse_args()

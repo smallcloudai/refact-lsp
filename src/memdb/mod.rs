@@ -34,7 +34,7 @@ pub fn chore_pubub_push(
 
 pub async fn memdb_pubsub_trigerred(
     gcx: Arc<ARwLock<GlobalContext>>,
-    db: &Arc<ParkMutex<db_structs::MemdbDB>>,
+    db: &Arc<ParkMutex<db_structs::MemDB>>,
     sleep_seconds: u64
 ) -> bool {
     let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();

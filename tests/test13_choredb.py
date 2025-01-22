@@ -99,7 +99,7 @@ async def main(only_sub=False, only_update=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ChoreDB test script")
+    parser = argparse.ArgumentParser(description="MemDB test script")
     parser.add_argument("--only-sub", action="store_true", help="Run only the subscription part")
     parser.add_argument("--only-update", action="store_true", help="Run only the update part")
     args = parser.parse_args()

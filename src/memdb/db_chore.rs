@@ -9,64 +9,36 @@ use hyper::{Body, Response, StatusCode};
 use serde::Deserialize;
 use async_stream::stream;
 
-use crate::memdb::db_structs::{MemdbDB, Chore, ChoreEvent};
+use crate::memdb::db_structs::{MemDB, Chore, ChoreEvent};
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 
-pub fn chores_from_rows(
-    mut rows: rusqlite::Rows,
-) -> Vec<Chore> {
-    let mut chores = Vec::new();
-    while let Some(row) = rows.next().unwrap_or(None) {
-        chores.push(Chore {
-            chore_id: row.get("chore_id").unwrap(),
-            chore_title: row.get("chore_title").unwrap(),
-            chore_spontaneous_work_enable: row.get("chore_spontaneous_work_enable").unwrap(),
-            chore_created_ts: row.get("chore_created_ts").unwrap(),
-            chore_archived_ts: row.get("chore_archived_ts").unwrap(),
-        });
-    }
-    chores
-}
 
-pub fn chore_events_from_rows(
-    mut rows: rusqlite::Rows,
-) -> Vec<ChoreEvent> {
-    let mut events = Vec::new();
-    while let Some(row) = rows.next().unwrap_or(None) {
-        events.push(ChoreEvent {
-            chore_event_id: row.get("chore_event_id").unwrap(),
-            chore_event_belongs_to_chore_id: row.get("chore_event_belongs_to_chore_id").unwrap(),
-            chore_event_summary: row.get("chore_event_summary").unwrap(),
-            chore_event_ts: row.get("chore_event_ts").unwrap(),
-            chore_event_link: row.get("chore_event_link").unwrap(),
-            chore_event_cthread_id: row.get("chore_event_cthread_id").unwrap_or(None),
-        });
-    }
-    events
-}
-
-fn chore_set_lowlevel(
-    tx: &rusqlite::Transaction,
-    chore: &Chore,
-) -> Result<usize, String> {
-    let updated_rows = tx.execute(
+pub fn chore_set(
+    mdb: Arc<ParkMutex<MemDB>>,
+    chore: Chore,
+) -> Result<(), String> {
+    fn _chore_set_lowlevel(
+        tx: &rusqlite::Transaction,
+        chore: &Chore,
+    ) -> Result<usize, String> {
+        let updated_rows = tx.execute(
         "UPDATE chores SET
             chore_title = ?2,
             chore_spontaneous_work_enable = ?3,
             chore_created_ts = ?4,
             chore_archived_ts = ?5
         WHERE chore_id = ?1",
-        params![
+            params![
             chore.chore_id,
             chore.chore_title,
             chore.chore_spontaneous_work_enable,
             chore.chore_created_ts,
             chore.chore_archived_ts,
         ],
-    ).map_err(|e| e.to_string())?;
-    if updated_rows == 0 {
-        tx.execute(
+        ).map_err(|e| e.to_string())?;
+        if updated_rows == 0 {
+            tx.execute(
             "INSERT INTO chores (
                 chore_id,
                 chore_title,
@@ -74,24 +46,37 @@ fn chore_set_lowlevel(
                 chore_created_ts,
                 chore_archived_ts
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
+                params![
                 chore.chore_id,
                 chore.chore_title,
                 chore.chore_spontaneous_work_enable,
                 chore.chore_created_ts,
                 chore.chore_archived_ts,
             ],
-        ).map_err(|e| e.to_string())
-    } else {
-        Ok(updated_rows)
+            ).map_err(|e| e.to_string())
+        } else {
+            Ok(updated_rows)
+        }
     }
+
+
+    let lite = mdb.lock().lite.clone();
+    let mut conn = lite.lock();
+    let tx = conn.transaction().expect("Failed to start transaction");
+    _chore_set_lowlevel(&tx, &chore).map_err(|e| format!("Failed to insert or replace chore event:\n{e}"))?;
+    tx.commit().map_err(|e| format!("Failed to commit transaction:\n{e}"))?;
+    Ok(())
 }
 
-fn chore_event_set_lowlevel(
-    tx: &rusqlite::Transaction,
-    cevent: &ChoreEvent,
-) -> Result<usize, String> {
-    let updated_rows = tx.execute(
+pub fn chore_event_set(
+    mdb: Arc<ParkMutex<MemDB>>,
+    cevent: ChoreEvent,
+) -> Result<(), String> {
+    fn _chore_event_set_lowlevel(
+        tx: &rusqlite::Transaction,
+        cevent: &ChoreEvent,
+    ) -> Result<usize, String> {
+        let updated_rows = tx.execute(
         "UPDATE chore_events SET
             chore_event_belongs_to_chore_id = ?2,
             chore_event_summary = ?3,
@@ -99,7 +84,7 @@ fn chore_event_set_lowlevel(
             chore_event_link = ?5,
             chore_event_cthread_id = ?6
         WHERE chore_event_id = ?1",
-        params![
+            params![
             cevent.chore_event_id,
             cevent.chore_event_belongs_to_chore_id,
             cevent.chore_event_summary,
@@ -107,9 +92,9 @@ fn chore_event_set_lowlevel(
             cevent.chore_event_link,
             cevent.chore_event_cthread_id,
         ],
-    ).map_err(|e| e.to_string())?;
-    if updated_rows == 0 {
-        tx.execute(
+        ).map_err(|e| e.to_string())?;
+        if updated_rows == 0 {
+            tx.execute(
             "INSERT INTO chore_events (
                 chore_event_id,
                 chore_event_belongs_to_chore_id,
@@ -118,7 +103,7 @@ fn chore_event_set_lowlevel(
                 chore_event_link,
                 chore_event_cthread_id
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
+                params![
                 cevent.chore_event_id,
                 cevent.chore_event_belongs_to_chore_id,
                 cevent.chore_event_summary,
@@ -126,68 +111,40 @@ fn chore_event_set_lowlevel(
                 cevent.chore_event_link,
                 cevent.chore_event_cthread_id,
             ],
-        ).map_err(|e| e.to_string())
-    } else {
-        Ok(updated_rows)
-    }
-}
-
-pub fn chore_set(
-    mdb: Arc<ParkMutex<MemdbDB>>,
-    chore: Chore,
-) {
-    let (lite, memdb_sleeping_point) = {
-        let db = mdb.lock();
-        (db.lite.clone(), db.memdb_sleeping_point.clone())
-    };
-    {
-        let mut conn = lite.lock();
-        let tx = conn.transaction().expect("Failed to start transaction");
-        if let Err(e) = chore_set_lowlevel(&tx, &chore) {
-            tracing::error!("Failed to insert or replace chore:\n{}", e);
+            ).map_err(|e| e.to_string())
         } else {
-            let j = serde_json::json!({
-                "chore_id": chore.chore_id,
-            });
-            crate::memdb::chore_pubub_push(&tx, "chore", "update", &j);
-            if let Err(e) = tx.commit() {
-                tracing::error!("Failed to commit transaction:\n{}", e);
-            }
+            Ok(updated_rows)
         }
     }
-    memdb_sleeping_point.notify_waiters();
-}
 
-pub fn chore_event_set(
-    mdb: Arc<ParkMutex<MemdbDB>>,
-    cevent: ChoreEvent,
-) {
-    let (lite, memdb_sleeping_point) = {
-        let db = mdb.lock();
-        (db.lite.clone(), db.memdb_sleeping_point.clone())
-    };
-    {
-        let mut conn = lite.lock();
-        let tx = conn.transaction().expect("Failed to start transaction");
-        if let Err(e) = chore_event_set_lowlevel(&tx, &cevent) {
-            tracing::error!("Failed to insert or replace chore event:\n{}", e);
-        } else {
-            let j = serde_json::json!({
-                "chore_id": cevent.chore_event_belongs_to_chore_id,
-            });
-            crate::memdb::chore_pubub_push(&tx, "chore", "update", &j);
-            if let Err(e) = tx.commit() {
-                tracing::error!("Failed to commit transaction:\n{}", e);
-            }
-        }
-    }
-    memdb_sleeping_point.notify_waiters();
+    let lite = mdb.lock().lite.clone();
+    let mut conn = lite.lock();
+    let tx = conn.transaction().expect("Failed to start transaction");
+    _chore_event_set_lowlevel(&tx, &cevent).map_err(|e| format!("Failed to insert or replace chore event:\n{e}"))?;
+    tx.commit().map_err(|e| format!("Failed to commit transaction:\n{e}"))?;
+    Ok(())
 }
 
 pub fn chore_get(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     chore_id: String,
 ) -> Result<Chore, String> {
+    fn chores_from_rows(
+        mut rows: rusqlite::Rows,
+    ) -> Vec<Chore> {
+        let mut chores = Vec::new();
+        while let Some(row) = rows.next().unwrap_or(None) {
+            chores.push(Chore {
+                chore_id: row.get("chore_id").unwrap(),
+                chore_title: row.get("chore_title").unwrap(),
+                chore_spontaneous_work_enable: row.get("chore_spontaneous_work_enable").unwrap(),
+                chore_created_ts: row.get("chore_created_ts").unwrap(),
+                chore_archived_ts: row.get("chore_archived_ts").unwrap(),
+            });
+        }
+        chores
+    }
+
     let lite = mdb.lock().lite.clone();
     let conn = lite.lock();
     let mut stmt = conn.prepare("SELECT * FROM chores WHERE chore_id = ?1").unwrap();
@@ -197,7 +154,7 @@ pub fn chore_get(
 }
 
 pub fn chore_event_get(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     chore_event_id: String,
 ) -> Result<ChoreEvent, String> {
     let lite = mdb.lock().lite.clone();
@@ -399,10 +356,27 @@ pub async fn handle_db_v1_chores_sub(
 }
 
 fn _chore_get_with_quicksearch(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     chore_id: String,
     post: &ChoresSubscriptionPost,
 ) -> Result<(Vec<Chore>, Vec<ChoreEvent>), String> {
+    fn chore_events_from_rows(
+        mut rows: rusqlite::Rows,
+    ) -> Vec<ChoreEvent> {
+        let mut events = Vec::new();
+        while let Some(row) = rows.next().unwrap_or(None) {
+            events.push(ChoreEvent {
+                chore_event_id: row.get("chore_event_id").unwrap(),
+                chore_event_belongs_to_chore_id: row.get("chore_event_belongs_to_chore_id").unwrap(),
+                chore_event_summary: row.get("chore_event_summary").unwrap(),
+                chore_event_ts: row.get("chore_event_ts").unwrap(),
+                chore_event_link: row.get("chore_event_link").unwrap(),
+                chore_event_cthread_id: row.get("chore_event_cthread_id").unwrap_or(None),
+            });
+        }
+        events
+    }
+
     let lite = mdb.lock().lite.clone();
     let conn = lite.lock();
 

@@ -10,12 +10,12 @@ use async_stream::stream;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
-use crate::memdb::db_structs::{MemdbDB, CThread};
+use crate::memdb::db_structs::{MemDB, CThread};
 use crate::memdb::memdb_pubsub_trigerred;
 
 
 pub fn cthread_get(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     cthread_id: String,
 ) -> Result<CThread, String> {
     let lite = mdb.lock().lite.clone();
@@ -137,7 +137,7 @@ pub fn cthread_set_lowlevel(
 }
 
 pub fn cthread_set(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     cthread: &CThread,
 ) {
     let (lite, memdb_sleeping_point) = {
@@ -164,7 +164,7 @@ pub fn cthread_set(
 }
 
 pub fn cthread_apply_json(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     incoming_json: serde_json::Value,
 ) -> Result<CThread, String> {
     let cthread_id = incoming_json.get("cthread_id")
@@ -298,7 +298,7 @@ pub async fn handle_db_v1_cthreads_sub(
 }
 
 pub fn cthread_quicksearch(
-    mdb: Arc<ParkMutex<MemdbDB>>,
+    mdb: Arc<ParkMutex<MemDB>>,
     cthread_id: &String,
     post: &CThreadSubscription,
 ) -> Result<Vec<CThread>, String> {

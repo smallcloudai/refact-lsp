@@ -165,7 +165,7 @@ pub struct GlobalContext {
     pub integration_sessions: HashMap<String, Arc<AMutex<Box<dyn IntegrationSession>>>>,
     pub codelens_cache: Arc<AMutex<crate::http::routers::v1::code_lens::CodeLensCache>>,
     pub docker_ssh_tunnel: Arc<AMutex<Option<SshTunnel>>>,
-    pub memdb: Arc<ParkMutex<crate::memdb::db_structs::MemdbDB>>,
+    pub memdb: Arc<ParkMutex<crate::memdb::db_structs::MemDB>>,
 }
 
 pub type SharedGlobalContext = Arc<ARwLock<GlobalContext>>;  // TODO: remove this type alias, confusing
