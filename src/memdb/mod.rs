@@ -14,23 +14,6 @@ pub mod db_schema;
 pub mod db_structs;
 mod db_memories;
 
-pub fn chore_pubub_push(
-    transaction: &rusqlite::Transaction,
-    channel: &str,
-    action: &str,
-    event_json: &serde_json::Value,
-) {
-    match transaction.execute(
-        "INSERT INTO pubsub_events (pubevent_channel, pubevent_action, pubevent_json)
-         VALUES (?1, ?2, ?3)",
-        rusqlite::params![channel, action, event_json.to_string()],
-    ) {
-        Ok(_) => {},
-        Err(e) => {
-            tracing::error!("Failed to insert pubsub event: {}", e);
-        }
-    }
-}
 
 pub async fn memdb_pubsub_trigerred(
     gcx: Arc<ARwLock<GlobalContext>>,
