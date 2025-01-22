@@ -249,7 +249,7 @@ pub async fn handle_db_v1_cmessages_sub(
         }
 
         loop {
-            if !crate::memdb::memdb_pubsub_trigerred(gcx.clone(), &mdb, 10).await {
+            if !crate::memdb::pubsub_trigerred(gcx.clone(), &mdb, 10).await {
                 break;
             }
             let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {

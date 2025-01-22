@@ -24,11 +24,11 @@ pub fn chore_set(
     ) -> Result<usize, String> {
         let updated_rows = tx.execute(
         "UPDATE chores SET
-            chore_title = ?2,
-            chore_spontaneous_work_enable = ?3,
-            chore_created_ts = ?4,
-            chore_archived_ts = ?5
-        WHERE chore_id = ?1",
+                chore_title = ?2,
+                chore_spontaneous_work_enable = ?3,
+                chore_created_ts = ?4,
+                chore_archived_ts = ?5
+            WHERE chore_id = ?1",
             params![
             chore.chore_id,
             chore.chore_title,
@@ -78,12 +78,12 @@ pub fn chore_event_set(
     ) -> Result<usize, String> {
         let updated_rows = tx.execute(
         "UPDATE chore_events SET
-            chore_event_belongs_to_chore_id = ?2,
-            chore_event_summary = ?3,
-            chore_event_ts = ?4,
-            chore_event_link = ?5,
-            chore_event_cthread_id = ?6
-        WHERE chore_event_id = ?1",
+                chore_event_belongs_to_chore_id = ?2,
+                chore_event_summary = ?3,
+                chore_event_ts = ?4,
+                chore_event_link = ?5,
+                chore_event_cthread_id = ?6
+            WHERE chore_event_id = ?1",
             params![
             cevent.chore_event_id,
             cevent.chore_event_belongs_to_chore_id,
@@ -252,104 +252,6 @@ pub async fn handle_db_v1_chore_event_update(
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
         .body(Body::from(json!({"status": "success"}).to_string()))
-        .unwrap();
-
-    Ok(response)
-}
-
-#[derive(Deserialize, Default)]
-struct ChoresSubscriptionPost {
-    quicksearch: String,
-    limit: usize,
-    only_archived: bool,
-}
-
-// HTTP handler
-pub async fn handle_db_v1_chores_sub(
-    Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
-    body_bytes: hyper::body::Bytes,
-) -> Result<Response<Body>, ScratchError> {
-    let post: ChoresSubscriptionPost = serde_json::from_slice(&body_bytes).map_err(|e| {
-        ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
-    })?;
-
-    let mdb = gcx.read().await.memdb.clone();
-    let lite_arc = mdb.lock().lite.clone();
-
-    let (pre_existing_chores, pre_existing_cevents, mut last_pubsub_id) = {
-        let lite = mdb.lock().lite.clone();
-        let max_event_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0))
-            .map_err(|e| { ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get max event ID: {}", e)) })?;
-        let (pre_existing_chores, pre_existing_cevents) = _chore_get_with_quicksearch(mdb.clone(), String::new(), &post)
-            .map_err(|e| ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        (pre_existing_chores, pre_existing_cevents, max_event_id)
-    };
-
-    let sse = stream! {
-        for chore in pre_existing_chores {
-            let e = json!({
-                "sub_event": "chore_update",
-                "chore_rec": chore
-            });
-            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
-        }
-        for cevent in pre_existing_cevents {
-            let e = json!({
-                "sub_event": "chore_event_update",
-                "chore_event_rec": cevent
-            });
-            yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
-        }
-
-        loop {
-            if !crate::memdb::memdb_pubsub_trigerred(gcx.clone(), &mdb, 10).await {
-                break;
-            }
-            let (deleted_chore_keys, updated_chore_keys) = match _chore_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {
-                Ok(x) => x,
-                Err(e) => {
-                    tracing::error!("handle_db_v1_chores_sub(1): {}", e);
-                    break;
-                }
-            };
-            for deleted_key in deleted_chore_keys {
-                let delete_event = json!({
-                    "sub_event": "chore_delete",
-                    "chore_id": deleted_key,
-                });
-                yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&delete_event).unwrap()));
-            }
-            for updated_key in updated_chore_keys {
-                let (chores, cevents) = match _chore_get_with_quicksearch(mdb.clone(), updated_key.clone(), &post) {
-                    Ok(chores) => chores,
-                    Err(e) => {
-                        tracing::error!("handle_db_v1_chores_sub(2): {}", e);
-                        break;
-                    }
-                };
-                for updated_chore in chores {
-                    let update_event = json!({
-                        "sub_event": "chore_update",
-                        "chore_rec": updated_chore
-                    });
-                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
-                }
-                for updated_event in cevents {
-                    let update_event = json!({
-                        "sub_event": "chore_event_update",
-                        "chore_event_rec": updated_event
-                    });
-                    yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&update_event).unwrap()));
-                }
-            }
-        }
-    };
-
-    let response = Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream")
-        .header("Cache-Control", "no-cache")
-        .body(Body::wrap_stream(sse))
         .unwrap();
 
     Ok(response)

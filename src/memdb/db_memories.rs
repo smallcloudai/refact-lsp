@@ -22,13 +22,6 @@ use crate::vecdb::vdb_structs::{
 use crate::vecdb::vdb_thread::{vectorizer_enqueue_dirty_memory, FileVectorizerService};
 use zerocopy::AsBytes;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemdbSubEvent {
-    pub pubevent_id: i64,
-    pub pubevent_action: String,
-    pub pubevent_memid: String,
-    pub pubevent_json: String,
-}
 
 fn map_row_to_memo_record(row: &rusqlite::Row) -> rusqlite::Result<MemoRecord> {
     Ok(MemoRecord {
@@ -277,35 +270,6 @@ pub async fn memories_search(
         query_text: query.clone(),
         results,
     })
-}
-
-pub async fn memdb_subscription_poll(
-    mdb: Arc<ParkMutex<MemDB>>,
-    from_memid: Option<i64>,
-) -> rusqlite::Result<Vec<MemdbSubEvent>, String> {
-    let lite = mdb.lock().lite.clone();
-    let query = "
-        SELECT pubevent_id, pubevent_action, pubevent_memid, pubevent_json
-        FROM pubsub_events
-        WHERE pubevent_id > ?1
-        ORDER BY pubevent_id ASC
-    ";
-    let from_id = from_memid.unwrap_or(0);
-    let lite_locked = lite.lock();
-    let mut stmt = lite_locked.prepare(query).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([from_id], |row| {
-            Ok(MemdbSubEvent {
-                pubevent_id: row.get(0)?,
-                pubevent_action: row.get(1)?,
-                pubevent_memid: row.get(2)?,
-                pubevent_json: row.get(3)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?)
 }
 
 async fn recall_dirty_memories_and_mark_them_not_dirty(

@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 
 use crate::global_context::GlobalContext;
 use crate::memdb::db_structs::{CThread, CMessage};
-use crate::memdb::memdb_pubsub_trigerred;
+use crate::memdb::pubsub_trigerred;
 use crate::memdb::db_cthread::CThreadSubscription;
 use crate::call_validation::{ChatContent, ChatMessage, ChatUsage};
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -43,7 +43,7 @@ pub async fn look_for_a_job(
 
     loop {
         let sleep_seconds = if might_work_on_cthread_id.is_empty() { SLEEP_IF_NO_WORK_SEC } else { 1 };
-        if !memdb_pubsub_trigerred(gcx.clone(), &mdb, sleep_seconds).await {
+        if !pubsub_trigerred(gcx.clone(), &mdb, sleep_seconds).await {
             break;
         }
         let (deleted_cthread_ids, updated_cthread_ids) = match crate::memdb::db_cthread::cthread_subsription_poll(lite_arc.clone(), &mut last_pubsub_id) {

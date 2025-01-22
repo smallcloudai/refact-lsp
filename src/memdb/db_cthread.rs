@@ -11,7 +11,7 @@ use async_stream::stream;
 use crate::custom_error::ScratchError;
 use crate::global_context::GlobalContext;
 use crate::memdb::db_structs::{MemDB, CThread};
-use crate::memdb::memdb_pubsub_trigerred;
+use crate::memdb::pubsub_trigerred;
 
 
 pub fn cthread_get(
@@ -248,7 +248,7 @@ pub async fn handle_db_v1_cthreads_sub(
             yield Ok::<_, ScratchError>(format!("data: {}\n\n", serde_json::to_string(&e).unwrap()));
         }
         loop {
-            if !memdb_pubsub_trigerred(gcx.clone(), &mdb, 10).await {
+            if !pubsub_trigerred(gcx.clone(), &mdb, 10).await {
                 break;
             }
             let (deleted_cthread_ids, updated_cthread_ids) = match cthread_subsription_poll(lite_arc.clone(), &mut last_pubsub_id) {
