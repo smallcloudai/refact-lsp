@@ -4,12 +4,13 @@ use tokio::sync::Notify as ANotify;
 use parking_lot::Mutex as ParkMutex;
 use rusqlite::Connection;
 
-use crate::memdb::db_structs::ChoreDB;
-
+use crate::memdb::db_structs::MemdbDB;
+use crate::vecdb::vdb_structs::VecdbConstants;
 
 fn _make_connection(
     config_dir: &PathBuf,
-) -> Result<Arc<ParkMutex<ChoreDB>>, String> {
+    constants: &VecdbConstants,
+) -> Result<Arc<ParkMutex<MemdbDB>>, String> {
     let db_path = config_dir.join("memdb.sqlite");
     let db = Connection::open_with_flags(
         db_path,
@@ -24,8 +25,11 @@ fn _make_connection(
     if journal_mode != "wal" {
         return Err(format!("Failed to set WAL journal mode. Current mode: {}", journal_mode));
     }
-    let db = ChoreDB {
+    let db = MemdbDB {
         lite: Arc::new(ParkMutex::new(db)),
+        vecdb_constants: constants.clone(),
+        dirty_memids: Vec::new(),
+        dirty_everything: true,
         memdb_sleeping_point: Arc::new(ANotify::new()),
     };
     Ok(Arc::new(ParkMutex::new(db)))
@@ -33,9 +37,10 @@ fn _make_connection(
 
 pub async fn memdb_init(
     config_dir: &PathBuf,
+    constants: &VecdbConstants,
     reset_memory: bool,
-) -> Arc<ParkMutex<ChoreDB>> {
-    let db = match _make_connection(config_dir) {
+) -> Arc<ParkMutex<MemdbDB>> {
+    let db = match _make_connection(config_dir, constants) {
         Ok(db) => db,
         Err(err) => panic!("Failed to initialize chore database: {}", err),
     };

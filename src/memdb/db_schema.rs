@@ -160,6 +160,24 @@ pub fn create_tables_202412(conn: &Connection, sleeping_point: Arc<Notify>, rese
         [],
     ).map_err(|e| e.to_string())?;
 
+    // Embeddings
+    conn.execute("DROP TABLE IF EXISTS embeddings", []).map_err(|e| e.to_string())?;
+    conn.execute(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS embeddings using vec0(
+              embedding float[{embedding_size}] distance_metric=cosine,
+              +memid text
+            );"),
+                 [],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS embeddings_delete_old
+            AFTER DELETE ON memories
+            BEGIN
+                DELETE FROM embeddings WHERE memid = OLD.memid;
+            END;",
+        [],
+    ).map_err(|e| e.to_string())?;
+
     setup_triggers(&conn, "memories", vec![
         "memid", "m_type", "m_goal", "m_project", "m_payload", "m_origin",
         "mstat_correct", "mstat_relevant", "mstat_times_used"

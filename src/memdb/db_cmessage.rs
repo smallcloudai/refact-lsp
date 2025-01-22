@@ -138,7 +138,7 @@ pub async fn handle_db_v1_cmessages_update(
     Extension(gcx): Extension<Arc<ARwLock<GlobalContext>>>,
     body_bytes: hyper::body::Bytes,
 ) -> Result<Response<Body>, ScratchError> {
-    let cdb = gcx.read().await.memdb.clone();
+    let mdb = gcx.read().await.memdb.clone();
 
     let incoming_json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|e| {
         tracing::error!("cannot parse input:\n{:?}", body_bytes);
@@ -150,7 +150,7 @@ pub async fn handle_db_v1_cmessages_update(
     })?;
 
     let (lite, memdb_sleeping_point) = {
-        let db = cdb.lock();
+        let db = mdb.lock();
         (db.lite.clone(), db.memdb_sleeping_point.clone())
     };
     {
@@ -213,8 +213,8 @@ pub async fn handle_db_v1_cmessages_sub(
         ScratchError::new(StatusCode::BAD_REQUEST, format!("JSON problem: {}", e))
     })?;
 
-    let cdb = gcx.read().await.memdb.clone();
-    let lite_arc = cdb.lock().lite.clone();
+    let mdb = gcx.read().await.memdb.clone();
+    let lite_arc = mdb.lock().lite.clone();
 
     let (pre_existing_cmessages, mut last_pubsub_id) = {
         let mut conn = lite_arc.lock();
@@ -249,7 +249,7 @@ pub async fn handle_db_v1_cmessages_sub(
         }
 
         loop {
-            if !crate::memdb::chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, 10).await {
+            if !crate::memdb::memdb_pubsub_trigerred(gcx.clone(), &mdb, 10).await {
                 break;
             }
             let (deleted_cmessage_keys, updated_cmessage_keys) = match _cmessage_subscription_poll(lite_arc.clone(), &mut last_pubsub_id) {

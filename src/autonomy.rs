@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 
 use crate::global_context::GlobalContext;
 use crate::memdb::db_structs::{CThread, CMessage};
-use crate::memdb::chore_pubsub_sleeping_procedure;
+use crate::memdb::memdb_pubsub_trigerred;
 use crate::memdb::db_cthread::CThreadSubscription;
 use crate::call_validation::{ChatContent, ChatMessage, ChatUsage};
 use crate::at_commands::at_commands::AtCommandsContext;
@@ -21,11 +21,11 @@ pub async fn look_for_a_job(
 ) {
     let worker_pid = std::process::id();
     let worker_name = format!("aworker-{}-{}", worker_pid, worker_n);
-    let cdb = gcx.read().await.memdb.clone();
-    let lite_arc = cdb.lock().lite.clone();
+    let mdb = gcx.read().await.memdb.clone();
+    let lite_arc = mdb.lock().lite.clone();
 
     let (mut might_work_on_cthread_id, mut last_pubsub_id) = {
-        let lite = cdb.lock().lite.clone();
+        let lite = mdb.lock().lite.clone();
         // intentional unwrap(), it's better to crash quickly than continue with a non-functioning thread
         let max_pubsub_id: i64 = lite.lock().query_row("SELECT COALESCE(MAX(pubevent_id), 0) FROM pubsub_events", [], |row| row.get(0)).unwrap();
         let post = CThreadSubscription {
@@ -33,7 +33,7 @@ pub async fn look_for_a_job(
             limit: 100,
         };
         // intentional unwrap()
-        let cthreads = crate::memdb::db_cthread::cthread_quicksearch(cdb.clone(), &String::new(), &post).unwrap();
+        let cthreads = crate::memdb::db_cthread::cthread_quicksearch(mdb.clone(), &String::new(), &post).unwrap();
         let mut might_work_on_cthread_id = IndexSet::new();
         for ct in cthreads.iter() {
             might_work_on_cthread_id.insert(ct.cthread_id.clone());
@@ -43,7 +43,7 @@ pub async fn look_for_a_job(
 
     loop {
         let sleep_seconds = if might_work_on_cthread_id.is_empty() { SLEEP_IF_NO_WORK_SEC } else { 1 };
-        if !chore_pubsub_sleeping_procedure(gcx.clone(), &cdb, sleep_seconds).await {
+        if !memdb_pubsub_trigerred(gcx.clone(), &mdb, sleep_seconds).await {
             break;
         }
         let (deleted_cthread_ids, updated_cthread_ids) = match crate::memdb::db_cthread::cthread_subsription_poll(lite_arc.clone(), &mut last_pubsub_id) {
@@ -81,8 +81,8 @@ async fn look_if_the_job_for_me(
     cthread_id: &String,
 ) -> Result<bool, String> {
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
-    let cdb = gcx.read().await.memdb.clone();
-    let lite_arc = cdb.lock().lite.clone();
+    let mdb = gcx.read().await.memdb.clone();
+    let lite_arc = mdb.lock().lite.clone();
     let (cthread_rec, cmessages) = {
         let mut conn = lite_arc.lock();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -142,7 +142,7 @@ async fn look_if_the_job_for_me(
     apply_json["cthread_locked_by"] = serde_json::json!("");
     apply_json["cthread_locked_ts"] = serde_json::json!(0);
     tracing::info!("{} {} /autonomous work\n{}", worker_name, cthread_id, apply_json);
-    crate::memdb::db_cthread::cthread_apply_json(cdb, apply_json)?;
+    crate::memdb::db_cthread::cthread_apply_json(mdb, apply_json)?;
 
     Ok(true)  // true means don't come back to it again
 }
@@ -153,9 +153,9 @@ async fn do_the_job(
     cthread_rec: &CThread,
     cmessages: &Vec<CMessage>,
 ) -> Result<serde_json::Value, String> {
-    let cdb = gcx.read().await.memdb.clone();
+    let mdb = gcx.read().await.memdb.clone();
     let (lite, memdb_sleeping_point) = {
-        let db = cdb.lock();
+        let db = mdb.lock();
         (db.lite.clone(), db.memdb_sleeping_point.clone())
     };
 

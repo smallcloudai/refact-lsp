@@ -12,7 +12,7 @@ pub mod db_cthread;
 pub mod db_init;
 pub mod db_schema;
 pub mod db_structs;
-
+mod db_memories;
 
 pub fn chore_pubub_push(
     transaction: &rusqlite::Transaction,
@@ -32,9 +32,9 @@ pub fn chore_pubub_push(
     }
 }
 
-pub async fn chore_pubsub_sleeping_procedure(
+pub async fn memdb_pubsub_trigerred(
     gcx: Arc<ARwLock<GlobalContext>>,
-    db: &Arc<ParkMutex<db_structs::ChoreDB>>,
+    db: &Arc<ParkMutex<db_structs::MemdbDB>>,
     sleep_seconds: u64
 ) -> bool {
     let shutdown_flag: Arc<AtomicBool> = gcx.read().await.shutdown_flag.clone();

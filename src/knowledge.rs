@@ -12,7 +12,7 @@ use tokio::sync::{Mutex as AMutex, Notify};
 use tokio::time::Instant;
 use tokio_rusqlite::Connection;
 
-use zerocopy::IntoBytes;
+use zerocopy::AsBytes;
 use crate::ast::chunk_utils::official_text_hashing_function;
 use crate::vecdb::vdb_sqlite::VecDBSqlite;
 use crate::vecdb::vdb_structs::{MemoRecord, SimpleTextHashVector, VecDbStatus, VecdbConstants};
@@ -58,14 +58,13 @@ async fn setup_db(conn: &Connection, pubsub_notifier: Arc<Notify>) -> Result<(),
     extern "C" fn pubsub_trigger_hook(
         user_data: *mut c_void,
         action: c_int,
-        db_name: *const std::os::raw::c_char,
-        table_name: *const std::os::raw::c_char,
+        db_name: *const i8,
+        table_name: *const i8,
         _: i64,
     ) {
         let notify = unsafe { &*(user_data as *const Notify) };
-        // Use c_char which is platform dependent (i8 or u8)
-        let db_name = unsafe { std::ffi::CStr::from_ptr(db_name as *const std::os::raw::c_char).to_str().unwrap_or("unknown") };
-        let table_name = unsafe { std::ffi::CStr::from_ptr(table_name as *const std::os::raw::c_char).to_str().unwrap_or("unknown") };
+        let db_name = unsafe { std::ffi::CStr::from_ptr(db_name).to_str().unwrap_or("unknown") };
+        let table_name = unsafe { std::ffi::CStr::from_ptr(table_name).to_str().unwrap_or("unknown") };
         let operation = match action {
             18 => "INSERT",
             9 => "DELETE",
@@ -329,7 +328,7 @@ impl MemoriesDatabase {
 
     pub async fn permdb_update_used(&self, memid: &str, mstat_correct: i32, mstat_relevant: i32) -> rusqlite::Result<usize, String> {
         let conn = self.conn.lock().await;
-        let memid_owned = memid.to_string();
+        let memid_owned = memid.to_string();        
         conn.call(move |conn| {
             let count: usize = conn.execute(
                 "UPDATE memories SET 
