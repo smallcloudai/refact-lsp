@@ -7,6 +7,7 @@ use ropey::Rope;
 
 
 use crate::custom_error::ScratchError;
+use crate::git::Checkpoint;
 use crate::scratchpads::multimodality::MultimodalElement;
 
 
@@ -146,7 +147,7 @@ pub struct ChatMessage {
     #[serde(default, skip_serializing_if="Option::is_none")]
     pub usage: Option<ChatUsage>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
-    pub checkpoints: Vec<String>,
+    pub checkpoints: Vec<Checkpoint>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
