@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::sync::Mutex as AMutex;
-use tokio::process::Command;
 use async_trait::async_trait;
 use tracing::{error, info};
+use tokio::sync::Mutex as AMutex;
+use tokio::sync::RwLock as ARwLock;
+use tokio::process::Command;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::global_context::GlobalContext;
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ContextEnum, ChatMessage, ChatContent, ChatUsage};
 use crate::files_correction::to_pathbuf_normalize;
@@ -23,15 +25,16 @@ pub struct SettingsGitLab {
 
 #[derive(Default)]
 pub struct ToolGitlab {
-    pub common:  IntegrationCommon,
+    pub common: IntegrationCommon,
     pub settings_gitlab: SettingsGitLab,
     pub config_path: String,
 }
 
+#[async_trait]
 impl IntegrationTrait for ToolGitlab {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
+    async fn integr_settings_apply(&mut self, _gcx: Arc<ARwLock<GlobalContext>>, config_path: String, value: &serde_json::Value) -> Result<(), String> {
         match serde_json::from_value::<SettingsGitLab>(value.clone()) {
             Ok(settings_gitlab) => {
                 info!("GitLab settings applied: {:?}", settings_gitlab);
@@ -61,7 +64,7 @@ impl IntegrationTrait for ToolGitlab {
         self.common.clone()
     }
 
-    fn integr_tools(&self, _integr_name: &str) -> Vec<Box<dyn crate::tools::tools_description::Tool + Send>> {
+    async fn integr_tools(&self, _integr_name: &str) -> Vec<Box<dyn crate::tools::tools_description::Tool + Send>> {
         vec![Box::new(ToolGitlab {
             common: self.common.clone(),
             settings_gitlab: self.settings_gitlab.clone(),
