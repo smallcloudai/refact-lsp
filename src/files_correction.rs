@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use std::path::{Component, PathBuf};
+use serde::Deserialize;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
 
@@ -304,6 +305,27 @@ pub async fn get_active_project_path(gcx: Arc<ARwLock<GlobalContext>>) -> Option
     None
 }
 
+pub async fn get_active_workspace_folder(gcx: Arc<ARwLock<GlobalContext>>) -> Option<PathBuf> {
+    let workspace_folders = get_project_dirs(gcx.clone()).await;
+    
+    let active_file = gcx.read().await.documents_state.active_file_path.clone();
+    if let Some(active_file) = active_file {
+        for f in &workspace_folders {
+            if active_file.starts_with(f) {
+                tracing::info!("found that {:?} is the workspace folder", f);
+                return Some(f.clone());
+            }
+        }
+    }
+
+    if let Some(first_workspace_folder) = workspace_folders.first() {
+        tracing::info!("found that {:?} is the workspace folder", first_workspace_folder);
+        Some(first_workspace_folder.clone())
+    } else {
+        None
+    }
+}
+
 pub async fn shortify_paths(gcx: Arc<ARwLock<GlobalContext>>, paths: &Vec<String>) -> Vec<String> {
     let (_, indexed_paths) = files_cache_rebuild_as_needed(gcx.clone()).await;
     let workspace_folders = get_project_dirs(gcx.clone()).await
@@ -386,6 +408,14 @@ pub fn canonical_path(s: &str) -> PathBuf {
     });
     // info!("canonical_path:\n{:?}\n{:?}", s, res);
     res
+}
+
+pub fn serialize_path<S: serde::Serializer>(path: &PathBuf, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&path.to_string_lossy())
+}
+
+pub fn deserialize_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<PathBuf, D::Error> {
+    Ok(PathBuf::from(String::deserialize(deserializer)?))
 }
 
 #[cfg(test)]
