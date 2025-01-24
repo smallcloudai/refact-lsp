@@ -11,14 +11,17 @@ use ropey::Rope;
 use tokio::sync::{RwLock as ARwLock, Mutex as AMutex};
 use walkdir::WalkDir;
 use which::which;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::git::git_ls_files;
 use crate::global_context::GlobalContext;
 use crate::telemetry;
-use crate::file_filter::{is_this_inside_blacklisted_dir, is_valid_file, BLACKLISTED_DIRS, SOURCE_FILE_EXTENSIONS};
+use crate::file_filter::{is_valid_file, SOURCE_FILE_EXTENSIONS};
 use crate::ast::ast_indexer_thread::ast_indexer_enqueue_files;
 use crate::privacy::{check_file_privacy, load_privacy_if_needed, PrivacySettings, FilePrivacyLevel};
+use crate::blocklist::{is_this_inside_blocklisted_dir, is_blocklisted, load_global_indexing_yaml,
+                       load_indexing_yaml, load_global_indexing_settings_if_needed,
+                       GlobalIndexingSettings, IndexingSettings};
 
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
@@ -241,11 +244,12 @@ async fn ls_files_under_version_control(path: &PathBuf) -> Option<Vec<PathBuf>> 
     }
 }
 
-pub fn ls_files(path: &PathBuf, recursive: bool) -> Result<Vec<PathBuf>, String> {
-    if !path.is_dir() {
-        return Err(format!("path '{}' is not a directory", path.display()));
-    }
-
+pub fn _ls_files(
+    global_indexing_settings: &GlobalIndexingSettings,
+    path: &PathBuf,
+    recursive: bool,
+    blocklist_check: bool,
+) -> Result<Vec<PathBuf>, String> {
     let mut paths = vec![];
     let mut dirs_to_visit = vec![path.clone()];
 
@@ -265,16 +269,36 @@ pub fn ls_files(path: &PathBuf, recursive: bool) -> Result<Vec<PathBuf>, String>
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let path = entry.path();
-            if recursive && path.is_dir() && !(
-                path.file_name().unwrap_or_default().to_str().unwrap_or_default().starts_with(".") ||
-                BLACKLISTED_DIRS.contains(&path.file_name().unwrap_or_default().to_str().unwrap_or_default())
-            ) {
-                dirs_to_visit.push(path);
+            let indexing_settings = global_indexing_settings.get_indexing_settings(path.clone());
+            if recursive && path.is_dir() {
+                if !blocklist_check || !is_blocklisted(&indexing_settings, &path) {
+                    dirs_to_visit.push(path);
+                }
             } else if path.is_file() {
                 paths.push(path);
             }
         }
     }
+    Ok(paths)
+}
+
+pub fn ls_files(
+    global_indexing_settings: &GlobalIndexingSettings,
+    path: &PathBuf,
+    recursive: bool,
+) -> Result<Vec<PathBuf>, String> {
+    if !path.is_dir() {
+        return Err(format!("path '{}' is not a directory", path.display()));
+    }
+
+    let indexing_settings = global_indexing_settings.get_indexing_settings(path.clone());
+    let mut paths = _ls_files(global_indexing_settings, path, recursive, true).unwrap();
+    if recursive {
+        for additional_indexing_dir in indexing_settings.additional_indexing_dirs.iter() {
+            paths.extend(_ls_files(global_indexing_settings, &PathBuf::from(additional_indexing_dir), recursive, false).unwrap());
+        }
+    }
+
     Ok(paths)
 }
 
@@ -331,13 +355,15 @@ pub async fn detect_vcs_for_a_file_path(file_path: &PathBuf) -> Option<(PathBuf,
 async fn _ls_files_under_version_control_recursive(
     all_files: &mut Vec<PathBuf>,
     vcs_folders: &mut Vec<PathBuf>,
+    global_indexing_settings: IndexingSettings,
     path: PathBuf,
     allow_files_in_hidden_folders: bool,
-    ignore_size_thresholds: bool
+    ignore_size_thresholds: bool,
+    check_blocklist: bool,
 ) {
     let mut candidates: Vec<PathBuf> = vec![path.clone()];
     let mut rejected_reasons: HashMap<String, usize> = HashMap::new();
-    let mut blacklisted_dirs_cnt: usize = 0;
+    let mut blocklisted_dirs_cnt: usize = 0;
     while !candidates.is_empty() {
         let local_path = candidates.pop().unwrap();
         if local_path.is_file() {
@@ -354,10 +380,6 @@ async fn _ls_files_under_version_control_recursive(
             }
         }
         if local_path.is_dir() {
-            if BLACKLISTED_DIRS.contains(&local_path.file_name().unwrap().to_str().unwrap()) {
-                blacklisted_dirs_cnt += 1;
-                continue;
-            }
             let maybe_files = ls_files_under_version_control(&local_path).await;
             if let Some(v) = maybe_files {
                 vcs_folders.push(local_path.clone());
@@ -374,6 +396,10 @@ async fn _ls_files_under_version_control_recursive(
                     }
                 }
             } else {
+                if check_blocklist && is_blocklisted(&global_indexing_settings, &local_path) {
+                    blocklisted_dirs_cnt += 1;
+                    continue;
+                }
                 let local_paths: Vec<PathBuf> = WalkDir::new(local_path.clone()).max_depth(1)
                     .into_iter()
                     .filter_map(|e| e.ok())
@@ -391,11 +417,12 @@ async fn _ls_files_under_version_control_recursive(
     if rejected_reasons.is_empty() {
         info!("    no bad files at all");
     }
-    info!("also the loop bumped into {} blacklisted dirs", blacklisted_dirs_cnt);
+    info!("also the loop bumped into {} blocklisted dirs", blocklisted_dirs_cnt);
 }
 
 pub async fn retrieve_files_in_workspace_folders(
     proj_folders: Vec<PathBuf>,
+    global_indexing_settings: IndexingSettings,
     allow_files_in_hidden_folders: bool,   // true when syncing to remote container
     ignore_size_thresholds: bool,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
@@ -405,10 +432,35 @@ pub async fn retrieve_files_in_workspace_folders(
         _ls_files_under_version_control_recursive(
             &mut all_files,
             &mut vcs_folders,
+            global_indexing_settings.clone(),
             proj_folder.clone(),
             allow_files_in_hidden_folders,
-            ignore_size_thresholds
+            ignore_size_thresholds,
+            true,
         ).await;
+    }
+    for indexing_root in vcs_folders.iter() {
+        let indexing_path = indexing_root.join(".refact").join("indexing.yaml");
+        match load_indexing_yaml(&indexing_path, Some(&indexing_root)).await {
+            Ok(indexing_settings) => {
+                for additional_indexing_dirs in &indexing_settings.additional_indexing_dirs {
+                    info!("retrieve files from additional indexing dir: {}", additional_indexing_dirs);
+                    let mut _vcs_folders = vec![];
+                    _ls_files_under_version_control_recursive(
+                        &mut all_files,
+                        &mut _vcs_folders,
+                        indexing_settings.clone(),
+                        PathBuf::from(additional_indexing_dirs.clone()),
+                        allow_files_in_hidden_folders,
+                        ignore_size_thresholds,
+                        false,
+                    ).await;
+                }
+            },
+            Err(e) => {
+                error!("{}, skip", e)
+            }
+        }
     }
     info!("in all workspace folders, VCS roots found:");
     for vcs_folder in vcs_folders.iter() {
@@ -477,8 +529,10 @@ pub async fn enqueue_all_files_from_workspace_folders(
     let folders: Vec<PathBuf> = gcx.read().await.documents_state.workspace_folders.lock().unwrap().clone();
 
     info!("enqueue_all_files_from_workspace_folders started files search with {} folders", folders.len());
+    let global_indexing_settings = load_global_indexing_yaml(gcx.clone()).await;
     let (all_files, vcs_folders) = retrieve_files_in_workspace_folders(
         folders,
+        global_indexing_settings,
         false,
         false
     ).await;
@@ -665,8 +719,16 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
 {
     async fn on_create_modify(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut docs = vec![];
+        let global_indexing_settings;
+        if let Some(gcx) = gcx_weak.clone().upgrade() {
+            global_indexing_settings = load_global_indexing_settings_if_needed(gcx.clone()).await;
+        } else {
+            // the program is shutting down
+            return;
+        }
         for p in &event.paths {
-            if is_this_inside_blacklisted_dir(&p) {  // important to filter BEFORE canonical_path
+            let indexing_settings = global_indexing_settings.get_indexing_settings(p.clone());
+            if is_this_inside_blocklisted_dir(&indexing_settings, &p) {  // important to filter BEFORE canonical_path
                 continue;
             }
 
@@ -695,13 +757,22 @@ pub async fn file_watcher_event(event: Event, gcx_weak: Weak<ARwLock<GlobalConte
 
     async fn on_remove(gcx_weak: Weak<ARwLock<GlobalContext>>, event: Event) {
         let mut never_mind = true;
+        let global_indexing_settings;
+        if let Some(gcx) = gcx_weak.clone().upgrade() {
+            global_indexing_settings = load_global_indexing_settings_if_needed(gcx.clone()).await;
+        } else {
+            // the program is shutting down
+            return;
+        }
         for p in &event.paths {
-            never_mind &= is_this_inside_blacklisted_dir(&p);
+            let indexing_settings = global_indexing_settings.get_indexing_settings(p.clone());
+            never_mind &= is_this_inside_blocklisted_dir(&indexing_settings, &p);
         }
         let mut docs = vec![];
         if !never_mind {
             for p in &event.paths {
-                if is_this_inside_blacklisted_dir(&p) {
+                let indexing_settings = global_indexing_settings.get_indexing_settings(p.clone());
+                if is_this_inside_blocklisted_dir(&indexing_settings, &p) {
                     continue;
                 }
                 let cpath = crate::files_correction::canonical_path(&p.to_string_lossy().to_string());
