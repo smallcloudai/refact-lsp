@@ -722,6 +722,19 @@ pub const KNOWN_MODELS: &str = r####"
                 "qwen2.5/coder/32b/instruct/gptq8bit",
                 "qwen2.5/coder/32b/instruct"
             ]
+        },
+        "deepseek-r1-distill/1.5b/vllm": {
+            "n_ctx": 32768,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            },
+            "similar_models": [
+                "deepseek-r1-distill/7b/vllm",
+                "deepseek-r1-distill/8b/vllm",
+                "deepseek-r1-distill/14b/vllm",
+                "deepseek-r1-distill/32b/vllm",
+                "deepseek-r1-distill/70b/vllm"
+            ]
         }
     },
     "tokenizer_rewrite_path": {
