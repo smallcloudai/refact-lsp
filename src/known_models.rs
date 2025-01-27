@@ -238,6 +238,15 @@ pub const KNOWN_MODELS: &str = r####"
                 "grok-2-vision"
             ]
         },
+        "deepseek-chat": {
+            "n_ctx": 64000,
+            "supports_scratchpads": {
+                "REPLACE_PASSTHROUGH": {
+                    "context_format": "chat",
+                    "rag_ratio": 0.5
+                }
+            }
+        },
         "qwen2.5/coder/0.5b/instruct": {
             "n_ctx": 8192,
             "supports_scratchpads": {
