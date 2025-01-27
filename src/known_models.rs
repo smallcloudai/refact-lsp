@@ -590,6 +590,22 @@ pub const KNOWN_MODELS: &str = r####"
                 "PASSTHROUGH": {}
             }
         },
+        "deepseek-chat": {
+            "n_ctx": 64000,
+            "supports_tools": true,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
+        },
+        "deepseek-reasoner": {
+            "n_ctx": 64000,
+            "supports_tools": false,
+            "supports_multimodality": false,
+            "supports_scratchpads": {
+                "PASSTHROUGH": {}
+            }
+        },
         "qwen2.5/coder/0.5b/instruct": {
             "n_ctx": 8192,
             "supports_tools": false,
@@ -656,7 +672,10 @@ pub const KNOWN_MODELS: &str = r####"
         "gemini-1.5-flash": "Xenova/gemma2-tokenizer",
         "gemini-1.5-flash-8b": "Xenova/gemma2-tokenizer",
         "gemini-1.5-pro": "Xenova/gemma2-tokenizer",
-        "gemini-2.0-exp-advanced": "Xenova/gemma2-tokenizer"
+        "gemini-2.0-exp-advanced": "Xenova/gemma2-tokenizer",
+
+        "deepseek-chat":     "deepseek-ai/DeepSeek-V3",
+        "deepseek-reasoner": "deepseek-ai/DeepSeek-R1"
     }
 }
 "####;
