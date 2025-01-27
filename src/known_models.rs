@@ -603,6 +603,7 @@ pub const KNOWN_MODELS: &str = r####"
             "n_ctx": 64000,
             "supports_tools": true,
             "supports_multimodality": false,
+            "supports_agent": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
             }
