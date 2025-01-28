@@ -158,7 +158,7 @@ pub async fn handle_v1_links(
     // }
 
     if post.meta.chat_mode == ChatMode::PROJECT_SUMMARY {
-        if !get_tickets_from_messages(gcx.clone(), &post.messages).await.is_empty() {
+        if !get_tickets_from_messages(gcx.clone(), &post.messages, None).await.is_empty() {
             links.push(Link {
                 link_action: LinkAction::PatchAll,
                 link_text: "Save and return".to_string(),

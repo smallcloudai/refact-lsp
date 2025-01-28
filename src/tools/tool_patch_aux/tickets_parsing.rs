@@ -298,10 +298,14 @@ pub async fn parse_tickets(gcx: Arc<ARwLock<GlobalContext>>, content: &str, mess
 pub async fn get_tickets_from_messages(
     gcx: Arc<ARwLock<GlobalContext>>,
     messages: &Vec<ChatMessage>,
+    explanation_mb: Option<String>
 ) -> HashMap<String, TicketToApply> {
     let mut tickets: HashMap<String, TicketToApply> = HashMap::new();
     for (idx, message) in messages.iter().enumerate().filter(|(_, x)| x.role == "assistant") {
-        for ticket in parse_tickets(gcx.clone(), &message.content.content_text_only(), idx).await.into_iter() {
+        for mut ticket in parse_tickets(gcx.clone(), &message.content.content_text_only(), idx).await.into_iter() {
+            if let Some(explanation) = &explanation_mb {
+                ticket.hint_message = explanation.clone();
+            }
             if !ticket.is_truncated {
                 tickets.insert(ticket.id.clone(), ticket);
             }
