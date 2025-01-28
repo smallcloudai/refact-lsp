@@ -21,6 +21,7 @@ use crate::http::routers::v1::caps::handle_v1_caps;
 use crate::http::routers::v1::caps::handle_v1_ping;
 use crate::http::routers::v1::chat::{handle_v1_chat, handle_v1_chat_completions};
 use crate::http::routers::v1::chat_based_handlers::handle_v1_commit_message_from_diff;
+use crate::http::routers::v1::chat_based_handlers::handle_v1_trajectory_save;
 use crate::http::routers::v1::dashboard::get_dashboard_plots;
 use crate::http::routers::v1::docker::{handle_v1_docker_container_action, handle_v1_docker_container_list};
 use crate::http::routers::v1::git::handle_v1_git_commit;
@@ -42,8 +43,12 @@ use crate::http::routers::v1::system_prompt::handle_v1_prepend_system_prompt_and
 #[cfg(feature="vecdb")]
 use crate::http::routers::v1::vecdb::{handle_v1_vecdb_search, handle_v1_vecdb_status};
 #[cfg(feature="vecdb")]
-use crate::http::routers::v1::handlers_memdb::{handle_mem_query, handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized, handle_mem_list};
+use crate::http::routers::v1::handlers_memdb::{handle_mem_add, handle_mem_erase, handle_mem_update_used, handle_mem_block_until_vectorized};
 use crate::http::routers::v1::v1_integrations::{handle_v1_integration_get, handle_v1_integration_icon, handle_v1_integration_save, handle_v1_integration_delete, handle_v1_integrations, handle_v1_integrations_filtered};
+use crate::agent_db::db_cthread::{handle_db_v1_cthread_update, handle_db_v1_cthreads_sub};
+use crate::agent_db::db_cmessage::{handle_db_v1_cmessages_update, handle_db_v1_cmessages_sub};
+use crate::agent_db::db_chore::{handle_db_v1_chore_update, handle_db_v1_chore_event_update, handle_db_v1_chores_sub};
+use crate::http::routers::v1::handlers_memdb::{handle_mem_sub, handle_mem_upd};
 use crate::http::utils::telemetry_wrapper;
 
 pub mod code_completion;
@@ -157,13 +162,27 @@ pub fn make_v1_router() -> Router {
     let builder = builder
         .route("/vdb-search", telemetry_post!(handle_v1_vecdb_search))
         .route("/vdb-status", telemetry_get!(handle_v1_vecdb_status))
-        .route("/mem-query", telemetry_post!(handle_mem_query))
         .route("/mem-add", telemetry_post!(handle_mem_add))
         .route("/mem-erase", telemetry_post!(handle_mem_erase))
+        .route("/mem-upd", telemetry_post!(handle_mem_upd))
         .route("/mem-update-used", telemetry_post!(handle_mem_update_used))
         .route("/mem-block-until-vectorized", telemetry_get!(handle_mem_block_until_vectorized))
-        .route("/mem-list", telemetry_get!(handle_mem_list))
+        .route("/mem-sub", telemetry_post!(handle_mem_sub))
+        .route("/trajectory-save", telemetry_post!(handle_v1_trajectory_save))
         ;
 
+    builder.layer(CorsLayer::very_permissive())
+}
+
+pub fn make_db_v1_router() -> Router {
+    let builder = Router::new()
+        .route("/cthreads-sub", telemetry_post!(handle_db_v1_cthreads_sub))
+        .route("/cthread-update", telemetry_post!(handle_db_v1_cthread_update))
+        .route("/cmessages-sub", telemetry_post!(handle_db_v1_cmessages_sub))
+        .route("/cmessages-update", telemetry_post!(handle_db_v1_cmessages_update))
+        .route("/chores-sub", telemetry_post!(handle_db_v1_chores_sub))
+        .route("/chore-update", telemetry_post!(handle_db_v1_chore_update))
+        .route("/chore-event-update", telemetry_post!(handle_db_v1_chore_event_update))
+        ;
     builder.layer(CorsLayer::very_permissive())
 }

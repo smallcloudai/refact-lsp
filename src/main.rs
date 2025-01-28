@@ -15,7 +15,8 @@ use crate::lsp::spawn_lsp_task;
 use crate::telemetry::{basic_transmit, snippets_transmit};
 use crate::yaml_configs::create_configs::yaml_configs_try_create_all;
 use crate::yaml_configs::customization_loader::load_customization;
-
+use sqlite_vec::sqlite3_vec_init;
+use rusqlite::ffi::sqlite3_auto_extension;
 
 // mods roughly sorted by dependency ↓
 
@@ -58,9 +59,11 @@ mod forward_to_openai_endpoint;
 mod restream;
 
 mod call_validation;
+mod agent_db;
 mod dashboard;
 mod lsp;
 mod http;
+mod autonomy;
 
 mod integrations;
 mod privacy;
@@ -70,12 +73,16 @@ mod trajectories;
 
 #[tokio::main]
 async fn main() {
+    unsafe {
+        sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+    }
+    
     let cpu_num = std::thread::available_parallelism().unwrap().get();
     rayon::ThreadPoolBuilder::new().num_threads(cpu_num / 2).build_global().unwrap();
     let home_dir = to_pathbuf_normalize(&home::home_dir().ok_or(()).expect("failed to find home dir").to_string_lossy().to_string());
     let cache_dir = home_dir.join(".cache").join("refact");
     let config_dir = home_dir.join(".config").join("refact");
-    let (gcx, ask_shutdown_receiver, shutdown_flag, cmdline) = global_context::create_global_context(cache_dir.clone(), config_dir.clone()).await;
+    let (gcx, ask_shutdown_receiver, cmdline) = global_context::create_global_context(cache_dir.clone(), config_dir.clone()).await;
     let mut writer_is_stderr = false;
     let (logs_writer, _guard) = if cmdline.logs_stderr {
         writer_is_stderr = true;
@@ -176,7 +183,7 @@ async fn main() {
 
     let mut main_handle: Option<JoinHandle<()>> = None;
     if should_start_http {
-        main_handle = http::start_server(gcx.clone(), ask_shutdown_receiver, shutdown_flag).await;
+        main_handle = http::start_server(gcx.clone(), ask_shutdown_receiver).await;
     }
     if should_start_lsp {
         if main_handle.is_none() {
