@@ -35,6 +35,7 @@ pub struct ToolShell {
     pub config_path: String,
 }
 
+#[async_trait]
 impl IntegrationTrait for ToolShell {
     fn as_any(&self) -> &dyn std::any::Any { self }
 
@@ -43,7 +44,7 @@ impl IntegrationTrait for ToolShell {
         SHELL_INTEGRATION_SCHEMA
     }
 
-    fn integr_settings_apply(&mut self, value: &Value, config_path: String) -> Result<(), String> {
+    async fn integr_settings_apply(&mut self, _gcx: Arc<ARwLock<GlobalContext>>, config_path: String, value: &serde_json::Value) -> Result<(), String> {
         match serde_json::from_value::<SettingsShell>(value.clone()) {
             Ok(x) => self.cfg = x,
             Err(e) => {
@@ -70,7 +71,7 @@ impl IntegrationTrait for ToolShell {
         self.common.clone()
     }
 
-    fn integr_tools(&self, _integr_name: &str) -> Vec<Box<dyn crate::tools::tools_description::Tool + Send>> {
+    async fn integr_tools(&self, _integr_name: &str) -> Vec<Box<dyn crate::tools::tools_description::Tool + Send>> {
         vec![Box::new(ToolShell {
             common: self.common.clone(),
             cfg: self.cfg.clone(),
