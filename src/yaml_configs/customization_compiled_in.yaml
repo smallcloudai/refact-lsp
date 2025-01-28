@@ -44,6 +44,7 @@ PROMPT_PINS: |
      4. 📍OTHER
         - For anything that isn’t a file edit (e.g., explanations, command-line instructions).
   4. Tips
+     - Use only absolute file paths.
      - For multiple symbol changes, use `📍PARTIAL_EDIT`.
      - Include context lines above and below your changes for clarity.
      - Avoid rewriting the entire file if only a few edits are needed.
