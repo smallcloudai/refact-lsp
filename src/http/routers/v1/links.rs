@@ -87,14 +87,14 @@ async fn trunc_pinned_message_link(
         match chat_mode {
             ChatMode::AGENT => {
                 if !truncated_ids.is_empty() {
-                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}, continue to generate others (if needed). Then use patch() to apply them"))
+                    Some(format!("Regenerate truncated {truncated_ids} 📍-tickets and continue to generate others (if needed). Then use patch() to apply them"))
                 } else {
                     None
                 }
             }
             _ => {
                 if !truncated_ids.is_empty() {
-                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}, continue to generate others (if needed)"))
+                    Some(format!("Regenerate truncated {truncated_ids} 📍-tickets and continue to generate others (if needed)"))
                 } else {
                     None
                 }
