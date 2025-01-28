@@ -81,20 +81,20 @@ async fn trunc_pinned_message_link(
         let truncated_ids = tickets
             .iter()
             .filter(|t| t.is_truncated)
-            .map(|x| x.message_idx.to_string())
+            .map(|x| x.id.to_string())
             .join(", ");
         
         match chat_mode {
             ChatMode::AGENT => {
                 if !truncated_ids.is_empty() {
-                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}. Then use patch() to apply them"))
+                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}, continue to generate others (if needed). Then use patch() to apply them"))
                 } else {
                     None
                 }
             }
             _ => {
                 if !truncated_ids.is_empty() {
-                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}"))
+                    Some(format!("Regenerate truncated 📍-tickets: {truncated_ids}, continue to generate others (if needed)"))
                 } else {
                     None
                 }
@@ -118,7 +118,7 @@ async fn apply_patch_promptly_link(
         let ids_to_apply = tickets
             .iter()
             .filter(|t| !t.is_truncated)
-            .map(|x| x.message_idx.to_string())
+            .map(|x| x.id.to_string())
             .join(", ");
         if !has_truncated_tickets && !ids_to_apply.is_empty() {
             Some(format!("Use patch() to apply tickets: {ids_to_apply}"))
