@@ -202,18 +202,19 @@ pub async fn handle_v1_links(
             link_tooltip: format!(""),
             ..Default::default()
         });
-        links.push(Link {
-            link_action: LinkAction::FollowUp,
-            link_text: "Continue the last message".to_string(),
-            link_goto: None,
-            link_summary_path: None,
-            link_tooltip: format!(""),
-            ..Default::default()
-        });
         if last_message_have_pinned_messages(&post.messages) {
             links.push(Link {
                 link_action: LinkAction::FollowUp,
                 link_text: "Split 📍 tickets into smaller parts ".to_string(),
+                link_goto: None,
+                link_summary_path: None,
+                link_tooltip: format!(""),
+                ..Default::default()
+            });
+        } else {
+            links.push(Link {
+                link_action: LinkAction::FollowUp,
+                link_text: "Continue the last message".to_string(),
                 link_goto: None,
                 link_summary_path: None,
                 link_tooltip: format!(""),
