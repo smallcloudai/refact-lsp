@@ -521,7 +521,6 @@ pub const KNOWN_MODELS: &str = r####"
         },
         "llama3.2/1b/instruct/vllm": {
             "n_ctx": 16384,
-            "supports_tools": true,
             "supports_scratchpads": {
                 "PASSTHROUGH": {}
             },
