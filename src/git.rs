@@ -67,7 +67,7 @@ pub fn git_ls_files(repository_path: &PathBuf) -> Option<Vec<PathBuf>> {
             files.push(repository_path.join(path));
         }
     }
-    if !files.is_empty() { Some(files) } else { None }
+    Some(files)
 }
 
 /// Similar to git checkout -b <branch_name>
