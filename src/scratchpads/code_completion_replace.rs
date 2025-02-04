@@ -44,8 +44,8 @@ const MIN_ROWS_TO_SKIP_CARET: usize = 2;
 const SUBBLOCK_REQUIRED_TOKENS: usize = 128;
 const CURSORFILE_MIN_TOKENS: usize = 128;
 const MAX_NEW_TOKENS: usize = 1024;  // it's quite high since we want to avoid having a stripped message
-const TEMPERATURE_INITIAL: f32 = 0.2;
-const TEMPERATURE_NOCACHE: f32 = 0.6;
+const TEMPERATURE_INITIAL: f32 = 0.0;
+const TEMPERATURE_NOCACHE: f32 = 0.5;
 
 #[derive(Debug, Clone)]
 pub struct SubBlock {
@@ -674,9 +674,6 @@ impl ScratchpadAbstract for CodeCompletionReplaceScratchpad {
         sampling_parameters_to_patch.max_new_tokens = MAX_NEW_TOKENS;
         sampling_parameters_to_patch.temperature = if !self.post.no_cache { Some(TEMPERATURE_INITIAL) } else { Some(TEMPERATURE_NOCACHE) };
         sampling_parameters_to_patch.stop = vec![self.t.eot.clone()];
-        if !self.post.inputs.multiline {
-            sampling_parameters_to_patch.stop.push("\n".to_string());
-        }
         let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
         let source = self
             .post
