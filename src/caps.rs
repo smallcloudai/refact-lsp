@@ -38,6 +38,8 @@ pub struct ModelRecord {
     pub supports_clicks: bool,
     #[serde(default)]
     pub supports_agent: bool,
+    #[serde(default)]
+    pub supports_temperature: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -415,6 +417,9 @@ fn apply_models_dict_patch(caps: &mut CodeAssistantCaps) {
         }
         if rec_patched.supports_tools {
             rec.supports_tools = rec_patched.supports_tools;
+        }
+        if rec_patched.supports_temperature {
+            rec.supports_temperature = rec_patched.supports_temperature;
         }
     }
 

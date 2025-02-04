@@ -358,6 +358,7 @@ pub const KNOWN_MODELS: &str = r####"
             "supports_tools": true,
             "supports_multimodality": false,
             "supports_agent": true,
+            "supports_temperature": false,
             "supports_scratchpads": {
                 "PASSTHROUGH": {
                 }

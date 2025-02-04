@@ -50,11 +50,17 @@ async fn create_chat_post_and_scratchpad(
         );
     }
 
+    let temperature_to_use = {
+        let caps_lock = caps.read().unwrap();
+        let model_record = caps_lock.code_chat_models.get(model_name).ok_or_else(|| format!("Model {} not found in code_chat_models", model_name))?;
+        if model_record.supports_temperature { temperature } else { None }
+    };
+
     let mut chat_post = ChatPost {
         messages: messages.iter().map(|x|json!(x)).collect(),
         parameters: SamplingParameters {
             max_new_tokens,
-            temperature,
+            temperature: temperature_to_use,
             top_p: None,
             stop: vec![],
             n: Some(n),
@@ -63,7 +69,7 @@ async fn create_chat_post_and_scratchpad(
         model: model_name.to_string(),
         scratchpad: "".to_string(),
         stream: Some(false),
-        temperature,
+        temperature: temperature_to_use,
         max_tokens: 0,
         n: Some(n),
         tools,
