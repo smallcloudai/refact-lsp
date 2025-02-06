@@ -405,6 +405,7 @@ fn process_n_choices(
                 info!("unprocessed {i} response_n_choice\n{}", x);
             }
             if finish_reasons[i] == FinishReason::Stop && !x.contains("```") {
+                warn!("completion refused: no code block found in the model response");
                 return json!({
                     "index": i,
                     "code_completion": "",
