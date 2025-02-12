@@ -63,7 +63,7 @@ pub async fn run_tools_remotely(
     ccx: Arc<AMutex<AtCommandsContext>>,
     model_name: &str,
     maxgen: usize,
-    original_messages: &Vec<ChatMessage>,
+    original_messages: &[ChatMessage],
     stream_back_to_user: &mut HasRagResults,
     style: &Option<String>,
     tools_confirmation: bool,
@@ -79,29 +79,30 @@ pub async fn run_tools_remotely(
         )
     };
 
+    let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
+    info!("run_tools_remotely: connecting to port {}", port);
+
     let tools_execute_post = ToolsExecutePost {
-        messages: original_messages.clone(),
+        messages: original_messages.to_vec(),
         n_ctx,
         maxgen,
         subchat_tool_parameters,
         postprocess_parameters,
         model_name: model_name.to_string(),
-        chat_id: chat_id.clone(),
+        chat_id,
         style: style.clone(),
-        tools_confirmation: tools_confirmation.clone(),
+        tools_confirmation,
     };
-
-    let port = docker_container_get_host_lsp_port_to_connect(gcx.clone(), &chat_id).await?;
-    info!("run_tools_remotely: connecting to port {}", port);
 
     let url = format!("http://localhost:{port}/v1/tools-execute");
     let response: ToolExecuteResponse = http_post_json(&url, &tools_execute_post).await?;
     info!("run_tools_remotely: got response: {:?}", response);
 
-    let mut all_messages = original_messages.to_vec();
+    let mut all_messages = tools_execute_post.messages;
+
     for msg in response.messages {
-        all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
+        stream_back_to_user.push_in_json(json!(&msg));
+        all_messages.push(msg);
     }
 
     Ok((all_messages, response.tools_ran))
@@ -123,8 +124,8 @@ pub async fn run_tools_locally(
 
     let mut all_messages = original_messages.to_vec();
     for msg in new_messages {
-        all_messages.push(msg.clone());
-        stream_back_to_user.push_in_json(json!(msg));
+        stream_back_to_user.push_in_json(json!(&msg));
+        all_messages.push(msg);
     }
 
     Ok((all_messages, tools_ran))

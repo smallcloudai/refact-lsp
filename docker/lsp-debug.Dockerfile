@@ -26,4 +26,4 @@ COPY . .
 
 RUN cargo build
 
-RUN mkdir -p /output && cp target/debug/refact-lsp /output/
+RUN mkdir -p /output && mv target/debug/refact-lsp /output/
