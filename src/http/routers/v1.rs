@@ -35,7 +35,6 @@ use crate::http::routers::v1::status::handle_v1_rag_status;
 use crate::http::routers::v1::customization::handle_v1_customization;
 use crate::http::routers::v1::customization::handle_v1_config_path;
 use crate::http::routers::v1::gui_help_handlers::handle_v1_fullpath;
-use crate::http::routers::v1::patch::{handle_v1_patch_apply_all, handle_v1_patch_single_file_from_ticket};
 use crate::http::routers::v1::subchat::{handle_v1_subchat, handle_v1_subchat_single};
 use crate::http::routers::v1::sync_files::handle_v1_sync_files_extract_tar;
 use crate::http::routers::v1::system_prompt::handle_v1_prepend_system_prompt_and_maybe_more_initial_messages;
@@ -73,7 +72,6 @@ mod subchat;
 pub mod system_prompt;
 pub mod sync_files;
 mod gui_help_handlers;
-mod patch;
 pub mod chat_based_handlers;
 
 #[cfg(feature="vecdb")]
@@ -141,9 +139,6 @@ pub fn make_v1_router() -> Router {
 
         .route("/docker-container-list", telemetry_post!(handle_v1_docker_container_list))
         .route("/docker-container-action", telemetry_post!(handle_v1_docker_container_action))
-
-        .route("/patch-single-file-from-ticket", telemetry_post!(handle_v1_patch_single_file_from_ticket))
-        .route("/patch-apply-all", telemetry_post!(handle_v1_patch_apply_all))
 
         .route("/restore-checkpoints", telemetry_post!(handle_v1_restore_checkpoints))
 

@@ -130,9 +130,14 @@ pub async fn tools_merged_and_filtered(
         ("definition".to_string(), Box::new(crate::tools::tool_ast_definition::ToolAstDefinition{}) as Box<dyn Tool + Send>),
         ("references".to_string(), Box::new(crate::tools::tool_ast_reference::ToolAstReference{}) as Box<dyn Tool + Send>),
         ("tree".to_string(), Box::new(crate::tools::tool_tree::ToolTree{}) as Box<dyn Tool + Send>),
-        ("patch".to_string(), Box::new(crate::tools::tool_patch::ToolPatch::new()) as Box<dyn Tool + Send>),
+        ("create_textdoc".to_string(), Box::new(crate::tools::file_edit::tool_create_textdoc::ToolCreateTextDoc{}) as Box<dyn Tool + Send>),
+        ("replace_textdoc".to_string(), Box::new(crate::tools::file_edit::tool_replace_textdoc::ToolReplaceTextDoc{}) as Box<dyn Tool + Send>),
+        ("update_textdoc".to_string(), Box::new(crate::tools::file_edit::tool_update_textdoc::ToolUpdateTextDoc {}) as Box<dyn Tool + Send>),
+        ("update_textdoc_regex".to_string(), Box::new(crate::tools::file_edit::tool_update_textdoc_regex::ToolUpdateTextDocRegex {}) as Box<dyn Tool + Send>),
         ("web".to_string(), Box::new(crate::tools::tool_web::ToolWeb{}) as Box<dyn Tool + Send>),
         ("cat".to_string(), Box::new(crate::tools::tool_cat::ToolCat{}) as Box<dyn Tool + Send>),
+        ("rm".to_string(), Box::new(crate::tools::tool_rm::ToolRm{}) as Box<dyn Tool + Send>),
+        ("mv".to_string(), Box::new(crate::tools::tool_mv::ToolMv{}) as Box<dyn Tool + Send>),
         ("think".to_string(), Box::new(crate::tools::tool_deep_thinking::ToolDeepThinking{}) as Box<dyn Tool + Send>),
         // ("locate".to_string(), Box::new(crate::tools::tool_locate::ToolLocate{}) as Box<dyn Tool + Send>))),
         // ("locate".to_string(), Box::new(crate::tools::tool_relevant_files::ToolRelevantFiles{}) as Box<dyn Tool + Send>))),
@@ -240,8 +245,77 @@ tools:
     parameters_required:
       - "paths"
 
-  # -- agentic tools below --
+  - name: "rm"
+    description: "Deletes a file or directory. Use recursive=true for directories. Set dry_run=true to preview without deletion."
+    parameters:
+      - name: "path"
+        type: "string"
+        description: "Absolute or relative path of the file or directory to delete."
+      - name: "recursive"
+        type: "boolean"
+        description: "If true and target is a directory, delete recursively. Defaults to false."
+      - name: "dry_run"
+        type: "boolean"
+        description: "If true, only report what would be done without deleting."
+      - name: "max_depth"
+        type: "number"
+        description: "(Optional) Maximum depth (currently unused)."
+    parameters_required:
+      - "path"
 
+  - name: "mv"
+    description: "Moves or renames files and directories. If a simple rename fails due to a cross-device error and the source is a file, it falls back to copying and deleting. Use overwrite=true to replace an existing target."
+    parameters:
+      - name: "source"
+        type: "string"
+        description: "Path of the file or directory to move."
+      - name: "destination"
+        type: "string"
+        description: "Target path where the file or directory should be placed."
+      - name: "overwrite"
+        type: "boolean"
+        description: "If true and target exists, replace it. Defaults to false."
+    parameters_required:
+      - "source"
+      - "destination"
+
+  - name: "create_textdoc"
+    agentic: false
+    description: "Creates a new text document or code"
+    parameters:
+      - name: "path"
+        type: "string"
+        description: "Absolute path to new file."
+      - name: "content"
+        type: "string"
+        description: "The initial text or code."
+    parameters_required:
+      - "path"
+      - "content"
+      
+  - name: "update_textdoc"
+    agentic: false
+    description: "Updates an existing document by replacing specific text. Optimized for large files or small changes where simple string replacement is sufficient. Prefer this over replace_textdoc for large files."
+    parameters:
+      - name: "path"
+        type: "string"
+        description: "Absolute path to the file to change."
+      - name: "old_str"
+        type: "string"
+        description: "The exact text that needs to be updated. Use update_textdoc_regex if you need pattern matching."        
+      - name: "replacement"
+        type: "string"
+        description: "The new text that will replace the old text."        
+      - name: "multiple"
+        type: "boolean"
+        description: "If true, applies the replacement to all occurrences; if false, only the first occurrence is replaced."        
+    parameters_required:
+      - "path"
+      - "old_str"
+      - "replacement"
+      - "multiple"
+      
+  # -- agentic tools below --
   - name: "locate"
     agentic: true
     description: "Get a list of files that are relevant to solve a particular task."
@@ -261,26 +335,42 @@ tools:
         description: "What's the topic and what kind of result do you want?"
     parameters_required:
       - "problem_statement"
-
-  - name: "patch"
+      
+  - name: "update_textdoc_regex"
     agentic: true
-    description: |
-      The function to apply changes from the existing 📍-notation edit blocks.
-      Do not call the function unless you have a generated 📍-notation edit blocks, you need an existing 📍-notation edit block ticket number!
-      Multiple tickets is allowed only for 📍PARTIAL_EDIT, otherwise only one ticket must be provided.
+    description: "Updates an existing document using regex pattern matching. Ideal when changes can be expressed as a regular expression or when you need to match variable text patterns. May be slower than update_textdoc for large files."
     parameters:
       - name: "path"
         type: "string"
         description: "Absolute path to the file to change."
-      - name: "tickets"
+      - name: "pattern"
         type: "string"
-        description: "Use 3-digit tickets comma separated to refer to the changes within a single file"
-      - name: "explanation"
+        description: "A regex pattern to match the text that needs to be updated. Prefer simpler regexes for better performance."        
+      - name: "replacement"
         type: "string"
-        description: "Location within the file where changes should be applied, any necessary code removals, and whether additional imports are required"
+        description: "The new text that will replace the matched pattern."        
+      - name: "multiple"
+        type: "boolean"
+        description: "If true, applies the replacement to all occurrences; if false, only the first occurrence is replaced."        
     parameters_required:
-      - "tickets"
       - "path"
+      - "pattern"
+      - "replacement"
+      - "multiple"
+      
+  - name: "replace_textdoc"
+    agentic: true
+    description: "Completely replaces the content of an existing document. Use ONLY for small files, as it rewrites the entire file. For large files or small changes, use update_textdoc instead."
+    parameters:
+      - name: "path"
+        type: "string"
+        description: "Absolute path to existing file. File must be small."
+      - name: "replacement"
+        type: "string"
+        description: "The complete replacement text or code that will overwrite the entire file."
+    parameters_required:
+      - "path"
+      - "replacement"
 
   - name: "github"
     agentic: true
@@ -353,7 +443,7 @@ tools:
     parameters:
       - name: "im_going_to_use_tools"
         type: "string"
-        description: "Which tools are you about to use? Comma-separated list, examples: hg, git, gitlab, rust debugger, patch"
+        description: "Which tools are you about to use? Comma-separated list, examples: hg, git, gitlab, rust debugger"
       - name: "im_going_to_apply_to"
         type: "string"
         description: "What your actions will be applied to? List all you can identify, starting with the project name. Comma-separated list, examples: project1, file1.cpp, MyClass, PRs, issues"

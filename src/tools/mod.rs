@@ -3,11 +3,12 @@ pub mod tools_execute;
 
 mod tool_ast_definition;
 mod tool_ast_reference;
-pub mod tool_patch_aux;
 mod tool_web;
 mod tool_tree;
 mod tool_relevant_files;
 mod tool_cat;
+mod tool_rm;
+mod tool_mv;
 
 mod tool_deep_thinking;
 
@@ -17,4 +18,4 @@ mod tool_search;
 mod tool_knowledge;
 #[cfg(feature="vecdb")]
 mod tool_locate_search;
-pub mod tool_patch;
+mod file_edit;
