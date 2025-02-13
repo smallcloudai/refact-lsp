@@ -124,7 +124,7 @@ pub async fn correct_and_validate_active_ticket(gcx: Arc<ARwLock<GlobalContext>>
                     if path_before.is_relative() {
                         return Err(_error_text(&format!("filename_before: '{}' must be absolute.", ticket.filename_before), ticket));
                     } else {
-                        let path_before = crate::files_correction::to_pathbuf_normalize(&ticket.filename_before);
+                        let path_before = crate::files_correction::canonical_path(&ticket.filename_before);
                         path_before.to_string_lossy().to_string()
                     }
                 }
