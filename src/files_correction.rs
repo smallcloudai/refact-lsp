@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-use std::path::{Component, PathBuf};
+use std::path::{PathBuf, Component, Path};
 use serde::Deserialize;
 use tokio::sync::RwLock as ARwLock;
 use tracing::info;
 
-use crate::files_in_workspace::detect_vcs_for_a_file_path;
 use crate::global_context::GlobalContext;
+use crate::custom_error::MapErrToString;
+use crate::files_in_workspace::detect_vcs_for_a_file_path;
 use crate::fuzzy_search::fuzzy_search;
 
 
@@ -119,35 +120,6 @@ pub async fn files_cache_rebuild_as_needed(global_context: Arc<ARwLock<GlobalCon
     return (cache_correction_arc, cache_shortened_arc);
 }
 
-
-fn winpath_normalize(p: &str) -> PathBuf {
-    // horrible_path//..\project1\project1/1.cpp
-    // everything should become an absolute \\?\ path on windows
-    let parts = p
-        .to_string()
-        .replace(r"\\", r"\")
-        .replace(r"/", r"\")
-        .split(r"\")
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
-    if parts.len() >= 2 && parts[0] == "?" {
-        canonical_path(&format!(r"\\?\{}", parts[1..].join(r"\")))
-    } else if parts.len() > 1 && parts[0].contains(":") {
-        canonical_path(&format!(r"\\?\{}", parts.join(r"\")))
-    } else {
-        canonical_path(&p.to_string())
-    }
-}
-
-pub fn to_pathbuf_normalize(path: &str) -> PathBuf {
-    if cfg!(target_os = "windows") {
-        PathBuf::from(winpath_normalize(path))
-    } else {
-        PathBuf::from(canonical_path(path))
-    }
-}
-
 async fn complete_path_with_project_dir(
     gcx: Arc<ARwLock<GlobalContext>>,
     correction_candidate: &String,
@@ -156,7 +128,7 @@ async fn complete_path_with_project_dir(
     fn path_exists(path: &PathBuf, is_dir: bool) -> bool {
         (is_dir && path.is_dir()) || (!is_dir && path.is_file())
     }
-    let candidate_path = to_pathbuf_normalize(&correction_candidate);
+    let candidate_path = canonical_path(correction_candidate);
     let project_dirs = get_project_dirs(gcx.clone()).await;
     for p in project_dirs {
         if path_exists(&candidate_path, is_dir) && candidate_path.starts_with(&p) {
@@ -362,52 +334,119 @@ fn _shortify_paths_from_indexed(paths: &Vec<String>, indexed_paths: Arc<HashSet<
     }).collect()
 }
 
-fn absolute(path: &std::path::Path) -> std::io::Result<PathBuf> {
-    let mut components = path.strip_prefix(".").unwrap_or(path).components();
+#[cfg(windows)]
+/// In Windows, tries to fix the path, permissive about paths like \\?\C:\path, incorrect amount of \ and more.
+/// 
+/// Temporarily remove verbatim, to resolve ., .., symlinks if possible, it will be added again later.
+fn preprocess_path_for_normalization(p: String) -> String {
+    let p = p.replace(r"/", r"\");
+    let starting_slashes = p.chars().take_while(|c| *c == '\\').count();
+
+    let mut parts_iter = p.split(r"\").filter(|part| !part.is_empty()).peekable();
+
+    match parts_iter.peek() {
+        Some(&"?") => {
+            parts_iter.next();
+            match parts_iter.peek() {
+                Some(pref) if pref.contains(":") => parts_iter.join(r"\"), // \\?\C:\path...
+                Some(pref) if pref.to_lowercase() == "unc" => { // \\?\UNC\server\share\path...
+                    parts_iter.next();
+                    format!(r"\\{}", parts_iter.join(r"\"))
+                },
+                Some(_) => { // \\?\path...
+                    tracing::warn!("Found a verbatim path that is not UNC nor Disk path: {}, leaving it as-is", p);
+                    p
+                },
+                None => p, // \\?\
+            }
+        },
+        Some(&".") if starting_slashes > 0 => {
+            parts_iter.next();
+            format!(r"\\.\{}", parts_iter.join(r"\")) // \\.\path...
+        },
+        Some(pref) if pref.contains(":") => parts_iter.join(r"\"), // C:\path...
+        Some(_) => {
+            match starting_slashes {
+                0 => parts_iter.join(r"\"), // relative path: folder\file.ext
+                1 => format!(r"\{}", parts_iter.join(r"\")), // absolute path from cur disk: \folder\file.ext
+                _ => format!(r"\\{}", parts_iter.join(r"\")), // standard UNC path: \\server\share\folder\file.ext
+            }
+        }
+        None => p, // \
+    }
+}
+
+#[cfg(not(windows))]
+/// In Unix, do nothing
+fn preprocess_path_for_normalization(p: String) -> String {
+    p
+}
+
+#[cfg(windows)]
+/// In Windows, call std::path::absolute, then add verbatim prefix to standard Disk or UNC paths
+fn absolute(path: &Path) -> Result<PathBuf, String> {
+    use std::path::Prefix;
+    use std::ffi::OsString;
+
+    let path = std::path::absolute(path).map_err_to_string()?;
+
+    if let Some(Component::Prefix(pref)) = path.components().next() {
+        match pref.kind() {
+            Prefix::Disk(_) => {
+                let mut path_os_str = OsString::from(r"\\?\");
+                path_os_str.push(path.as_os_str());
+                Ok(PathBuf::from(path_os_str))
+            },
+            Prefix::UNC(_, _) => {
+                let mut path_os_str = OsString::from(r"\\?\UNC\");
+                path_os_str.push(path.strip_prefix(r"\\").unwrap_or(&path).as_os_str());
+                Ok(PathBuf::from(path_os_str))
+            },
+            _ => Ok(path.to_path_buf())
+        }
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+#[cfg(not(windows))]
+/// In Unix, this method is similar to std::path::absolute, but also resolves ..
+fn absolute(path: &Path) -> Result<PathBuf, String> {
+    let mut components = path.components();
     let path_os = path.as_os_str().as_encoded_bytes();
+    
     let mut normalized = if path.is_absolute() {
         if path_os.starts_with(b"//") && !path_os.starts_with(b"///") {
             components.next();
             PathBuf::from("//")
         } else {
-            PathBuf::new()
+            PathBuf::from("/")
         }
     } else {
-        std::env::current_dir()?
+        std::env::current_dir().map_err_to_string()?
     };
-    normalized.extend(components);
+    for component in components {
+        match component {
+            Component::Normal(c) => { normalized.push(c); }
+            Component::ParentDir => { normalized.pop(); }
+            Component::CurDir => (),
+            Component::RootDir => (),
+            Component::Prefix(_) => return Err("Prefix should not occur in Unix".to_string()),
+        }
+    }
+    
     if path_os.ends_with(b"/") {
         normalized.push("");
     }
+    
     Ok(normalized)
 }
 
-pub fn canonical_path(s: &str) -> PathBuf {
-    let mut res = match PathBuf::from(s).canonicalize() {
-        Ok(x) => x,
-        Err(_) => {
-            let a = absolute(std::path::Path::new(s)).unwrap_or(PathBuf::from(s));
-            // warn!("canonical_path: {:?} doesn't work: {}\n using absolute path instead {}", s, e, a.display());
-            a
-        }
-    };
-    let components: Vec<String> = res
-        .components()
-        .map(|x| match x {
-            Component::Normal(c) => c.to_string_lossy().to_string(),
-            Component::Prefix(c) => {
-                let lowercase_prefix = c.as_os_str().to_string_lossy().to_string().to_lowercase();
-                lowercase_prefix
-            },
-            _ => x.as_os_str().to_string_lossy().to_string(),
-        })
-        .collect();
-    res = components.iter().fold(PathBuf::new(), |mut acc, x| {
-        acc.push(x);
-        acc
-    });
-    // info!("canonical_path:\n{:?}\n{:?}", s, res);
-    res
+pub fn canonical_path<T: Into<String>>(p: T) -> PathBuf {
+    let p: String = p.into();
+    let path= PathBuf::from(preprocess_path_for_normalization(p));
+
+    path.canonicalize().unwrap_or_else(|_| absolute(&path).unwrap_or(path))
 }
 
 pub fn serialize_path<S: serde::Serializer>(path: &PathBuf, serializer: S) -> Result<S::Ok, S::Error> {
@@ -492,6 +531,153 @@ mod tests {
         ];
 
         assert_eq!(result, expected_result, "The result should contain the expected paths, instead it found");
+    }
+    
+    #[cfg(windows)]
+    #[test]
+    fn test_preprocess_windows_path_for_normalization() {
+        let test_cases = [
+            // Verbatim disk paths
+            (r"\\\\\\\\?\\\\C:\\\\Windows\\\\System32", r"C:\Windows\System32"),
+            (r"\?\C:\Model generates this kind of paths", r"C:\Model generates this kind of paths"),
+            (r"/?/C:/other\\horr.ible/path", r"C:\other\horr.ible\path"),
+
+            // Disk paths
+            (r"C:\\folder/..\\\\file", r"C:\folder\..\file"),
+            (r"/D:\\Users/John Doe\\\\.\myfolder/file.ext", r"D:\Users\John Doe\.\myfolder\file.ext"),
+
+            // Verbatim UNC paths
+            (r"\\?\UNC\server\share/folder//file.ext", r"\\server\share\folder\file.ext"),
+            (r"\\?\unc\server\share/folder//file.ext", r"\\server\share\folder\file.ext"),
+            (r"/?/unc/server/share/folder//file.ext", r"\\server\share\folder\file.ext"),
+
+            // Standard UNC paths
+            (r"\\server\share/folder//file.ext", r"\\server\share\folder\file.ext"),
+            (r"////server//share//folder//file.ext", r"\\server\share\folder\file.ext"),
+            (r"//wsl$/Ubuntu/home/yourusername/projects", r"\\wsl$\Ubuntu\home\yourusername\projects"),
+
+            // DeviceNS paths
+            (r"////./pipe/docker_engine", r"\\.\pipe\docker_engine"),
+            (r"\\.\pipe\docker_engine", r"\\.\pipe\docker_engine"),
+            (r"//./pipe/docker_engine", r"\\.\pipe\docker_engine"),
+
+            // Absolute paths without disk
+            (r"\Windows\System32", r"\Windows\System32"),
+            (r"/Program Files/Common Files", r"\Program Files\Common Files"),
+            (r"\Users\Public\Downloads", r"\Users\Public\Downloads"),
+            (r"\temp/path", r"\temp\path"),
+
+            // Relative paths
+            (r"folder/file.txt", r"folder\file.txt"),
+            (r"./current/./folder", r".\current\.\folder"),
+            (r"project/../src/main.rs", r"project\..\src\main.rs"),
+            (r"documents\\photos", r"documents\photos"),
+            (r"some folder/with spaces/file", r"some folder\with spaces\file"),
+            (r"bin/../lib/./include", r"bin\..\lib\.\include"),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = preprocess_path_for_normalization(input.to_string());
+            assert_eq!(result, expected.to_string(), "The result for {} should be {}, got {}", input, expected, result);
+        }  
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_canonical_path_windows() 
+    {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir_path = temp_dir.path();
+        let temp_dir_path_str = temp_dir_path.to_str().unwrap();
+
+        let long_str = String::from_utf8(vec![b'a'; 600].iter().map(|b| *b).collect()).unwrap();
+        let long_dir_path = PathBuf::from(format!("\\\\?\\{temp_dir_path_str}\\{long_str}"));
+
+        let create_dir_cmd = format!(
+            "powershell.exe -Command \"New-Item -Path '{}' -ItemType Directory -Force\"",
+            long_dir_path.to_string_lossy().replace("'", "''")
+        );
+        let create_file_cmd = format!(
+            "powershell.exe -Command \"New-Item -Path '{}' -ItemType File -Force\"",
+            long_dir_path.join("file.txt").to_string_lossy().replace("'", "''")
+        );
+        std::process::Command::new("cmd")
+            .args(["/C", &create_dir_cmd])
+            .output()
+            .expect("Failed to create directory");
+        std::process::Command::new("cmd")
+            .args(["/C", &create_file_cmd])
+            .output()
+            .expect("Failed to create file");
+
+        let long_dir_path_str = format!("{temp_dir_path_str}\\{long_str}\\..\\{long_str}");
+        let long_dir_file_str = format!("{temp_dir_path_str}\\{long_str}\\..\\{long_str}\\.\\..\\{long_str}\\file.txt");
+
+        let test_cases = vec![
+            // Disks
+            (r"C:\\Windows\\System32\\..\\..\\Temp\\conn", PathBuf::from(r"\\?\C:\Temp\conn")),
+            (r"D:/../..\NUL", PathBuf::from(r"\\.\NUL")),
+            (r"d:\\A\\B\\C\\D\\..\\..\\..\\..\\E\\F\\G\\..\\..\\H", PathBuf::from(r"\\?\D:\E\H")),
+            (r"c:\\../Windows", PathBuf::from(r"\\?\C:\Windows")),
+            (r"d:\\..\\..\\..\\..\\..", PathBuf::from(r"\\?\D:\")),
+
+            // Verbatim Disks
+            (r"\\\\?\\C:\Very\Long\Path\With\Lots\Of\Subdirectories\..\..\..\CON", PathBuf::from(r"\\?\C:\Very\Long\Path\With\CON")),
+            (r"//?/d:/Trailing/Dot./.", PathBuf::from(r"\\?\d:\Trailing\Dot")),
+            (r"\?\c:\Trailing\Space\\  ", PathBuf::from(r"\\?\c:\Trailing\Space\")),
+            (r"\?/C:/$MFT", PathBuf::from(r"\\?\C:\$MFT")),
+
+            // Devices
+            (r"\\.\COM1", PathBuf::from(r"\\.\COM1")),
+            (r"\.\PIPE\SomePipeName", PathBuf::from(r"\\.\PIPE\SomePipeName")),
+            (r"/?/UNC//./PIPE/AnotherPipe", PathBuf::from(r"\\.\PIPE\AnotherPipe")),
+            (r"D:\\PRN", PathBuf::from(r"\\?\D:\PRN")),
+
+            // Non-Standard Verbatim
+            (r"\\?\Volume{12345678-1234-1234-1234-1234567890AB}\Path\To\Some\File", PathBuf::from(r"\\?\Volume{12345678-1234-1234-1234-1234567890AB}\Path\To\Some\File")),
+
+            // UNC Verbatim
+            (r"\\?\UNC\localhost\C$/Windows/System32\..\System32", PathBuf::from(r"\\?\UNC\localhost\C$\Windows\System32")),
+
+            // Long paths
+            (&long_dir_path_str, PathBuf::from(format!("\\\\?\\{temp_dir_path_str}\\{long_str}"))),
+            (&long_dir_file_str, PathBuf::from(format!("\\\\?\\{temp_dir_path_str}\\{long_str}\\file.txt"))),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = canonical_path(input);
+            assert_eq!(result, expected, "Expected canonical path for {} to be {}, but got {}", input, expected.to_string_lossy(), result.to_string_lossy());
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn test_canonical_path_unix() 
+    {
+        let cur_dir = std::env::current_dir().unwrap();
+
+        let test_cases = vec![
+            // Absolute paths
+            (r"/home/.././etc/./../usr/bin", PathBuf::from(r"/usr/bin")),
+            (r"/var/run//.././run//docker.sock", PathBuf::from(r"/run/docker.sock")),
+            (r"/this_folder_does_not_exist/run/.././run/docker.sock", PathBuf::from(r"/this_folder_does_not_exist/run/docker.sock")),
+            (r"/../../var", PathBuf::from(r"/var")),
+            (r"/../../var_n/.", PathBuf::from(r"/var_n")),
+            (r"///var_n//foo_n/foo_n//./././../bar_n/", PathBuf::from(r"/var_n/foo_n/bar_n/")),
+
+            // Relative paths
+            (r".", cur_dir.clone()),
+            (r".//some_not_existing_folder/..", cur_dir.clone()),
+            (r"./some_not_existing_folder///..//", cur_dir.join("")),
+            (r"foo_n////var_n", cur_dir.join("foo_n").join("var_n")),
+            (r"foo_n/../var_n/../cat_n/", cur_dir.join("cat_n")),
+            (r"./foo_n/././..", cur_dir.clone()),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = canonical_path(input);
+            assert_eq!(result, expected, "Expected canonical path for {} to be {}, but got {}", input, expected.to_string_lossy(), result.to_string_lossy());
+        }
     }
 
     // cicd works with virtual machine, this test is slow

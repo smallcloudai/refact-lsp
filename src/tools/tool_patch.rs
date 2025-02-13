@@ -6,7 +6,7 @@ use tokio::sync::Mutex as AMutex;
 
 use crate::at_commands::at_commands::AtCommandsContext;
 use crate::call_validation::{ChatMessage, ChatContent, ChatUsage, ContextEnum, DiffChunk, SubchatParameters};
-use crate::files_correction::to_pathbuf_normalize;
+use crate::files_correction::canonical_path;
 use crate::tools::tool_patch_aux::diff_apply::diff_apply;
 use crate::tools::tool_patch_aux::model_based_edit::partial_edit::partial_edit_tickets_to_chunks;
 use crate::tools::tool_patch_aux::no_model_edit::{full_rewrite_diff, rewrite_symbol_diff};
@@ -183,7 +183,7 @@ async fn can_execute_patch(
         return Err("no active tickets found".to_string());
     }
 
-    if to_pathbuf_normalize(&active_tickets[0].filename_before) != to_pathbuf_normalize(&path) {
+    if canonical_path(&active_tickets[0].filename_before) != canonical_path(&path) {
         return Err("the filename of the ticket(s) you provided doesn't match the filename of the file you provided".to_string());
     }
 
@@ -223,7 +223,7 @@ impl Tool for ToolPatch {
         };
         assert!(!active_tickets.is_empty());
 
-        if to_pathbuf_normalize(&active_tickets[0].filename_before) != to_pathbuf_normalize(&path) {
+        if canonical_path(&active_tickets[0].filename_before) != canonical_path(&path) {
             let (err, cd_instruction) = good_error_text(
                 &format!("ticket(s) have different filename from what you provided: '{}'!='{}'.", active_tickets[0].filename_before, path),
                 &tickets,
