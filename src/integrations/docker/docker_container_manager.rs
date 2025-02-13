@@ -51,10 +51,14 @@ impl IntegrationSession for DockerContainerSession {
         self.last_usage_ts + self.session_timeout_after_inactivity.as_secs() < current_time
     }
 
-    fn try_stop(&mut self) -> Box<dyn Future<Output = String> + Send + '_> {
-        Box::new(async {
-            if let Some(gcx) = self.weak_gcx.upgrade() {
-                let container_id = self.container_id.clone();
+    fn try_stop(&mut self, self_arc: Arc<AMutex<Box<dyn IntegrationSession>>>) -> Box<dyn Future<Output = String> + Send> {
+        Box::new(async move {
+            let mut container_session = self_arc.lock().await;
+            let docker_session = container_session.as_any_mut().downcast_ref::<DockerContainerSession>()
+                .expect("Failed to downcast to DockerContainerSession");
+
+            if let Some(gcx) = docker_session.weak_gcx.upgrade() {
+                let container_id = docker_session.container_id.clone();
                 match docker_container_kill(gcx, &container_id).await {
                     Ok(()) => format!("Cleanup docker container session: {}", container_id),
                     Err(e) => {
@@ -231,8 +235,8 @@ async fn docker_container_create(
         "{DEFAULT_CONTAINER_LSP_PATH} --http-port {lsp_port} --logs-stderr --inside-container \
         --address-url {address_url} --api-key {api_key} --vecdb --reset-memory --ast --experimental",
     );
-    if !integrations_yaml.is_empty() { 
-        lsp_command.push_str(" --integrations-yaml ~/.config/refact/integrations.yaml"); 
+    if !integrations_yaml.is_empty() {
+        lsp_command.push_str(" --integrations-yaml ~/.config/refact/integrations.yaml");
     }
 
     let ports_to_forward_as_arg_list = ports_to_forward.iter()
