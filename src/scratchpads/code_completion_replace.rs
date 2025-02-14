@@ -899,11 +899,7 @@ impl ScratchpadAbstract for CodeCompletionReplacePassthroughScratchpad {
         let use_rag = self.t.rag_ratio > 0.0 && self.post.use_ast && self.ast_service.is_some();
         sampling_parameters_to_patch.max_new_tokens = MAX_NEW_TOKENS;
         sampling_parameters_to_patch.temperature = if !self.post.no_cache { Some(TEMPERATURE_INITIAL) } else { Some(TEMPERATURE_NOCACHE) };
-        sampling_parameters_to_patch.stop = vec![];
-        // if !self.post.inputs.multiline {
-        //     info!("multiline = {}", self.post.inputs.multiline);
-            // sampling_parameters_to_patch.stop.push("\n".to_string());
-        // }
+        sampling_parameters_to_patch.stop = vec![]; // avoid model cutting completion too early 
         let cpath = crate::files_correction::canonical_path(&self.post.inputs.cursor.file);
         let source = self
             .post
