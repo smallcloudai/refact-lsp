@@ -19,6 +19,10 @@ RUN apk add --no-cache \
     pkgconfig \
     zlib-static
 
+COPY ./docker/fix_sqlite_vec.h .
+
+ENV CFLAGS="-include /refact-lsp/fix_sqlite_vec.h"
+
 RUN cargo chef cook --recipe-path recipe.json
 
 COPY . .
@@ -26,3 +30,4 @@ COPY . .
 RUN cargo build
 
 RUN mkdir -p /output && mv target/debug/refact-lsp /output/
+
