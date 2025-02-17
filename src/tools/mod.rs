@@ -18,4 +18,6 @@ mod tool_search;
 mod tool_knowledge;
 #[cfg(feature="vecdb")]
 mod tool_locate_search;
+#[cfg(feature="vecdb")]
+mod tool_create_knowledge;
 pub mod file_edit;

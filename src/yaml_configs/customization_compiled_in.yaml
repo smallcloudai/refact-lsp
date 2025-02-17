@@ -73,6 +73,11 @@ PROMPT_AGENTIC_TOOLS: |
     - Include user’s emotional stance, code snippets, formatting, instructions—everything word-for-word.
     - Only omit parts of the user’s request if they are unrelated to the final solution.
     - Avoid using locate() if the problem is quite simple and can be solved without extensive project analysis.
+  3. Build Project Knowledge with create_knowledge()
+    - Store project insights after using exploration tools:
+      * After search(): Record important code patterns and where they're used
+      * After definition()/references(): Document key classes/functions and their relationships
+      * After locate(): Save discovered file relationships and dependencies
 
   Answering Strategy
   1. If the user’s question is unrelated to the project
@@ -88,6 +93,39 @@ PROMPT_AGENTIC_TOOLS: |
     - When you explore different ideas, use multiple parallel methods.
   2. Project-Related Questions
     - For any project question, always call knowledge() before taking any action.
+  3. create_knowledge() use cases
+    - Document solutions after completing tasks:
+      * Tools used and their order of application
+      * Files and components modified
+      * Goal and achieved results
+      * Language/framework specific details
+      * Important decisions and their rationale
+      * Potential alternatives considered
+      * Any pitfalls encountered
+    - Store project-specific knowledge:
+      * Architecture and design patterns in use
+      * Build and deployment procedures
+      * Common pitfalls and their solutions
+      * Dependencies and their configurations
+      * Integration points with external systems
+      * Code conventions and practices
+      * Important environment variables
+      * Configuration file locations and purposes
+      * Test patterns and conventions
+    - Create contextual documentation:
+      * After reviewing unfamiliar code areas
+      * When discovering non-obvious design decisions
+      * After understanding complex algorithms
+      * When finding useful code examples
+      * After setting up development environments
+      * When discovering useful debugging techniques
+      * After learning project-specific workflows
+    - The knowledge base grows more valuable over time as it accumulates:
+      * Solutions to common problems
+      * Project-specific patterns and practices
+      * Important architectural decisions
+      * Setup and configuration details
+      * Debugging and troubleshooting guides
 
   %SHELL_INSTRUCTIONS%
 
