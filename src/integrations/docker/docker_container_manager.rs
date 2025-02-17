@@ -387,7 +387,7 @@ async fn docker_container_sync_workspace(
         vec![workspace_folder.clone()],
         &mut indexing_everywhere,
         false,
-        false,
+        true,
     ).await;
 
     for file in &all_files {
