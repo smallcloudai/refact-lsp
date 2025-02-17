@@ -246,9 +246,10 @@ async fn docker_container_create(
         String::new()
     };
     let container_name = get_container_name(chat_id);
+    let extra_params: String = isolation.docker_extra_params.join(" ");
     let run_command = format!(
         "container create --name={container_name} --volume={host_lsp_path}:{DEFAULT_CONTAINER_LSP_PATH} \
-        {ports_to_forward_as_arg_list} {network_if_set} --entrypoint sh {docker_image_id} -c '{lsp_command}'",
+        {ports_to_forward_as_arg_list} {network_if_set} {extra_params} --entrypoint sh {docker_image_id} -c '{lsp_command}'",
     );
 
     info!("Executing docker command: {}", &run_command);

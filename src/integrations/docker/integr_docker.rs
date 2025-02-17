@@ -101,7 +101,7 @@ impl IntegrationTrait for ToolDocker {
 impl ToolDocker {
     pub async fn command_execute(&self, command: &str, gcx: Arc<ARwLock<GlobalContext>>, fail_if_stderr_is_not_empty: bool, verbose_error: bool) -> Result<(String, String), String>
     {
-        let mut command_args = split_command(&command)?;
+        let mut command_args = split_command(command)?;
 
         if command_is_interactive_or_blocking(&command_args) {
             return Err("Docker commands that are interactive or blocking are not supported".to_string());

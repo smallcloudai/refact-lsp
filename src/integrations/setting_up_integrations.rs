@@ -77,7 +77,7 @@ pub fn read_integrations_d(
         let config_dir = if project_config_dir == "" { global_config_dir.clone() } else { PathBuf::from(project_config_dir.clone()) };
         for integr_name in lst.iter() {
             let path_str = join_config_path(&config_dir, integr_name);
-            let path = PathBuf::from(path_str.clone());
+            let path = PathBuf::from(&path_str);
             let (_integr_name, project_path) = match split_path_into_project_and_integration(&path) {
                 Ok(x) => x,
                 Err(e) => {

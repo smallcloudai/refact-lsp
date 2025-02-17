@@ -14,12 +14,15 @@ use crate::integrations::integr_abstract::{IntegrationTrait, IntegrationCommon};
 pub struct SettingsIsolation {
     pub container_workspace_folder: String,
     pub docker_image_id: String,
+    #[serde(default)]
     pub docker_network: String,
     pub host_lsp_path: String,
     #[serde(serialize_with = "serialize_ports", deserialize_with = "deserialize_ports")]
     pub ports: Vec<Port>,
     #[serde(serialize_with = "serialize_num_to_str", deserialize_with = "deserialize_str_to_num")]
     pub keep_containers_alive_for_x_minutes: u64,
+    #[serde(default)]
+    pub docker_extra_params: Vec<String>,
 }
 
 #[derive(Clone, Default)]
