@@ -139,6 +139,7 @@ pub async fn tools_merged_and_filtered(
         ("rm".to_string(), Box::new(crate::tools::tool_rm::ToolRm{}) as Box<dyn Tool + Send>),
         ("mv".to_string(), Box::new(crate::tools::tool_mv::ToolMv{}) as Box<dyn Tool + Send>),
         ("think".to_string(), Box::new(crate::tools::tool_deep_thinking::ToolDeepThinking{}) as Box<dyn Tool + Send>),
+        ("create_memory_bank".to_string(), Box::new(crate::tools::tool_create_memory_bank::ToolCreateMemoryBank{}) as Box<dyn Tool + Send>),
         // ("locate".to_string(), Box::new(crate::tools::tool_locate::ToolLocate{}) as Box<dyn Tool + Send>))),
         // ("locate".to_string(), Box::new(crate::tools::tool_relevant_files::ToolRelevantFiles{}) as Box<dyn Tool + Send>))),
         #[cfg(feature="vecdb")]
@@ -487,6 +488,12 @@ tools:
       - "goal"
       - "language_slash_framework"
       - "knowledge_entry"
+
+  - name: "create_memory_bank"
+    agentic: true
+    description: "Gathers information about the project structure (modules, file relations, classes, etc.) and saves this data into the memory bank."
+    parameters: []
+    parameters_required: []
 "####;
 
 
