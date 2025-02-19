@@ -67,10 +67,16 @@ impl ExplorationState {
         depth: usize,
         max_tree_depth: usize,
         avg_dir_size: f64,
-        _project_dirs: &[std::path::PathBuf],
+        project_dirs: &[std::path::PathBuf],
     ) -> Option<f64> {
         let node_ref = node.read();
-        if node_ref.file_name().starts_with('.') || node_ref.child_paths().is_empty() {
+        let node_path = node_ref.get_path();
+
+        // Check if the current node is one of the project directories
+        let is_project_dir = project_dirs.iter().any(|pd| pd == node_path);
+
+        // Only filter out node if it is NOT a project directory
+        if !is_project_dir && (node_ref.file_name().starts_with('.') || node_ref.child_paths().is_empty()) {
             return None;
         }
 
@@ -135,12 +141,26 @@ impl ExplorationState {
         let project_dirs = get_project_dirs(gcx.clone()).await;
         let relative_paths: Vec<PathBuf> = paths_from_anywhere(gcx.clone()).await
             .into_iter()
-            .filter_map(|path| {
+            .filter_map(|path| 
                 project_dirs.iter()
                     .find(|dir| path.starts_with(dir))
-                    .and_then(|dir| path.strip_prefix(dir).ok())
-                    .map(|p| p.to_path_buf())
-            })
+                    .map(|dir| {
+                        // Get the project directory name
+                        let project_name = dir.file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        
+                        // If path is deeper than project dir, append the rest of the path
+                        if let Ok(rest) = path.strip_prefix(dir) {
+                            if rest.as_os_str().is_empty() {
+                                PathBuf::from(&project_name)
+                            } else {
+                                PathBuf::from(&project_name).join(rest)
+                            }
+                        } else {
+                            PathBuf::from(&project_name)
+                        }
+                    }))
             .collect();
 
         let tree = construct_tree_out_of_flat_list_of_paths(&relative_paths);
