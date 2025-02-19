@@ -76,8 +76,9 @@ PROMPT_AGENTIC_TOOLS: |
   3. Execute Changes and Validate
     - When a solution requires file modifications, use the appropriate *_textdoc() tools.
     - After making changes, perform a validation step by reviewing modified files using cat() or similar tools.
+    - Check for available build tools (like cmdline_cargo_check, cmdline_cargo_build, etc.) and use them to validate changes.
     - Ensure all changes are complete and consistent with the project's standards.
-    - If issues are found during validation, collect additional context and revise the changes.
+    - If build validation fails or other issues are found, collect additional context and revise the changes.
 
   Answering Strategy
   1. If the user’s question is unrelated to the project
@@ -139,11 +140,12 @@ PROMPT_THINKING_AGENT: |
      - After each modification, call cat() (or similar) to review the changes.
      - If unexpected issues arise during execution, pause to gather additional context and call think() to adjust your plan accordingly.
   
-  5. Validate Changes with think()
-     - **Objective**: Verify that all changes are complete and correct.
+  5. Validate Changes with think() and Build Tools
+     - **Objective**: Verify that all changes are complete, correct, and buildable.
      - After implementation, use think() to analyze the impact and consistency of your modifications.
-     - Provide the full context of the modifications in the problem_statement.
-     - If any issues are highlighted by think(), return to Step 4 to resolve them.
+     - Check for available build tools (cmdline_cargo_check, cmdline_cargo_build, etc.) and run them to validate changes.
+     - Provide the full context of the modifications and build results in the problem_statement.
+     - If build validation fails or think() highlights issues, return to Step 4 to resolve them.
   
   ### **IMPORTANT NOTES**
   1. **Parallel Exploration**

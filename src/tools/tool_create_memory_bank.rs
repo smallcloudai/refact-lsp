@@ -25,6 +25,8 @@ use crate::{
 };
 use crate::global_context::try_load_caps_quickly_if_not_present;
 
+const MAX_EXPLORATION_STEPS: usize = 100;
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct ExplorationTarget {
     target_name: String,
@@ -202,6 +204,14 @@ async fn read_and_compress_directory(
         &abs_dir,
         false
     ).unwrap_or_default();
+    tracing::info!(
+        target = "memory_bank",
+        directory = dir_relative,
+        files_count = files.len(),
+        token_limit = tokens_limit,
+        "Reading and compressing directory"
+    );
+
     if files.is_empty() {
         return Ok("Directory is empty; no files to read.".to_string());
     }
@@ -245,7 +255,7 @@ pub struct ToolCreateMemoryBank;
 
 const MB_SYSTEM_PROMPT: &str = r###"You are an expert software architect. Analyze the provided directory structure and file content to determine its purpose, organization, notable subdirectories and naming patterns."###;
 
-const MB_EXPERT_WRAP_UP: &str = r###"Create a knowledge entry by calling create_knowledge() with these keys: im_going_to_use_tools, im_going_to_apply_to, goal, language_slash_framework, and knowledge_entry. Do not duplicate prior documented details."###;
+const MB_EXPERT_WRAP_UP: &str = r###"Create a knowledge entry by calling create_knowledge()"###;
 
 impl ToolCreateMemoryBank {
     fn build_step_prompt(
@@ -255,7 +265,7 @@ impl ToolCreateMemoryBank {
     ) -> String {
         let mut prompt = String::new();
         prompt.push_str(MB_SYSTEM_PROMPT);
-        prompt.push_str(&format!("\n\nNow exploring directory: '{}'", target.target_name));
+        prompt.push_str(&format!("\n\nNow exploring directory: '{}' from the project '{}'", target.target_name, target.target_name.split('/').next().unwrap_or("")));
         {
             prompt.push_str("\nFocus on details like purpose, organization, and notable files. Here is the project structure:\n");
             prompt.push_str(&state.project_tree_summary());
@@ -300,15 +310,19 @@ impl Tool for ToolCreateMemoryBank {
         let mut state = ExplorationState::new(gcx.clone()).await?;
         let mut final_results = Vec::new();
         let mut step = 0;
-        let max_steps = 100;
-        let usage_collector = ChatUsage::default();
+        let mut usage_collector = ChatUsage::default();
 
-        while state.has_unexplored_targets() && step < max_steps {
+        while state.has_unexplored_targets() && step < MAX_EXPLORATION_STEPS {
             step += 1;
             let log_prefix = Local::now().format("%Y%m%d-%H%M%S").to_string();
-            tracing::info!("Memory bank step {}/{}", step, max_steps);
-
             if let Some(target) = state.get_next_target() {
+                tracing::info!(
+                    target = "memory_bank",
+                    step = step,
+                    max_steps = MAX_EXPLORATION_STEPS,
+                    directory = target.target_name,
+                    "Starting directory exploration"
+                );
                 let file_context = read_and_compress_directory(
                     gcx.clone(),
                     target.target_name.clone(),
@@ -324,7 +338,7 @@ impl Tool for ToolCreateMemoryBank {
                     Self::build_step_prompt(&state, &target, file_context.as_ref())
                 );
 
-                _ = subchat(
+                let subchat_result = subchat(
                     ccx_subchat.clone(),
                     params.subchat_model.as_str(),
                     vec![step_msg],
@@ -335,11 +349,31 @@ impl Tool for ToolCreateMemoryBank {
                     1,
                     None,
                     Some(tool_call_id.clone()),
-                    Some(format!("{log_prefix}-memory-bank-step{}", step)),
+                    Some(format!("{log_prefix}-memory-bank-dir-{}", target.target_name.replace("/", "_"))),
                     Some(false),
                 ).await?[0].clone();
 
-                state.mark_explored(target);
+                // Update usage from subchat result
+                if let Some(last_msg) = subchat_result.last() {
+                    crate::tools::tool_relevant_files::update_usage_from_message(&mut usage_collector, last_msg);
+                    tracing::info!(
+                        target = "memory_bank",
+                        directory = target.target_name,
+                        prompt_tokens = usage_collector.prompt_tokens,
+                        completion_tokens = usage_collector.completion_tokens,
+                        total_tokens = usage_collector.total_tokens,
+                        "Updated token usage"
+                    );
+                }
+
+                state.mark_explored(target.clone());
+                tracing::info!(
+                    target = "memory_bank",
+                    directory = target.target_name,
+                    remaining_dirs = state.to_explore.len(),
+                    explored_dirs = state.explored.len(),
+                    "Completed directory exploration"
+                );
             } else {
                 break;
             }
