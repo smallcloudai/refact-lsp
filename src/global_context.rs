@@ -146,7 +146,7 @@ pub struct GlobalContext {
     pub config_dir: PathBuf,
     pub caps: Option<Arc<StdRwLock<CodeAssistantCaps>>>,
     pub caps_reading_lock: Arc<AMutex<bool>>,
-    pub caps_last_error: String,
+    pub caps_last_error: Option<ScratchError>,
     pub caps_last_attempted_ts: u64,
     pub tokenizer_map: HashMap< String, Arc<StdRwLock<Tokenizer>>>,
     pub tokenizer_download_lock: Arc<AMutex<bool>>,
@@ -229,7 +229,10 @@ pub async fn try_load_caps_quickly_if_not_present(
             }
             if caps_last_attempted_ts + CAPS_RELOAD_BACKOFF > now {
                 let gcx_locked = gcx.write().await;
-                return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, gcx_locked.caps_last_error.clone()));
+                info!("Returning caps error from cache");
+                return Err(gcx_locked.caps_last_error.clone().unwrap_or(
+                    ScratchError::new_internal("Expected cached error, but none found".to_string()),
+                ));
             }
         }
 
@@ -244,13 +247,19 @@ pub async fn try_load_caps_quickly_if_not_present(
             match caps_result {
                 Ok(caps) => {
                     gcx_locked.caps = Some(caps.clone());
-                    gcx_locked.caps_last_error = "".to_string();
+                    gcx_locked.caps_last_error = None;
                     Ok(caps)
-                },
+                }
                 Err(e) => {
                     error!("caps fetch failed: {:?}", e);
-                    gcx_locked.caps_last_error = format!("caps fetch failed: {}", e);
-                    return Err(ScratchError::new(StatusCode::INTERNAL_SERVER_ERROR, gcx_locked.caps_last_error.clone()));
+                    gcx_locked.caps_last_error = Some(ScratchError::new(
+                        e.status_code,
+                        format!("caps fetch failed: {}", e.message),
+                    ));
+                    Err(gcx_locked
+                        .caps_last_error
+                        .clone()
+                        .expect("The previous line is assigning it"))
                 }
             }
         }
@@ -355,7 +364,7 @@ pub async fn create_global_context(
         config_dir,
         caps: None,
         caps_reading_lock: Arc::new(AMutex::<bool>::new(false)),
-        caps_last_error: String::new(),
+        caps_last_error: None,
         caps_last_attempted_ts: 0,
         tokenizer_map: HashMap::new(),
         tokenizer_download_lock: Arc::new(AMutex::<bool>::new(false)),

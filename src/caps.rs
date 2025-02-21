@@ -1,15 +1,16 @@
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::sync::Arc;
-use std::sync::RwLock as StdRwLock;
+use hyper::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::RwLock as StdRwLock;
 use tokio::sync::RwLock as ARwLock;
-use url::Url;
 use tracing::{error, info, warn};
+use url::Url;
 
 use crate::custom_error::ScratchError;
 use crate::global_context::{try_load_caps_quickly_if_not_present, GlobalContext};
@@ -311,15 +312,21 @@ async fn load_caps_buf_from_file(
 async fn load_caps_buf_from_url(
     cmdline: crate::global_context::CommandLine,
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), ScratchError> {
     let mut buffer = String::new();
     let mut caps_urls: Vec<String> = Vec::new();
     if cmdline.address_url.to_lowercase() == "refact" {
         caps_urls.push("https://inference.smallcloud.ai/coding_assistant_caps.json".to_string());
     } else {
-        let base_url = Url::parse(&cmdline.address_url.clone()).map_err(|_| "failed to parse address url (1)".to_string())?;
-        let joined_url = base_url.join(&CAPS_FILENAME).map_err(|_| "failed to parse address url (2)".to_string())?;
-        let joined_url_fallback = base_url.join(&CAPS_FILENAME_FALLBACK).map_err(|_| "failed to parse address url (2)".to_string())?;
+        let base_url = Url::parse(&cmdline.address_url.clone()).map_err(|_| {
+            ScratchError::new_internal("failed to parse address url (1)".to_string())
+        })?;
+        let joined_url = base_url.join(&CAPS_FILENAME).map_err(|_| {
+            ScratchError::new_internal("failed to parse address url (2)".to_string())
+        })?;
+        let joined_url_fallback = base_url.join(&CAPS_FILENAME_FALLBACK).map_err(|_| {
+            ScratchError::new_internal("failed to parse address url (2)".to_string())
+        })?;
         caps_urls.push(joined_url.to_string());
         caps_urls.push(joined_url_fallback.to_string());
     }
@@ -335,11 +342,25 @@ async fn load_caps_buf_from_url(
     let mut status: u16 = 0;
     for url in caps_urls.iter() {
         info!("fetching caps from {}", url);
-        let response = http_client.get(url).headers(headers.clone()).send().await.map_err(|e| format!("{}", e))?;
+        let response = http_client
+            .get(url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .map_err(|e| {
+                ScratchError::new(
+                    e.status()
+                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR)
+                        .as_u16()
+                        .try_into()
+                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    e.to_string(),
+                )
+            })?;
         status = response.status().as_u16();
         buffer = match response.text().await {
             Ok(v) => v,
-            Err(_) => continue
+            Err(_) => continue,
         };
 
         if status == 200 {
@@ -352,18 +373,40 @@ async fn load_caps_buf_from_url(
         let response_json: serde_json::Result<Value> = serde_json::from_str(&buffer);
         return if let Ok(response_json) = response_json {
             if let Some(detail) = response_json.get("detail") {
-                Err(detail.as_str().unwrap().to_string())
+                Err(ScratchError::new(
+                    status
+                        .try_into()
+                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    detail.as_str().unwrap().to_string(),
+                ))
             } else {
-                Err(format!("cannot fetch caps, status={}", status))
+                Err(ScratchError::new(
+                    status
+                        .try_into()
+                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    format!("cannot fetch caps, status={}", status),
+                ))
             }
         } else {
-            Err(format!("cannot fetch caps, status={}", status))
+            Err(ScratchError::new(
+                status
+                    .try_into()
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                format!("cannot fetch caps, status={}", status),
+            ))
         };
     }
 
     let caps_url: String = match caps_urls.get(0) {
         Some(u) => u.clone(),
-        None => return Err("caps_url is none".to_string())
+        None => {
+            return Err(ScratchError::new(
+                status
+                    .try_into()
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                "caps_url is none".to_string(),
+            ))
+        }
     };
 
     Ok((buffer, caps_url))
@@ -372,15 +415,17 @@ async fn load_caps_buf_from_url(
 pub async fn load_caps(
     cmdline: crate::global_context::CommandLine,
     gcx: Arc<ARwLock<GlobalContext>>,
-) -> Result<Arc<StdRwLock<CodeAssistantCaps>>, String> {
+) -> Result<Arc<StdRwLock<CodeAssistantCaps>>, ScratchError> {
     let mut caps_url = cmdline.address_url.clone();
     let buf: String;
     if caps_url.to_lowercase() == "refact" || caps_url.starts_with("http") {
         (buf, caps_url) = load_caps_buf_from_url(cmdline, gcx).await?
     } else {
-        (buf, caps_url) = load_caps_buf_from_file(cmdline, gcx).await?
+        (buf, caps_url) = load_caps_buf_from_file(cmdline, gcx)
+            .await
+            .map_err(ScratchError::new_internal)?
     }
-    load_caps_from_buf(&buf, &caps_url)
+    load_caps_from_buf(&buf, &caps_url).map_err(ScratchError::new_internal)
 }
 
 pub fn strip_model_from_finetune(model: &String) -> String {
