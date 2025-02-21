@@ -1,3 +1,9 @@
+# ⚠️ ARCHIVED
+
+**This repository has been archived. Active development continues in [smallcloudai/refact](https://github.com/smallcloudai/refact).**
+
+---
+
 # Refact Agent
 
 This is a small executable written in Rust, a part of the Refact Agent project. Its main job is to live
